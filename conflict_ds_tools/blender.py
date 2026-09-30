@@ -7,6 +7,7 @@
 Materials: base texture, the .RFX normal map (DirectX green flipped), backface culling like the game.
 """
 import os
+import threading
 import time
 
 import bpy
@@ -628,25 +629,83 @@ class IMPORT_SCENE_OT_ds_extract(bpy.types.Operator):
             self.out_dir = os.path.join(os.path.expanduser("~"), "Documents", "Conflict Desert Storm extracted")
         return context.window_manager.invoke_props_dialog(self, width=520)
 
+    @classmethod
+    def poll(cls, context):
+        return _job.get("thread") is None or not _job["thread"].is_alive()
+
     def execute(self, context):
         game = bpy.path.abspath(self.game_dir)
         out = bpy.path.abspath(self.out_dir)
         if not os.path.isdir(game) or not archive.list_archives(game):
             self.report({"ERROR"}, "no .dat archives in " + game)
             return {"CANCELLED"}
+        # the extraction runs in a worker thread (pure Python file work, no Blender calls); this modal operator
+        # only polls it on a timer and draws the progress bar in the status bar, so Blender stays usable
+        _job.clear()
+        _job.update(fraction=0.0, text="Starting", cancel=False, error=None, summary=None, out=out,
+                    start=time.time())
+
+        def work():
+            try:
+                _job["summary"] = archive.extract(
+                    game, out, None, self.png,
+                    progress=lambda f, text: _job.update(fraction=f, text=text),
+                    log=lambda s: None, cancel=lambda: _job["cancel"])
+            except archive.Cancelled:
+                _job["error"] = "cancelled"
+            except Exception as e:      # reported back on the main thread
+                _job["error"] = "%s: %s" % (type(e).__name__, e)
+
+        _job["thread"] = threading.Thread(target=work, name="ds_extract", daemon=True)
+        _job["thread"].start()
         wm = context.window_manager
-        wm.progress_begin(0, 1000)
-        t = time.time()
+        self._timer = wm.event_timer_add(0.1, window=context.window)
+        wm.modal_handler_add(self)
+        context.workspace.status_text_set(_draw_status)
+        return {"RUNNING_MODAL"}
 
-        def progress(i, n):
-            wm.progress_update(int(1000 * i / max(1, n)))
-
-        summary = archive.extract(game, out, None, self.png, progress, log=lambda s: None)
-        wm.progress_end()
+    def modal(self, context, event):
+        if event.type == "ESC" and event.value == "PRESS":
+            _job["cancel"] = True
+        if event.type != "TIMER":
+            return {"PASS_THROUGH"}
+        context.workspace.status_text_set(_draw_status)     # redraws the status bar
+        if _job["thread"].is_alive():
+            return {"PASS_THROUGH"}
+        context.window_manager.event_timer_remove(self._timer)
+        context.workspace.status_text_set(None)
+        secs = time.time() - _job["start"]
+        if _job["error"] == "cancelled":
+            self.report({"WARNING"}, "Extraction cancelled after %.0f s (files so far are in %s)" % (secs, _job["out"]))
+            return {"CANCELLED"}
+        if _job["error"]:
+            self.report({"ERROR"}, "Extraction failed: " + _job["error"])
+            return {"CANCELLED"}
+        summary = _job["summary"] or []
         named = sum(s[1] for s in summary)
         total = named + sum(s[2] for s in summary)
-        self.report({"INFO"}, "Extracted %d files (%d named) in %.0f s to %s" % (total, named, time.time() - t, out))
+        self.report({"INFO"}, "Extracted %d files (%d named) in %.0f s to %s" % (total, named, secs, _job["out"]))
         return {"FINISHED"}
+
+
+_job = {}
+
+
+def _draw_status(header, context):
+    """Status bar while extracting: progress bar (Blender 4.0+) or text, and the cancel hint."""
+    layout = header.layout
+    frac = _job.get("fraction", 0.0)
+    text = _job.get("text", "")
+    layout.label(text="Extracting game archives", icon="FILE_ARCHIVE")
+    if hasattr(layout, "progress"):
+        row = layout.row()
+        row.ui_units_x = 12
+        row.progress(factor=frac, type="BAR", text="%d%%" % (frac * 100))
+    else:
+        layout.label(text="%d%%" % (frac * 100))
+    layout.label(text=text)
+    layout.separator()
+    layout.label(text="Cancel", icon="EVENT_ESC")
 
 
 def menu_func_import(self, context):

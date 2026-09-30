@@ -523,14 +523,27 @@ def load(path):
 TEXTURE_EXTS = (".png", ".dds", ".tga", ".bmp")
 
 
-def archive_hash(name):
+def _lfsr_byte(x, c):
+    for b in range(8):
+        i = ((c >> b) & 1) ^ (x & 1) ^ ((x >> 1) & 1) ^ ((x >> 21) & 1) ^ ((x >> 31) & 1)
+        x = ((x << 1) & 0xFFFFFFFF) | i
+    return x
+
+
+# the LFSR step is linear over GF(2): state' = A(state) ^ B(byte), with A split into one table per state byte
+_HA = [[_lfsr_byte(v << (8 * k), 0) for v in range(256)] for k in range(4)]
+_HB = [_lfsr_byte(0, c) for c in range(256)]
+
+
+def archive_hash(name, state=1):
     """Name hash of the game's .dat archives (FUN_004b9a10): LFSR over the upper-cased name, start 1, per bit
-    LSB first. Entries whose name is unknown are extracted as _<HASH>.<EXT>."""
-    x = 1
+    LSB first (in = bit ^ h0 ^ h1 ^ h21 ^ h31, h = h << 1 | in). Entries whose name is unknown are extracted as
+    _<HASH>.<EXT>. state continues a previous hash: archive_hash("B", archive_hash("A")) == archive_hash("AB")."""
+    a0, a1, a2, a3 = _HA
+    b = _HB
+    x = state
     for c in name.upper().encode("latin-1", "replace"):
-        for b in range(8):
-            i = ((c >> b) & 1) ^ (x & 1) ^ ((x >> 1) & 1) ^ ((x >> 21) & 1) ^ ((x >> 31) & 1)
-            x = ((x << 1) & 0xFFFFFFFF) | i
+        x = a0[x & 255] ^ a1[x >> 8 & 255] ^ a2[x >> 16 & 255] ^ a3[x >> 24] ^ b[c]
     return x
 
 

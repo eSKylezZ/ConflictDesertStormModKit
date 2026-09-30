@@ -31,12 +31,12 @@ def main():
         paths.append(p)
     print("game:", game)
     t = time.time()
-    last = [0]
+    last = [0.0]
 
-    def progress(i, n):
-        if time.time() - last[0] > 2 or i == n:
+    def progress(frac, text):
+        if time.time() - last[0] > 2 or frac >= 1.0:
             last[0] = time.time()
-            print("  %d / %d files" % (i, n), flush=True)
+            print("  %3d%%  %s" % (frac * 100, text), flush=True)
 
     summary = archive.extract(game, a.out, paths or None, not a.no_png, progress)
     named = sum(s[1] for s in summary)

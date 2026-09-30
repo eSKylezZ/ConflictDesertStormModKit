@@ -103,38 +103,69 @@ def _words(data, words):
                 words.add(tok.upper())
 
 
-def build_dictionary(game_dir, blobs):
+def build_dictionary(game_dir, blobs, targets=None, progress=None):
+    """{hash: NAME.EXT} for words found in the game's binaries and in archive contents, combined with every
+    known extension; only hashes in targets are kept (all when None). progress(fraction) while working."""
     words = set()
-    for f in os.listdir(game_dir):
-        if f.lower().endswith((".exe", ".dll", ".sch")):
-            with open(os.path.join(game_dir, f), "rb") as fh:
-                _words(fh.read(), words)
-    for b in blobs:
+    bins = [os.path.join(game_dir, f) for f in os.listdir(game_dir) if f.lower().endswith((".exe", ".dll", ".sch"))]
+    sources = len(bins) + len(blobs)
+    for i, f in enumerate(bins):
+        with open(f, "rb") as fh:
+            _words(fh.read(), words)
+        if progress:
+            progress(0.5 * i / sources)
+    for i, b in enumerate(blobs):
         _words(b, words)
+        if progress and i % 200 == 0:
+            progress(0.5 * (len(bins) + i) / sources)
     table = {}
     stems = set()
     for w in words:
         base, dot, ext = w.rpartition(".")
         if dot and ext in EXTS:
-            table.setdefault(archive_hash(w), w)
+            h = archive_hash(w)
+            if targets is None or h in targets:
+                table.setdefault(h, w)
         stems.add(base if dot else w)
-    for stem in stems:
-        for e in EXTS:
-            table.setdefault(archive_hash(stem + "." + e), stem + "." + e)
+    exts = [e.upper() for e in EXTS]
+    for n, stem in enumerate(stems):
+        if progress and n % 5000 == 0:
+            progress(0.5 + 0.5 * n / max(1, len(stems)))
+        base = archive_hash(stem + ".")          # hash the stem once, continue per extension
+        for e in exts:
+            h = archive_hash(e, base)
+            if (targets is None or h in targets) and h not in table:
+                table[h] = stem + "." + e
     return table
 
 
-def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print):
-    """Extract archives to out_dir/<archive>/<NAME.EXT> (+ .png next to .dds/.tga when png). progress(i, n)."""
+class Cancelled(Exception):
+    pass
+
+
+def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print, cancel=None):
+    """Extract archives to out_dir/<archive>/<NAME.EXT> (+ .png next to .dds/.tga when png).
+    progress(fraction 0..1, text) reports the stage; cancel() returning True stops with Cancelled.
+    Safe to run in a worker thread (no Blender calls). Returns [(archive, named, unnamed)]."""
+    def report(frac, text):
+        if progress:
+            progress(min(1.0, max(0.0, frac)), text)
+        if cancel and cancel():
+            raise Cancelled()
+
     archives = archives or list_archives(game_dir)
+    report(0.0, "Reading archives")
     datas = {}
     for p in archives:
         with open(p, "rb") as f:
             datas[p] = f.read()
+    report(0.01, "Scanning archive contents")
     blobs = []
     evo_names = {}
+    targets = set()
     for d in datas.values():
         for h, o, s in entries(d):
+            targets.add(h)
             k = kind(d[o:o + 40])
             if k == "EVO":
                 chunk = d[o:o + s]
@@ -144,7 +175,10 @@ def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print
                     evo_names[h] = name + ".EVO"
             elif k in ("RFX", "BIN") and s < 4 << 20:
                 blobs.append(d[o:o + s])
-    table = build_dictionary(game_dir, blobs)
+    # name recovery is roughly a third of the run (with PNGs), writing the files the rest
+    report(0.02, "Recovering file names")
+    table = build_dictionary(game_dir, blobs, targets,
+                             lambda f: report(0.02 + 0.33 * f, "Recovering file names  (%d%%)" % (f * 100)))
     table.update(evo_names)
     total = sum(len(entries(d)) for d in datas.values())
     done = 0
@@ -176,12 +210,11 @@ def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print
                 except (images.ImageError, struct.error, IndexError, ValueError) as e:
                     log("  png failed: %s (%s)" % (name, e))
             done += 1
-            if progress and done % 50 == 0:
-                progress(done, total)
+            if done % 25 == 0:
+                report(0.35 + 0.65 * done / total, "Extracting %s  (%d / %d files)" % (arc, done, total))
         with open(os.path.join(dst, "_index.tsv"), "w") as f:
             f.write("\n".join(index) + "\n")
         summary.append((arc, named, unnamed))
         log("%s: %d named, %d unnamed" % (arc, named, unnamed))
-    if progress:
-        progress(total, total)
+    report(1.0, "Done: %d files" % total)
     return summary
