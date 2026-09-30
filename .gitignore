@@ -1,0 +1,31 @@
+# Build output
+dist/
+__pycache__/
+*.pyc
+
+# Never commit game data or anything extracted/converted from it
+extracted/
+*.dat
+*.evo
+*.EVO
+*.prb
+*.PRB
+*.dds
+*.DDS
+*.tga
+*.TGA
+*.glb
+*.gltf
+*.bin
+*.obj
+*.mtl
+*.png
+
+# Local / editor clutter
+.claude/
+CLAUDE.md
+.vscode/
+.vs/
+Thumbs.db
+desktop.ini
+.DS_Store
