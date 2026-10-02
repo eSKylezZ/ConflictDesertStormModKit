@@ -1,0 +1,24 @@
+# A tiger-striped M249 SAW with its own gunshots and a faster rate of fire.
+#
+# Shows: textures for a model with two parts, your own sounds (two shot variations + the distant echo),
+# rate of fire / magazine numbers, and setting any Weaps.txt column by number.
+
+id            = US_WPN_SAW_Tiger
+based on      = US_WPN_SAW_lightmg
+display name  = Tiger SAW
+
+texture                   = TigerSAW       # the main part (LMG01_M249SAW, 128 x 32)
+texture LMG01_M249AmmoBox = TigerAmmoBox   # the ammo box is a part with its own texture (32 x 32)
+hud icon      = TigerSAW_Icon      # the HUD / inventory picture to match (PNG with transparency, 1 pixel = 1
+                                   # pixel of the game's 800 x 600 HUD; the SAW's own is 115 x 35)
+
+shot sound    = tiger_shot1.wav      # WAV files in this folder: 16-bit, mono or stereo, e.g. 22050 Hz
+shot sound 2  = tiger_shot2.wav      # the game picks one of the two at random
+tail sound    = tiger_tail.wav       # the echo heard from far away
+
+muzzle flash       = yes
+time between shots = 0.06            # seconds: 1000 rounds a minute (SAW 0.10)
+magazine size      = 200
+reload time        = 3.0
+
+column 24 = 1000                     # any column of Weaps.txt by number (1-based); 24 is the range (SAW 850)

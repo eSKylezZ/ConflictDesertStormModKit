@@ -232,6 +232,84 @@ def encode_png(w, h, rgba, alpha=True):
             + chunk(b"IDAT", zlib.compress(body, 6)) + chunk(b"IEND", b""))
 
 
+def _to565(c):
+    return (min(31, (c[0] * 31 + 127) // 255) << 11) | (min(63, (c[1] * 63 + 127) // 255) << 5) | min(31, (c[2] * 31 + 127) // 255)
+
+
+def _dxt1_block(px):
+    """8-byte DXT1 colour block for 16 (r, g, b) pixels: endpoints = the extremes along the block's colour range."""
+    lo = [min(p[i] for p in px) for i in range(3)]
+    hi = [max(p[i] for p in px) for i in range(3)]
+    axis = [hi[i] - lo[i] for i in range(3)]
+    proj = [sum(p[i] * axis[i] for i in range(3)) for p in px]
+    e0, e1 = px[proj.index(max(proj))], px[proj.index(min(proj))]
+    c0, c1 = _to565(e0), _to565(e1)
+    if c0 == c1:
+        return struct.pack("<HHI", c0, c1, 0)
+    if c0 < c1:
+        c0, c1 = c1, c0
+
+    def rgb(c):
+        return ((c >> 11 & 31) * 255 // 31, (c >> 5 & 63) * 255 // 63, (c & 31) * 255 // 31)
+    a, b = rgb(c0), rgb(c1)
+    pal = [a, b, tuple((2 * a[i] + b[i]) // 3 for i in range(3)), tuple((a[i] + 2 * b[i]) // 3 for i in range(3))]
+    bits = 0
+    for k, p in enumerate(px):
+        best = min(range(4), key=lambda j: sum((p[i] - pal[j][i]) ** 2 for i in range(3)))
+        bits |= best << (2 * k)
+    return struct.pack("<HHI", c0, c1, bits)
+
+
+def _dxt5_alpha_block(alphas):
+    a0, a1 = max(alphas), min(alphas)
+    if a0 == a1:
+        return bytes([a0, a1]) + b"\0" * 6
+    pal = [a0, a1] + [((7 - j) * a0 + j * a1) // 7 for j in range(1, 7)]
+    bits = 0
+    for k, a in enumerate(alphas):
+        bits |= min(range(8), key=lambda j: abs(a - pal[j])) << (3 * k)
+    return bytes([a0, a1]) + bits.to_bytes(6, "little")
+
+
+def _dxt3_alpha_block(alphas):
+    """8-byte explicit alpha (4 bits per pixel) of a DXT3 block."""
+    v = 0
+    for k, a in enumerate(alphas):
+        v |= ((a * 15 + 127) // 255) << (4 * k)
+    return v.to_bytes(8, "little")
+
+
+def encode_dds(w, h, rgba, alpha=None, fmt=None):
+    """A DXT1 (or DXT5 when the image has transparency) .dds without mip maps - the layout of the game's own
+    textures. rgba = bytes, top row first; the game wants powers of two (256 x 256, 512 x 512 ...).
+    fmt = "DXT1" / "DXT3" / "DXT5" forces a format (soldier-panel portraits are DXT3)."""
+    if fmt is None:
+        if alpha is None:
+            alpha = has_alpha(rgba)
+        fmt = "DXT5" if alpha else "DXT1"
+    fmt = fmt.upper()
+    alpha = fmt != "DXT1"
+    out = bytearray()
+    for by in range(0, h, 4):
+        for bx in range(0, w, 4):
+            px, al = [], []
+            for y in range(by, by + 4):
+                for x in range(bx, bx + 4):
+                    o = (min(y, h - 1) * w + min(x, w - 1)) * 4
+                    px.append((rgba[o], rgba[o + 1], rgba[o + 2]))
+                    al.append(rgba[o + 3])
+            if fmt == "DXT5":
+                out += _dxt5_alpha_block(al)
+            elif fmt == "DXT3":
+                out += _dxt3_alpha_block(al)
+            out += _dxt1_block(px)
+    fourcc = fmt.encode()
+    header = b"DDS " + struct.pack("<7I", 124, 0x81007, h, w, len(out), 0, 0) + b"\0" * 44
+    header += struct.pack("<2I", 32, 4) + fourcc + b"\0" * 20
+    header += struct.pack("<4I", 0x1000, 0, 0, 0) + b"\0" * 4
+    return header + bytes(out)
+
+
 def has_alpha(rgba):
     return rgba[3::4].count(255) != len(rgba) // 4
 
@@ -243,12 +321,76 @@ def flip_green(rgba):
     return bytes(b)
 
 
+def decode_png(data):
+    """8-bit, non-interlaced PNG (grey, RGB, palette, grey + alpha, RGBA) -> (w, h, RGBA bytes)."""
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        raise ImageError("not a PNG file")
+    o, idat, pal, trns = 8, b"", None, None
+    w = h = ctype = 0
+    while o + 8 <= len(data):
+        n, t = struct.unpack_from(">I4s", data, o)
+        body = data[o + 8:o + 8 + n]
+        if t == b"IHDR":
+            w, h, bits, ctype, _c, _f, interlace = struct.unpack(">IIBBBBB", body)
+            if bits != 8 or interlace:
+                raise ImageError("only 8-bit, non-interlaced PNGs are supported")
+        elif t == b"PLTE":
+            pal = body
+        elif t == b"tRNS":
+            trns = body
+        elif t == b"IDAT":
+            idat += body
+        o += 12 + n
+    bpp = {0: 1, 2: 3, 3: 1, 4: 2, 6: 4}.get(ctype)
+    if bpp is None:
+        raise ImageError("unsupported PNG colour type %d" % ctype)
+    raw, stride = zlib.decompress(idat), w * bpp
+    rows, prev, p = [], bytearray(stride), 0
+    for _ in range(h):
+        f, line = raw[p], bytearray(raw[p + 1:p + 1 + stride])
+        p += 1 + stride
+        for i in range(stride):
+            a = line[i - bpp] if i >= bpp else 0
+            b = prev[i]
+            c = prev[i - bpp] if i >= bpp else 0
+            if f == 1:
+                line[i] = (line[i] + a) & 255
+            elif f == 2:
+                line[i] = (line[i] + b) & 255
+            elif f == 3:
+                line[i] = (line[i] + (a + b) // 2) & 255
+            elif f == 4:
+                pa, pb, pc = abs(b - c), abs(a - c), abs(a + b - 2 * c)
+                line[i] = (line[i] + (a if pa <= pb and pa <= pc else b if pb <= pc else c)) & 255
+        rows.append(line)
+        prev = line
+    out = bytearray(w * h * 4)
+    for y, line in enumerate(rows):
+        for x in range(w):
+            q, s = (y * w + x) * 4, x * bpp
+            if ctype == 6:
+                out[q:q + 4] = line[s:s + 4]
+            elif ctype == 2:
+                out[q:q + 4] = line[s:s + 3] + b"\xff"
+            elif ctype == 0:
+                out[q:q + 4] = bytes((line[s],) * 3) + b"\xff"
+            elif ctype == 4:
+                out[q:q + 4] = bytes((line[s],) * 3) + bytes((line[s + 1],))
+            else:
+                i = line[s]
+                out[q:q + 3] = pal[i * 3:i * 3 + 3]
+                out[q + 3] = trns[i] if trns and i < len(trns) else 255
+    return w, h, bytes(out)
+
+
 def decode_file(path):
     with open(path, "rb") as f:
         data = f.read()
     low = path.lower()
     if low.endswith(".dds") or data[:4] == b"DDS ":
         return decode_dds(data)
+    if low.endswith(".png") or data[:4] == b"\x89PNG":
+        return decode_png(data)
     if low.endswith(".tga"):
         return decode_tga(data)
     raise ImageError("unsupported image " + path)
