@@ -40,7 +40,7 @@ without any programming, then a recipe for everything a mod can do (21 of them, 
 
 Works in Blender 3.6, 4.2 and 5.x.
 
-1. Download `conflict_ds_tools-<version>.zip` from the releases.
+1. Download `conflict_ds_tools-<version>.zip` from NexusMods.
 2. In Blender: **Edit › Preferences › Add-ons**, then the **▾** menu at the top right › **Install from Disk…**,
    and pick the zip. (In Blender 3.6: **Install…** on the Add-ons page, then tick the add-on.)
 
