@@ -1,0 +1,9 @@
+# Connors in Spetsnaz kit - on the Squad Loadout screen pick UNIFORM "SPETSNAZ".
+#
+# Shows: a uniform that uses a texture already in the game (the Russian multiplayer skin for Connors' body),
+# so the mod is just this file.
+
+uniform      = Delta           # listed after the Delta uniforms
+uniform name = Spetsnaz
+soldier      = Connors
+texture      = HERO02_RU_01    # in the game's chardata.dat

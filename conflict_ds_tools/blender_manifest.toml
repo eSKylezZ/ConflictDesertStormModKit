@@ -1,9 +1,9 @@
 schema_version = "1.0.0"
 
 id = "conflict_ds_tools"
-version = "1.1.0"
+version = "1.2.0"
 name = "Conflict: Desert Storm tools"
-tagline = "Import meshes, characters and animations, extract game archives"
+tagline = "Import and export meshes, characters and animations"
 maintainer = "eSKylezZ"
 type = "add-on"
 tags = ["Import-Export"]
@@ -11,4 +11,4 @@ blender_version_min = "4.2.0"
 license = ["SPDX:MIT"]
 
 [permissions]
-files = "Read game archives, meshes and textures; write extracted files"
+files = "Read game archives, meshes and textures; write extracted files and exported models"

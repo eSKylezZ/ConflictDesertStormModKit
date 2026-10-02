@@ -1,0 +1,16 @@
+# A gold-plated Desert Eagle with the Barrett's thunder - a sidearm on the Squad Loadout screen.
+#
+# Shows: a new texture on the game's own model, a gunshot borrowed from another weapon, and changed numbers.
+
+id            = US_WPN_DesertEagle_Gold
+based on      = US_WPN_DesertEagle
+
+display name  = Golden Eagle
+texture       = GoldEagle              # GoldEagle.dds in this folder, the pistol's own layout (64 x 32)
+hud icon      = GoldEagle_Icon         # GoldEagle_Icon.png: the HUD / inventory picture to match
+sound         = US_WPN_BarrettSniper   # any weapon's gunshot; found in whichever mission has it
+
+damage        = 40                     # Desert Eagle 20
+magazine size = 7                      # 9
+magazines     = 6                      # 9
+hearing range = 120                    # enemies hear it from further away (normal guns 80)

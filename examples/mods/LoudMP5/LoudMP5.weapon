@@ -1,0 +1,18 @@
+# The MP5SD without its silencer, firing with a shotgun's bang.
+#
+# Shows: a model with a part taken off (the suppressor, in Blender), its picture to match, and a sound bank
+# shipped with the mod. BREACHER.sch is a "bank pack" - the Remington 870's bank copied
+# out of the game and renamed with the ModKit:
+#     python cli/ds_sound.py pack mission3.sch REMMINGTON870 BREACHER.sch --rename BREACHER
+# Every .sch in a mod folder is added to every level, so the bank is there in any mission.
+# (For your own recordings a .weapon's "shot sound = my.wav" is simpler - see TigerSAW.)
+
+id            = US_WPN_MP5_Breacher
+based on      = US_WPN_MP5SilencedSubMG
+display name  = MP5 Breacher
+model         = MP5BREACHER    # MP5BREACHER.evo: the MP5SD with the suppressor cut off and a short barrel
+hud icon      = Breacher_Icon  # Breacher_Icon.png: the HUD / inventory picture without the suppressor
+
+sound bank    = BREACHER      # a bank by name (a weapon id also works: sound = US_WPN_Remmington870)
+muzzle flash  = yes           # the MP5SD has none
+hearing range = 80            # the MP5SD's is 8 (quiet)

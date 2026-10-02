@@ -20,10 +20,16 @@ extracted/
 *.obj
 *.mtl
 *.png
+*.sch
+*.wav
 
-# Local / editor clutter
-.claude/
-CLAUDE.md
+# Screenshots show game content - kept local
+docs/screenshots/
+
+# Example mods built from your game (examples/build_examples.py)
+examples/build/
+
+# Editor clutter
 .vscode/
 .vs/
 Thumbs.db

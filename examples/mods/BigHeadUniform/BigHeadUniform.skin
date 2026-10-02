@@ -1,0 +1,11 @@
+# A uniform that comes with its own body: Bradley in olive, with a 1.5x head - only while he wears it.
+#
+# Shows: "body" - a body mesh made in Blender (BIGHEAD_BRADLEY.evo, exported based on Bradley's HERO01_ARMSTRONG so the
+# skeleton fits), swapped in whenever this skin is chosen on the Squad Loadout screen and swapped back for any other.
+# Nothing of the game is replaced: other uniforms keep the normal body.
+
+uniform      = SAS
+uniform name = SAS (Big Head)
+soldier      = Bradley
+texture      = BigHead_UK          # its own texture name: the body goes with this texture
+body         = BIGHEAD_BRADLEY     # BIGHEAD_BRADLEY.evo in this folder

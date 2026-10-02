@@ -1,0 +1,12 @@
+# Silenced M249 SAW - Connors' light machine gun with a suppressor.
+
+id       = US_WPN_SAW_Silenced     # the new weapon's name (used by loadouts)
+based on = US_WPN_SAW_lightmg      # start from the normal SAW: same model, damage, magazine ...
+
+silenced = yes                     # no muzzle flash, quiet MP5SD shot sound, enemies only hear it up close
+#texture  = SAW_Red                 # SAW_Red.dds in this folder (the gun's own texture layout)
+display name = M249 SAW (Silenced)   # shown in the inventory
+
+shot sound   = shot.wav              # your own gunshot (WAV, e.g. 22050 Hz mono)
+model        = MYSAW                 # MYSAW.evo in this folder (made in Blender): blue, with a suppressor
+hud icon     = SAW_Silenced_Icon     # the HUD / inventory picture to match: SAW_Silenced_Icon.png

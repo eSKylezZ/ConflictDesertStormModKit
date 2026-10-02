@@ -1,0 +1,9 @@
+# A pink SAS uniform for Bradley - on the Squad Loadout screen pick UNIFORM "SAS (PINK)".
+#
+# Shows: a new uniform for a soldier (he stays John Bradley), with its own portrait.
+
+uniform      = SAS            # the side it belongs to: SAS or Delta
+uniform name = SAS (Pink)     # shown on the UNIFORM row
+soldier      = Bradley        # Bradley, Foley, Connors or Jones (or rifleman, sniper, heavy, engineer)
+texture      = SASPink_01     # SASPink_01.dds in this folder - Bradley's texture layout (HERO01_UK_01)
+portrait     = PinkPortrait   # optional: PinkPortrait.dds, 64 x 64 DXT3 (shown on the soldier panel)

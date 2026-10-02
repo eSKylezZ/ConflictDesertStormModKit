@@ -1,0 +1,8 @@
+# Winter camouflage for Foley - on the Squad Loadout screen pick UNIFORM "US DELTA (WINTER)".
+#
+# Shows: a Delta uniform, the soldier named by role; no portrait line, so Foley's own is used.
+
+uniform      = Delta
+uniform name = US Delta (Winter)
+soldier      = sniper           # rifleman = Bradley, sniper = Foley, heavy = Connors, engineer = Jones
+texture      = DeltaWinter_04   # DeltaWinter_04.dds in this folder - Foley's texture layout (HERO04_US_01)
