@@ -8,6 +8,15 @@ controllers, split screen and more for the game itself).
 
 You need your own copy of the game (Steam or GOG). No game files are included here.
 
+## Download
+
+- **Blender add-on** (ready to install in Blender): [Nexus Mods](https://www.nexusmods.com/games/conflictdesertstorm/mods/2)
+- **DesertStormFix plugin** (the compiled `dinput8.dll` that loads mods):
+  [Nexus Mods](https://www.nexusmods.com/games/conflictdesertstorm/mods/1)
+
+**New to modding?** Start with [Making a mod, step by step](docs/MAKING_MODS.md): your first uniform and weapon
+without any programming, then a recipe for everything a mod can do (21 of them, each with a working example).
+
 ## Features
 
 - **Extract the game archives** (`*.dat`): meshes, textures, animations, vehicle data and tables, with the
@@ -19,6 +28,10 @@ You need your own copy of the game (Steam or GOG). No game files are included he
   - **Animations** (`.prb`): imported as Blender actions (288 of them fit the soldiers, a few the goats)
   - Textures and normal maps set up automatically; flags and tank tracks get their animation frames as
     shape keys
+- **Blender exporter** (File › Export): new geometry for a game model - weapons, props, vehicle parts and
+  character bodies - plus its new textures as `.dds`, and animations (`.prb`), loaded by the game through the DesertStormFix plugin's mod
+  folders.
+- **Sound tools**: game sound banks to WAV and back.
 - **Command-line converter** to glTF (`.glb` / `.gltf`) or `.obj`, with the same features, including
   animations in glTF.
 - Pure Python, no extra packages to install.
@@ -27,7 +40,7 @@ You need your own copy of the game (Steam or GOG). No game files are included he
 
 Works in Blender 3.6, 4.2 and 5.x.
 
-1. Download `conflict_ds_tools-<version>.zip` from the releases (or build it, see below).
+1. Download `conflict_ds_tools-<version>.zip` from the releases.
 2. In Blender: **Edit › Preferences › Add-ons**, then the **▾** menu at the top right › **Install from Disk…**,
    and pick the zip. (In Blender 3.6: **Install…** on the Add-ons page, then tick the add-on.)
 
@@ -70,10 +83,57 @@ Options in the import dialog:
 | Character Skin | Uniform texture for soldiers, e.g. `HERO01_US_01` (default: the UK one) |
 | Extra Folder | Another folder to search for textures and parts |
 
-### 3. Add animations to a character
+### 3. Export a model for the game
+
+Make new geometry for a game model - a weapon with a suppressor, a different prop - and export it:
+**File › Export › Conflict: Desert Storm (.evo)**.
+
+1. Import the model it replaces (e.g. `mission1/LMG01_M249SAW.EVO`) and edit it, or add your own meshes.
+2. Select the meshes and export. **Based On** is filled in with the imported model; it keeps the game's
+   attachment points (hands, muzzle), materials and part layout, so the new model works wherever the old one did.
+   Models with several parts (vehicles) match your objects to their parts by name; a one-part model (weapons,
+   most props) takes every selected mesh.
+3. The file name is the new model's name, e.g. `MYSAW.evo`. Put it in a mod folder of the
+   [DesertStormFix](https://github.com/eSKylezZ/ConflictDesertStormPatch) plugin and use it from a `.weapon` file
+   (`model = MYSAW`).
+
+Textures are referenced by name: each face uses its material's image name (without extension). With **Save
+Textures** (on by default) every image that isn't one of the game model's own is saved next to the model as a
+`.dds` the game reads (DXT1, DXT5 when it has transparency) - use power-of-two sizes (128, 256, 512 …).
+
+**Characters**: import a soldier (e.g. `frontend/HERO01_ARMSTRONG.EVO`), edit the body mesh (`NEWSKIN`) -
+reshape it, sculpt a new head - keeping it weighted to the skeleton, and export it under the same name
+(`HERO01_ARMSTRONG.evo` replaces Bradley's body in a mod folder). The skin keeps the game's UV layout, because the
+uniform/face textures are picked by the game (`.skin` files of the DesertStormFix plugin add new ones). Up to 4
+bones per vertex; keep the body one connected mesh.
+
+### 4. Add animations to a character
 
 Select the character's skeleton (the `…_rig` object), then **File › Import › Conflict: Desert Storm Animation
 (.prb)** and pick one or more `.prb` files, e.g. `PRONE_AIM_RIFLE.PRB`. Each becomes an action on the skeleton.
+
+### 5. Export an animation
+
+Select the character's skeleton with the action you made or edited (e.g. an imported `upright_relaxed_with_rifle`
+with the head turned) and **File › Export › Conflict: Desert Storm Animation (.prb)**. The action is sampled at
+**Keys per Second** (filled in from the imported animation; the game's own use 3-15). Walk and run cycles keep the
+footstep events of the game animation with the same name (or the one picked in **Footsteps From**).
+
+Name the file like a game animation to replace it (in a DesertStormFix mod folder), or give it a new name and
+use it from a `.weapon` file (`reload animation = MY_RELOAD`).
+
+## Example mods
+
+[examples/](examples/README.md) has small, commented example mods for the DesertStormFix plugin's `Mods` folder:
+new uniforms and recruits (portraits, a uniform with its own body, raw table rows), new weapons (numbers, textures,
+pictures, sounds, a sound bank pack, a Blender model, new animations) and replacing game models and animations by
+name. One command builds every example complete from your copy of the game (this repository holds no game files):
+
+```bat
+python examples/build_examples.py --blender "C:\Program Files\Blender Foundation\Blender 4.2\blender.exe" --install
+```
+
+[Making a mod](docs/MAKING_MODS.md) shows how to make each kind of file yourself.
 
 ## Command line
 
@@ -108,17 +168,32 @@ python cli/evo_convert.py extracted/mission1 -f obj -o out/mission1             
 
 Run either script with `-h` for all options.
 
-## Building the add-on zip
+Textures (PNG / TGA to the game's `.dds` and back):
 
 ```
-python scripts/build_zip.py        # dist/conflict_ds_tools-<version>.zip
+python cli/ds_texture.py png extracted/chardata/HERO01_UK_01.DDS          # to edit in any paint program
+python cli/ds_texture.py dds MyCamo.png                                   # DXT1 (DXT5 with transparency)
+python cli/ds_texture.py dds face.png --format DXT3                       # soldier-panel portraits
+python cli/ds_texture.py icon US_WPN_SAW_lightmg SAW.png                  # a weapon's HUD / inventory picture
 ```
 
-The version comes from `conflict_ds_tools/blender_manifest.toml`.
+Sounds (the level sound caches `mission1.sch` … next to `DesertStorm.exe`):
+
+```
+python cli/ds_sound.py list mission3.sch                          # banks and their samples
+python cli/ds_sound.py wav mission3.sch M16A2 out/                 # a gun's click, tail and shots as WAV
+python cli/ds_sound.py pack mission3.sch M16A2 M16.sch --rename MYGUN   # bank pack for a mod folder
+python cli/ds_sound.py encode my_shot.wav check.wav                # hear the game's ADPCM on your sound
+```
+
+Gun banks are named in `Weaps.txt` column 64 (`M16A2`, `SAW-LIGHTMG`, `MP5SILENCEDSUBMG` …); each refers to four
+samples: trigger click, distant tail, shot 1, shot 2. With the DesertStormFix plugin a mod usually needs none of
+this - a `.weapon` file's `shot sound = my.wav` takes a WAV directly.
 
 ## Limitations
 
-- Import only for now: models and animations can't be written back to the game's formats yet.
+- Export needs a game model to base the new one on (attachment points, skeleton); animations have to fit the
+  game's 51-object soldier skeleton.
 - Two animations have no known name and import as `anim_<hash>`.
 - The game's detail textures and reflection effects aren't recreated; only base textures and normal maps.
 - Some gear pieces (helmets, pouches) get their texture at run time and may import untextured.

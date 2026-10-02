@@ -867,7 +867,9 @@ def resolve_textures(scene, finder, skin=""):
     for o in scene.objects:
         for m in o.node.meshes:
             name = m.texture
-            if not name and o.role in ("skin", "bone"):
+            if skin and fallback and o.role == "skin":  # a chosen skin replaces the model's own texture
+                name = fallback
+            elif not name and o.role in ("skin", "bone"):
                 name = fallback or ""
             elif not name and o.role == "mesh":
                 name = next((n for n in (o.node.name, scene.name) if n and finder.find(n)), "")

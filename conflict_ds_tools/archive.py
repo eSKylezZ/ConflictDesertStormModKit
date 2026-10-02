@@ -56,6 +56,42 @@ def list_archives(game_dir):
                   if f.lower().endswith(".dat") and not f.lower().startswith("unins"))
 
 
+class GameFiles:
+    """Single files out of the game's .dat archives by name (the first archive that has it)."""
+
+    def __init__(self, game_dir):
+        self.dir = game_dir
+        self.index = {}
+        for path in list_archives(game_dir):
+            with open(path, "rb") as f:
+                head = f.read(0x8000)
+            for h, o, s in entries_head(head):
+                self.index.setdefault(h, (path, o, s))
+
+    def get(self, name):
+        hit = self.index.get(archive_hash(os.path.basename(name)))
+        if hit is None:
+            return None
+        path, o, s = hit
+        with open(path, "rb") as f:
+            f.seek(o)
+            return f.read(s)
+
+
+def entries_head(head):
+    """The index of an archive from its first 0x8000 bytes."""
+    if len(head) < 12:
+        return []
+    first = struct.unpack_from("<I", head, 4)[0]
+    out = []
+    for p in range(0, min(first, len(head)), 12):
+        h, o, s = struct.unpack_from("<III", head, p)
+        if h == o == s == 0:
+            break
+        out.append((h, o, s))
+    return out
+
+
 def entries(data):
     if len(data) < 12:
         return []

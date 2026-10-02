@@ -1,0 +1,16 @@
+# A Colt Commando with a speed reload.
+#
+# Shows: new animations used by a weapon. UPRIGHT_RELOAD_FAST.prb and PRONE_RELOAD_FAST.prb are the game's
+# reload animations played twice as fast - made in Blender (import the .prb onto a soldier, change it,
+# File > Export > Conflict: Desert Storm Animation) and given names of their own, so nothing else changes.
+
+id            = US_WPN_M16_SpeedReload
+based on      = US_WPN_M16
+display name  = Colt Commando (Speed Reload)
+
+reload animation       = UPRIGHT_RELOAD_FAST   # standing / crouching (Colt Commando: upright_relaxed_reload_rifle)
+prone reload animation = PRONE_RELOAD_FAST     # lying down (prone_reload_LMG)
+reload time            = 0.75                  # seconds (1.50) - match the animation
+# Looks like the normal Colt Commando, so it keeps its model and HUD / inventory picture.
+
+# Also possible: aim animation, prone aim animation, throw animation, prone throw animation

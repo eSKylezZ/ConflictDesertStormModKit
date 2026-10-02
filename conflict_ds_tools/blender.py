@@ -2,8 +2,12 @@
 
 - .evo import: props, vehicles (node hierarchy + the tracks, wheels and guns the game attaches), world pieces,
   cloth (frames as shape keys), characters (armature, skin weights, optionally all their animations).
-- .prb import: animations onto a character armature made by the .evo import.
+- .prb import: animations onto a character armature made by the .evo import; .prb export: the armature's action
+  back to the game (footstep events kept from the game animation it replaces).
 - Archive extraction: the game's .dat files -> folders of meshes, textures (+ PNG), animations and tables.
+- .evo export: new geometry for a game model's parts (the model it is based on keeps attachment points,
+  materials and layout): static models (weapons, props, vehicles) and characters (the skin, weighted to the
+  game's skeleton).
 Materials: base texture, the .RFX normal map (DirectX green flipped), backface culling like the game.
 """
 import os
@@ -12,10 +16,10 @@ import time
 
 import bpy
 from bpy.props import BoolProperty, CollectionProperty, EnumProperty, FloatProperty, StringProperty
-from bpy_extras.io_utils import ImportHelper
+from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Matrix, Vector
 
-from . import archive, evo
+from . import archive, evo, evo_write, images
 
 HELPER_COLLECTION = "helpers"
 
@@ -281,6 +285,7 @@ class EvoImporter:
         self.rfx = evo.read_rfx(self.finder) if self.o["normal_maps"] else None
         coll = bpy.data.collections.new(os.path.splitext(os.path.basename(self.path))[0])
         self.context.collection.children.link(coll)
+        coll["evo_source"] = self.path
         self.helpers = None
         if self.o["helpers"]:
             self.helpers = bpy.data.collections.new(HELPER_COLLECTION)
@@ -708,22 +713,427 @@ def _draw_status(header, context):
     layout.label(text="Cancel", icon="EVENT_ESC")
 
 
+# --------------------------------------------------------------------------------------------------- export --
+
+def game_matrix_inverse(m):
+    """Inverse of a game-space 4x4 (rotation/scale + translation)."""
+    return [list(r) for r in Matrix([list(r) for r in m]).inverted()]
+
+
+def to_game_point(v, k):
+    return (v[0] / k, v[2] / k, v[1] / k)
+
+
+def to_game_dir(v):
+    return (v[0], v[2], v[1])
+
+
+def texture_of(mat):
+    """Texture name for a material: its first image's file name, else the importer's "EVO <name>" material name."""
+    if mat is None:
+        return "Default"
+    if mat.use_nodes and mat.node_tree:
+        for n in mat.node_tree.nodes:
+            if n.type == "TEX_IMAGE" and n.image and n.outputs[0].is_linked:
+                path = n.image.filepath or n.image.name
+                return os.path.splitext(os.path.basename(bpy.path.abspath(path)) or n.image.name)[0]
+    name = mat.name
+    if name.startswith("EVO "):
+        name = name[4:]
+    if name.endswith(" +N"):
+        name = name[:-3]
+    return name.split(".")[0] if name.count(".") == 1 and name.rsplit(".", 1)[1].isdigit() else name
+
+
+def mesh_parts(context, ob, to_local, k):
+    """evo_write.Part list (one per texture) for a Blender object; to_local = game-space matrix from the model's
+    space into the template object's space."""
+    deps = context.evaluated_depsgraph_get()
+    eob = ob.evaluated_get(deps)
+    me = eob.to_mesh()
+    try:
+        me.calc_loop_triangles()
+        if hasattr(me, "calc_normals_split"):
+            me.calc_normals_split()
+        corner_normals = me.corner_normals if hasattr(me, "corner_normals") else None
+        uv = me.uv_layers.active.data if me.uv_layers.active else None
+        mw = ob.matrix_world
+        rot = mw.to_3x3()
+        conv = Matrix([list(r) for r in to_local])
+        conv3 = conv.to_3x3()
+        parts = {}
+        for tri in me.loop_triangles:
+            mat = ob.material_slots[tri.material_index].material if tri.material_index < len(ob.material_slots) else None
+            tex = texture_of(mat)
+            part = parts.setdefault(tex, {"verts": {}, "p": [], "n": [], "uv": [], "t": []})
+            idx = []
+            for li in tri.loops:
+                vi = me.loops[li].vertex_index
+                n = corner_normals[li].vector if corner_normals is not None else me.loops[li].normal
+                u = tuple(uv[li].uv) if uv else (0.0, 0.0)
+                key = (vi, round(u[0], 5), round(u[1], 5), round(n[0], 3), round(n[1], 3), round(n[2], 3))
+                if key not in part["verts"]:
+                    part["verts"][key] = len(part["p"])
+                    wp = mw @ me.vertices[vi].co
+                    gp = conv @ Vector(to_game_point(wp, k) + (1.0,))
+                    gn = conv3 @ Vector(to_game_dir(rot @ n))
+                    if gn.length > 0:
+                        gn.normalize()
+                    part["p"].append(tuple(gp[:3]))
+                    part["n"].append(tuple(gn))
+                    part["uv"].append((u[0], 1.0 - u[1]))
+                idx.append(part["verts"][key])
+            part["t"].append((idx[0], idx[2], idx[1]))      # the mirror flips the winding back
+        return [evo_write.Part(tex, d["p"], d["n"], d["uv"], d["t"]) for tex, d in parts.items() if d["t"]]
+    finally:
+        eob.to_mesh_clear()
+
+
+def skin_part(context, ob, arm, k):
+    """evo_write.SkinPart for a character mesh bound to an armature: rest pose, model space, weights from the vertex
+    groups (named after the bones, as the importer makes them)."""
+    rest = arm.data.pose_position if arm else None
+    if arm:
+        arm.data.pose_position = "REST"
+        context.view_layer.update()
+    deps = context.evaluated_depsgraph_get()
+    eob = ob.evaluated_get(deps)
+    me = eob.to_mesh()
+    try:
+        me.calc_loop_triangles()
+        if hasattr(me, "calc_normals_split"):
+            me.calc_normals_split()
+        corner_normals = me.corner_normals if hasattr(me, "corner_normals") else None
+        uv = me.uv_layers.active.data if me.uv_layers.active else None
+        to_model = (arm.matrix_world.inverted() if arm else Matrix.Identity(4)) @ ob.matrix_world
+        rot = to_model.to_3x3()
+        groups = {g.index: g.name for g in ob.vertex_groups}
+        src = ob.data                               # vertex groups live on the original mesh
+        verts, pos, nrm, uvs, weights, tris = {}, [], [], [], [], []
+        for tri in me.loop_triangles:
+            idx = []
+            for li in tri.loops:
+                vi = me.loops[li].vertex_index
+                n = corner_normals[li].vector if corner_normals is not None else me.loops[li].normal
+                u = tuple(uv[li].uv) if uv else (0.0, 0.0)
+                key = (vi, round(u[0], 5), round(u[1], 5), round(n[0], 3), round(n[1], 3), round(n[2], 3))
+                if key not in verts:
+                    verts[key] = len(pos)
+                    pos.append(to_game_point(to_model @ me.vertices[vi].co, k))
+                    gn = Vector(to_game_dir(rot @ n))
+                    if gn.length > 0:
+                        gn.normalize()
+                    nrm.append(tuple(gn))
+                    uvs.append((u[0], 1.0 - u[1]))
+                    vw = src.vertices[vi].groups if vi < len(src.vertices) else []
+                    weights.append([(groups[g.group], g.weight) for g in vw if g.group in groups and g.weight > 0])
+                idx.append(verts[key])
+            tris.append((idx[0], idx[2], idx[1]))
+        return evo_write.SkinPart(pos, nrm, uvs, tris, weights)
+    finally:
+        eob.to_mesh_clear()
+        if arm:
+            arm.data.pose_position = rest
+            context.view_layer.update()
+
+
+def armature_of(ob):
+    for m in ob.modifiers:
+        if m.type == "ARMATURE" and m.object:
+            return m.object
+    return ob.parent if ob.parent and ob.parent.type == "ARMATURE" else None
+
+
+def image_of(mat):
+    if mat is not None and mat.use_nodes and mat.node_tree:
+        for n in mat.node_tree.nodes:
+            if n.type == "TEX_IMAGE" and n.image and n.outputs[0].is_linked:
+                return n.image
+    return None
+
+
+def save_dds(img, path):
+    """A Blender image as the game's .dds (DXT1, DXT5 with transparency). Returns a problem or None."""
+    w, h = img.size
+    if not w or not h:
+        return "%s has no pixels" % img.name
+    px = list(img.pixels[:])                       # float RGBA, bottom row first
+    rgba = bytearray(w * h * 4)
+    for y in range(h):
+        src = (h - 1 - y) * w * 4
+        row = px[src:src + w * 4]
+        rgba[y * w * 4:(y + 1) * w * 4] = bytes(max(0, min(255, int(v * 255 + 0.5))) for v in row)
+    with open(path, "wb") as f:
+        f.write(images.encode_dds(w, h, bytes(rgba)))
+    if w & (w - 1) or h & (h - 1):
+        return "%s is %d x %d - the game wants powers of two (256, 512 ...)" % (img.name, w, h)
+    return None
+
+
+def base_name(name):
+    head, _, tail = name.rpartition(".")
+    return head if head and tail.isdigit() else name
+
+
+class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
+    """Write a Conflict: Desert Storm model (.evo) based on a game model: new geometry for its parts"""
+    bl_idname = "export_scene.evo"
+    bl_label = "Export EVO"
+    bl_options = {"REGISTER"}
+
+    filename_ext = ".evo"
+    filter_glob: StringProperty(default="*.evo;*.EVO", options={"HIDDEN"})
+    template: StringProperty(name="Based On", subtype="FILE_PATH",
+                             description="The game model this one replaces (.evo from the extracted folders): its "
+                                         "attachment points, materials and part layout are kept. Empty = the model "
+                                         "the selected objects were imported from")
+    scale: FloatProperty(name="Scale", default=0.01, min=1e-5, max=100.0,
+                         description="Blender units per game centimetre (0.01 = the model is in metres)")
+    selected_only: BoolProperty(name="Selected Only", default=True)
+    save_textures: BoolProperty(name="Save Textures", default=True,
+                                description="Save new textures (materials whose image isn't one of the game model's own) "
+                                            "as .dds next to the model, named after the image")
+
+    def source_of(self, obs):
+        for ob in obs:
+            for coll in ob.users_collection:
+                if coll.get("evo_source"):
+                    return coll["evo_source"]
+        return ""
+
+    def invoke(self, context, event):
+        obs = context.selected_objects or context.view_layer.objects
+        if not self.template:
+            self.template = self.source_of(obs)
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context):
+        obs = [o for o in (context.selected_objects if self.selected_only else context.view_layer.objects)
+               if o.type == "MESH"]
+        template = bpy.path.abspath(self.template) if self.template else self.source_of(obs)
+        if not template or not os.path.isfile(template):
+            self.report({"ERROR"}, "Pick the game model this one is based on (Based On)")
+            return {"CANCELLED"}
+        if not obs:
+            self.report({"ERROR"}, "No mesh objects to export")
+            return {"CANCELLED"}
+        k = self.scale
+        data = open(template, "rb").read()
+        scene = evo.Scene(evo.read(data))
+        targets = [so for so in scene.objects if so.node.kind in (0, 3) and so.node.meshes and so.role == "mesh"]
+        skins = [so for so in scene.objects if so.role == "skin"]
+        if skins:
+            targets = []                                    # characters: the skin is what gets replaced
+        by_name = {}
+        for ob in obs:
+            by_name.setdefault(base_name(ob.name).upper(), []).append(ob)
+        parts = {}
+        used = set()
+        for so in targets:
+            match = by_name.get(so.name.upper(), [])
+            if len(targets) == 1:
+                match = obs                                 # one-part model: every selected mesh is that part
+            if not match:
+                continue
+            to_local = game_matrix_inverse(so.world)
+            new = []
+            for ob in match:
+                new += mesh_parts(context, ob, to_local, k)
+                used.add(ob.name)
+            if new:
+                parts[so.node.name] = new
+        for so in skins:
+            match = by_name.get(so.name.upper(), [])
+            if not match and len(skins) == 1:
+                match = [o for o in obs if armature_of(o)] or obs
+            if not match:
+                continue
+            if len(match) > 1:
+                self.report({"ERROR"}, "Join the character's meshes into one object (%s)" % ", ".join(o.name for o in match))
+                return {"CANCELLED"}
+            parts[so.node.name] = skin_part(context, match[0], armature_of(match[0]), k)
+            used.add(match[0].name)
+        if not parts:
+            self.report({"ERROR"}, "No object matches a part of %s (%s)" % (
+                os.path.basename(template), ", ".join(so.name for so in targets)))
+            return {"CANCELLED"}
+        name = os.path.splitext(os.path.basename(self.filepath))[0]
+        try:
+            notes = []
+            out = evo_write.rebuild(data, parts, model_name=name, warnings=notes)
+        except evo.EvoError as e:
+            self.report({"ERROR"}, str(e))
+            return {"CANCELLED"}
+        with open(self.filepath, "wb") as f:
+            f.write(out)
+        if self.save_textures:
+            game = {name.lower() for n in scene.nodes for _h, name in n.textures}
+            saved = {}                                      # lower-case name -> file name
+            folder = os.path.dirname(self.filepath)
+            for ob in obs:
+                if ob.name not in used:
+                    continue
+                for slot in ob.material_slots:
+                    img = image_of(slot.material)
+                    tex = texture_of(slot.material)
+                    if img is None or tex.lower() in game or tex.lower() == "default" or tex.lower() in saved:
+                        continue
+                    saved[tex.lower()] = tex + ".dds"
+                    problem = save_dds(img, os.path.join(folder, tex + ".dds"))
+                    if problem:
+                        notes.append(problem)
+            if saved:
+                notes.append("saved " + ", ".join(sorted(saved.values())))
+        skipped = [o.name for o in obs if o.name not in used]
+        textures = sorted({p.texture for ps in parts.values() if isinstance(ps, list) for p in ps}) or ["(character skin)"]
+        msg = "Wrote %s: %d part(s), textures %s" % (os.path.basename(self.filepath), len(parts), ", ".join(textures))
+        if skipped:
+            msg += "; not exported (no matching part): " + ", ".join(skipped)
+        if notes:
+            msg += "; " + "; ".join(notes)
+        warn = skipped or any(not n.startswith("saved ") for n in notes)
+        self.report({"WARNING"} if warn else {"INFO"}, msg)
+        return {"FINISHED"}
+
+
+def action_of(arm):
+    ad = arm.animation_data
+    return ad.action if ad else None
+
+
+class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
+    """Write the armature's current action as a Conflict: Desert Storm animation (.prb)"""
+    bl_idname = "export_anim.evo_prb"
+    bl_label = "Export PRB Animation"
+    bl_options = {"REGISTER"}
+
+    filename_ext = ".prb"
+    filter_glob: StringProperty(default="*.prb;*.PRB", options={"HIDDEN"})
+    fps: FloatProperty(name="Keys per Second", default=15.0, min=1.0, max=60.0,
+                       description="How often the animation is sampled (the game's own use 6-15)")
+    template: StringProperty(name="Footsteps From", subtype="FILE_PATH",
+                             description="A game animation whose footstep events (walk / run cycles) the new one "
+                                         "keeps. Empty = the game animation with the same name, if there is one")
+
+    @classmethod
+    def poll(cls, context):
+        ob = context.active_object
+        return ob is not None and ob.type == "ARMATURE" and ob.get("evo_path") and action_of(ob) is not None
+
+    def invoke(self, context, event):
+        act = action_of(context.active_object)
+        if act is not None:
+            if act.get("evo_fps"):
+                self.fps = float(act["evo_fps"])
+            if not self.filepath or os.path.basename(self.filepath) in ("", "untitled.prb"):
+                self.filepath = act.name + ".prb"
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context):
+        arm = context.active_object
+        act = action_of(arm)
+        k = arm.get("evo_scale", 0.01)
+        try:
+            scene = evo.load(arm["evo_path"])
+        except (evo.EvoError, OSError) as e:
+            self.report({"ERROR"}, "Can't read the character's model %s: %s" % (arm["evo_path"], e))
+            return {"CANCELLED"}
+        bones = arm.data.bones
+        bone_ids = [i for i in sorted(scene.bone_ids) if scene.objects[i].name in bones]
+        rest = {i: bones[scene.objects[i].name].matrix_local.copy() for i in bone_ids}
+        corr_inv = {i: (conv_matrix(scene.objects[i].world, k).inverted() @ rest[i]).inverted() for i in bone_ids}
+        # the template animation: footstep events, keys for objects that aren't bones
+        tpath = bpy.path.abspath(self.template) if self.template else ""
+        if not tpath:
+            finder = evo.AssetFinder(arm["evo_path"])
+            tpath = finder.animations().get(act.name.upper()) or finder.animations().get(act.name) or ""
+            if not tpath:
+                for stem, p in finder.animations().items():
+                    if stem.lower() == act.name.lower():
+                        tpath = p
+                        break
+        template = None
+        if tpath and os.path.isfile(tpath):
+            try:
+                tdata = open(tpath, "rb").read()
+                template = (evo.read_prb(tdata), evo_write.prb_events(tdata))
+            except evo.EvoError:
+                template = None
+        scn = context.scene
+        scene_fps = scn.render.fps / (scn.render.fps_base or 1.0)
+        start, end = act.frame_range
+        frames = max(1, int(round((end - start) * self.fps / scene_fps)) + 1)
+        keep = scn.frame_current
+        tracks = [[] for _ in scene.objects]
+        points = []
+        try:
+            for f in range(frames):
+                t = start + f * scene_fps / self.fps
+                scn.frame_set(int(t), subframe=t - int(t))
+                world = {}
+
+                def world_of(i, depth=0):
+                    if i in world:
+                        return world[i]
+                    so = scene.objects[i]
+                    if i in bone_ids:
+                        pb = arm.pose.bones[so.name]
+                        world[i] = conv_matrix(pb.matrix @ corr_inv[i], 1.0 / k)
+                    else:
+                        parent = world_of(so.parent, depth + 1) if so.parent is not None and depth < 256 else Matrix.Identity(4)
+                        local = Matrix([list(r) for r in so.local])
+                        if template and evo.compatible(scene, template[0]):
+                            local = Matrix([list(r) for r in template[0].local(i, min(f, template[0].frames - 1))])
+                        world[i] = parent @ local
+                    return world[i]
+
+                for i, so in enumerate(scene.objects):
+                    w = world_of(i)
+                    parent = world_of(so.parent) if so.parent is not None else Matrix.Identity(4)
+                    loc, rot, sca = (parent.inverted() @ w).decompose()
+                    tracks[i].append((tuple(loc), tuple(sca), (rot.x, rot.y, rot.z, rot.w)))
+                    if i in bone_ids:
+                        points.append(tuple(w.translation))
+        finally:
+            scn.frame_set(keep)
+        if template:
+            events, nevents, flag, tframes = template[1]
+            out = evo_write.write_prb(tracks, self.fps, points, events, nevents, flag, tframes)
+        else:
+            out = evo_write.write_prb(tracks, self.fps, points)
+        with open(self.filepath, "wb") as f:
+            f.write(out)
+        msg = "Wrote %s: %d frames at %g per second" % (os.path.basename(self.filepath), frames, self.fps)
+        if template:
+            msg += ", footsteps from %s" % os.path.basename(tpath)
+        self.report({"INFO"}, msg)
+        return {"FINISHED"}
+
+
+def menu_func_export(self, context):
+    self.layout.operator(EXPORT_SCENE_OT_evo.bl_idname, text="Conflict: Desert Storm (.evo)")
+    self.layout.operator(EXPORT_ANIM_OT_prb.bl_idname, text="Conflict: Desert Storm Animation (.prb)")
+
+
 def menu_func_import(self, context):
     self.layout.operator(IMPORT_SCENE_OT_evo.bl_idname, text="Conflict: Desert Storm (.evo)")
     self.layout.operator(IMPORT_ANIM_OT_prb.bl_idname, text="Conflict: Desert Storm Animation (.prb)")
     self.layout.operator(IMPORT_SCENE_OT_ds_extract.bl_idname, text="Conflict: Desert Storm Archives (extract)")
 
 
-CLASSES = (IMPORT_SCENE_OT_evo, IMPORT_ANIM_OT_prb, IMPORT_SCENE_OT_ds_extract)
+CLASSES = (IMPORT_SCENE_OT_evo, IMPORT_ANIM_OT_prb, IMPORT_SCENE_OT_ds_extract, EXPORT_SCENE_OT_evo,
+           EXPORT_ANIM_OT_prb)
 
 
 def register():
     for c in CLASSES:
         bpy.utils.register_class(c)
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
+    bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 
 def unregister():
+    bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)
