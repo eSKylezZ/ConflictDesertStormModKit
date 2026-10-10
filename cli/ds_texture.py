@@ -3,6 +3,7 @@
   python ds_texture.py dds <in.png> [out.dds] [--format DXT1|DXT3|DXT5]   for a mod folder
   python ds_texture.py png <in.dds> [out.png]                              to edit in any paint program
   python ds_texture.py icon <weapon id> [out.png] [-g game folder]         a weapon's HUD / inventory picture
+  python ds_texture.py normal <in.png> [out.tga] [--opengl]                a normal map for a .skin's "normal map"
 
 dds: DXT1 for plain textures, DXT5 when the picture has transparency (picked automatically), DXT3 for the
 64 x 64 soldier-panel portraits (--format DXT3). Sizes must be powers of two (64, 128, 256, 512); keep the size of
@@ -10,6 +11,10 @@ the texture you replace - the game runs out of texture memory with bigger ones.
 
 icon: the picture the HUD weapon panel, the inventory and pick-ups show for a weapon (e.g. US_WPN_SAW_lightmg, or a
 picture name such as IMAGE_WEAPON_SAW), cut out of the game's HUD sheet - a starting point for a .weapon's "hud icon".
+
+normal: a normal map in the game's format - 32-bit uncompressed TGA like its own (Hero01BUMP_UK_01.tga, 256 x 256).
+The game's normal maps are DirectX style (green = down); add --opengl when yours comes from Blender or a program that
+makes OpenGL-style maps (green = up), so the green channel is flipped.
 """
 import argparse
 import os
@@ -45,6 +50,18 @@ def cmd_png(a):
     with open(out, "wb") as f:
         f.write(images.encode_png(w, h, rgba, images.has_alpha(rgba)))
     print(f"{out}: {w} x {h}")
+
+
+def cmd_normal(a):
+    w, h, rgba = images.decode_file(a.input)
+    if not (power_of_two(w) and power_of_two(h)):
+        raise SystemExit(f"{a.input} is {w} x {h}: the game needs powers of two (the soldiers' own are 256 x 256)")
+    if a.opengl:
+        rgba = images.flip_green(rgba)
+    out = a.output or os.path.splitext(a.input)[0] + ".tga"
+    with open(out, "wb") as f:
+        f.write(images.encode_tga(w, h, rgba))
+    print(f"{out}: {w} x {h} 32-bit TGA" + (" (green flipped from OpenGL)" if a.opengl else ""))
 
 
 def cmd_icon(a):
@@ -95,6 +112,11 @@ def main():
     s.add_argument("output", nargs="?")
     s.add_argument("-g", "--game", help="game folder (default: found from the registry)")
     s.set_defaults(fn=cmd_icon)
+    s = sub.add_parser("normal", help="PNG / TGA / DDS -> normal map TGA in the game's format")
+    s.add_argument("input")
+    s.add_argument("output", nargs="?")
+    s.add_argument("--opengl", action="store_true", help="the input is an OpenGL-style map (green up): flip green")
+    s.set_defaults(fn=cmd_normal)
     a = p.parse_args()
     a.fn(a)
 

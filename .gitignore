@@ -35,3 +35,6 @@ examples/build/
 Thumbs.db
 desktop.ini
 .DS_Store
+
+# Local tests
+/tests

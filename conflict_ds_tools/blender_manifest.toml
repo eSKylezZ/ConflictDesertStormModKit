@@ -1,7 +1,7 @@
 schema_version = "1.0.0"
 
 id = "conflict_ds_tools"
-version = "1.2.0"
+version = "1.4.0"
 name = "Conflict: Desert Storm tools"
 tagline = "Import and export meshes, characters and animations"
 maintainer = "eSKylezZ"

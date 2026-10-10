@@ -1,0 +1,44 @@
+/* Records window (records.js) - uses the editor's colour variables from style.css */
+#records-dialog { width: 96vw; height: 90vh; max-width: none; max-height: none; padding: 0; display: none; }
+#records-dialog[open] { display: flex; flex-direction: column; }
+#records-dialog .console-head button.on { border-color: var(--accent, #58a6ff); }
+.rec-msg { margin-left: 8px; }
+.rec-msg.bad { color: #ff7b72; }
+.rec-body { flex: 1; display: grid; grid-template-columns: 190px 300px 1fr; min-height: 0; }
+.rec-body[hidden] { display: none; }
+.rec-text-body { display: flex; flex-direction: column; padding: 8px 12px; gap: 6px; overflow: auto; }
+.rec-tables, .rec-list, .rec-form { overflow: auto; border-right: 1px solid var(--line); }
+.rec-mid { display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); }
+.rec-search { margin: 6px; }
+.rec-table, .rec-item { display: block; width: 100%; text-align: left; border: 0; border-bottom: 1px solid var(--line);
+  border-radius: 0; background: none; padding: 5px 8px; }
+.rec-table small, .rec-item small { display: block; color: var(--dim); white-space: nowrap; overflow: hidden;
+  text-overflow: ellipsis; }
+.rec-table.on, .rec-item.on { background: rgba(88, 166, 255, 0.15); }
+.rec-item em, .rec-head em, .rec-text em { font-style: normal; font-size: 11px; padding: 0 5px; border-radius: 8px;
+  margin-left: 6px; background: var(--line); }
+.rec-item.changed em, .rec-text.changed em { background: #9e6a03; }
+.rec-item.new em, .rec-text.new em { background: #238636; }
+.rec-item.deleted em { background: #b62324; }
+.rec-form { padding: 8px 12px; }
+.rec-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 6px; }
+.rec-head strong { font-size: 16px; }
+.rec-actions { flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.rec-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(440px, 1fr)); gap: 3px 18px; }
+.rec-field { display: grid; grid-template-columns: 140px 1fr 34px 86px; align-items: center; gap: 6px; }
+.rec-field .rec-link { justify-self: start; white-space: nowrap; }
+.rec-field.unnamed span { color: var(--dim); }
+.rec-field small { color: var(--dim); font-size: 10px; }
+.rec-fields input.num { text-align: right; }
+.rec-fields input.diff { border-color: #d29922; }
+.rec-link { font-size: 11px; padding: 1px 6px; margin: 2px; }
+.rec-used { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 6px; }
+.rec-grid { border-collapse: collapse; }
+.rec-grid th { font-weight: normal; color: var(--dim); text-align: left; padding: 2px 4px; font-size: 12px; }
+.rec-grid td { padding: 1px 2px; }
+.rec-grid input { width: 140px; }
+.rec-text { gap: 6px; align-items: center; }
+.rec-text code { min-width: 220px; }
+button.danger { border-color: #b62324; color: #ff7b72; }
+.rec-rows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; overflow-x: auto; }
+.rec-src { min-width: 46px; color: var(--dim); font-size: 11px; }

@@ -27,6 +27,18 @@ Layout follows the game's loader in DesertStorm.exe:
          u32 list count, u32 frames, vertices (36 B), (frames - 1) x vertex count x {pos, normal},
          [strip u16s], list u16s, [version > 2: tag, u32 n, n B]}
 
+Header char[128] pair after has-keys: collision source ("#BSP_<name>" helper, "THIS" own mesh, "NOBSP"; the game
+ignores it) and shadow ("NOSHADOW" / "(NULL)" / "#SHA_<name>").
+  BSPT   {u32 size, u32 u, "BSPT", u32 size, tree}; the game loads only u = 0 (the collision tree), u = 1 is skipped.
+         Tree (FUN_0055c790): node 32 B {plane n, d; offset of polys facing n; of polys facing -n; child on the
+         negative side; child on the positive side} (offsets from the tree start, 0 = none, root at 0), laid out
+         pre-order: node, its two poly blocks, negative subtree, positive subtree. Polys back to back {u16 n,
+         u16 surface (row of Default.spl: 18 Metal, 32 Render Only ...), vec3 centre (vertex average), f32
+         1.25 x max squared distance to the centre, n x vec3}, ended by u16 0, block padded to 16 bytes.
+  FACE   (#SHA_ shadow meshes only) per list triangle: s8 x3 normal x 127, u8 0, u16 x3 neighbours across
+         v0v1 / v1v2 / v2v0 (open edge 0xFFFF), 2 bytes unused. The game skips it and computes the table itself
+         when it loads the shadow object (FUN_005227b0) - a writer can leave FACE empty.
+
 Space: Direct3D, left-handed, Y up, centimetres. Node keys (only in the first object of a hierarchy, one per
 object in file order) are local to the parent; the stored quaternion is the conjugate of the rotation
 (verified: every skin influence of HERO01_ARMSTRONG lands on the same point to 1e-5).
@@ -35,6 +47,11 @@ import math
 import struct
 
 VERSION = 0x2F
+
+# the points of an object (header: u32 n, n x vec3, then 5 x i32 = point index per role, -1 = none), in the object's
+# space; found by role in every game model: guns' muzzle (just past the barrel) and shell ejection port, the M203's
+# muzzle, launchers' back blast (role 2), ladders' bottom / top climb points
+POINT_ROLES = ("MUZZLE", "LAUNCHER", "EJECT", "LADDER_BOTTOM", "LADDER_TOP")
 
 # object flags
 FLAG_HITBOX = 0x01      # "#HR_..." hit regions (no geometry)
@@ -131,6 +148,10 @@ class Node:
         self.meshes = []
         self.keys = []         # [(pos, scale, quat)] - one per object of the file
         self.bones = []        # skinned: [(bone node name, node index)]
+        self.collision_source = ""   # "#BSP_<helper>", "THIS", "NOBSP" (the game ignores it)
+        self.shadow_name = ""        # "#SHA_<object>", "NOSHADOW", "(NULL)"
+        self.trees = []        # BSPT entries [(u, tree bytes)]; the game uses the u = 0 one (bsp.read)
+        self.point_roles = (-1,) * 5   # points index per role (POINT_ROLES), -1 = none
         self.offset = 0
 
     @property
@@ -285,12 +306,13 @@ def read_node(r):
         name = r.s(128)
         n.bones.append((name, r.u32()))
     has_keys = r.u32()
-    r.raw(0x100)
+    n.collision_source = r.s(128)
+    n.shadow_name = r.s(128)
     nbspt = r.u32()
     npts = r.u32()
     if npts:
         n.points = [r.f32(3) for _ in range(npts)]
-        r.raw(20)
+        n.point_roles = struct.unpack("<5i", r.raw(20))
     r.tag(b"TEXL")
     for _ in range(r.u32()):
         h = r.u32()
@@ -319,10 +341,12 @@ def read_node(r):
         raise EvoError("unknown geometry kind %d" % n.kind)
     for _ in range(nbspt):
         size = r.u32()
-        r.u32()
+        u = r.u32()
+        tree = b""
         if size:
             r.tag()
-            r.raw(r.u32())
+            tree = r.raw(r.u32())
+        n.trees.append((u, bytes(tree)))
     if has_keys:
         r.tag()
         r.u32()
@@ -708,6 +732,7 @@ class Animation:
         self.fps = 10.0
         self.frames = 1
         self.tracks = []       # [[(pos, scale, quat)]], quat as a plain rotation (x, y, z, w)
+        self.events = []       # [(type, time in frames, value)]: 1 = footstep (value sign = foot, 1 walk / 25 run)
 
     @property
     def duration(self):
@@ -739,9 +764,13 @@ def read_prb(path_or_bytes, name=""):
     a = Animation()
     a.name = name
     a.frames = max(1, frames)
-    off = 32 + nbounds * 160 + n3 * 40
+    ev = 32 + nbounds * 160
+    off = ev + n3 * 40
     if off + 4 * ntracks > len(d):
         raise EvoError("truncated .prb")
+    for i in range(n3):        # 40 B: u32 type, f32 time, 2 x 0, f32 value, 4 x 0, u32 (run-time slot)
+        etype, etime = struct.unpack_from("<If", d, ev + 40 * i)
+        a.events.append((etype, etime, struct.unpack_from("<f", d, ev + 40 * i + 16)[0]))
     offsets = struct.unpack_from("<%dI" % ntracks, d, off)
     for i, o in enumerate(offsets):
         if o + 12 > len(d):

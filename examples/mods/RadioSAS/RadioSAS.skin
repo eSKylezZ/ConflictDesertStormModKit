@@ -1,0 +1,13 @@
+# Bradley as the squad's radio operator - on the Squad Loadout screen pick UNIFORM "SAS (RADIO)".
+#
+# Shows: a uniform with a voice of its own. He keeps his SAS uniform but speaks with the Delta (American) actor, and
+# every line comes over a crackly radio: radio\Bradley_line01.wav ... are his Delta lines with a radio effect.
+# Make your own: python cli/ds_sound.py wav <game>\mission3.sch Bradley lines --accent delta, edit the WAVs you want
+# to change and keep their numbers. On the loadout screen VOICE shows "AUTO - OWN (MOD)" while he wears this uniform.
+
+uniform      = SAS
+uniform name = SAS (Radio)
+soldier      = Bradley
+texture      = RadioSAS_01      # RadioSAS_01.dds - Bradley's layout (HERO01_UK_01)
+voice        = Delta            # start from the Delta actor's lines (SAS = the British one)
+voice folder = radio            # every ...lineNN.wav in it replaces line NN (single lines: voice line 12 = my.wav)

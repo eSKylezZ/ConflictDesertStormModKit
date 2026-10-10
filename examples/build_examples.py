@@ -164,6 +164,62 @@ def hazard(r, g, b, x, y):
     return 120 + 150 * l, 95 + 130 * l, 10 + 20 * l
 
 
+QUILT = 32     # diamond size in pixels of a 256 x 256 normal map (64 on the 512 x 512 texture)
+
+
+def quilt(x, y, w):
+    """Padded diamonds: height 0 on the stitched seams, 1 in the middle of a diamond, and its slope (d/dx, d/dy),
+    for pixel x, y of a w-wide soldier texture (the pattern lines up on the texture and the normal map)."""
+    p = QUILT * w / 256.0
+    a, b = ((x + y) % p) / p, ((x - y) % p) / p
+    sa, ca, sb, cb = math.sin(math.pi * a), math.cos(math.pi * a), math.sin(math.pi * b), math.cos(math.pi * b)
+    k = math.pi / p
+    return sa * sb, k * (ca * sb + sa * cb), k * (ca * sb - sa * cb)
+
+
+def navy(r, g, b, x, y):
+    """Plain navy cloth: the camo flattened to a little texture, so the quilting's light and shade stand out."""
+    f = 0.8 + 0.45 * lum(r, g, b) / 255.0
+    return 52 * f, 62 * f, 88 * f
+
+
+def jacket_only(keep):
+    """Quilting goes on the jacket and trousers: also leave out the boots (top-left block of the hero layout)."""
+    return lambda x, y, w, h, r, g, b: (x * 512 // w < 256 and y * 512 // h < 128) or keep(x, y, w, h, r, g, b)
+
+
+def quilted(tex, keep):
+    """The uniform texture: the seams darkened, so the stitching shows on the colour too."""
+    w, h, px = tex
+    out = bytearray(px)
+    for y in range(h):
+        for x in range(w):
+            o = (y * w + x) * 4
+            if keep(x, y, w, h, px[o], px[o + 1], px[o + 2]):
+                continue
+            f = 0.72 + 0.28 * min(1.0, quilt(x, y, w)[0] * 5)
+            out[o], out[o + 1], out[o + 2] = (clamp(c * f) for c in px[o:o + 3])
+    return w, h, out
+
+
+def quilted_normals(tex, keep, strength=1.1):
+    """The soldier's own normal map with the padded diamonds added on the cloth (DirectX style: green = down)."""
+    w, h, px = tex
+    out = bytearray(px)
+    for y in range(h):
+        for x in range(w):
+            if keep(x, y, w, h, 0, 0, 0):
+                continue
+            o = (y * w + x) * 4
+            nx, ny, nz = (c / 127.5 - 1 for c in px[o:o + 3])
+            _, dx, dy = quilt(x, y, w)
+            s = strength * QUILT / math.pi       # slope 1 at the steepest point of a diamond -> strength
+            nx, ny = nx - dx * s, ny - dy * s
+            n = math.sqrt(nx * nx + ny * ny + nz * nz) or 1.0
+            out[o], out[o + 1], out[o + 2] = (clamp(127.5 + 127.5 * c / n) for c in (nx, ny, nz))
+    return w, h, out
+
+
 def dxt3(w, h, rgba):
     """DXT3 .dds (explicit 4-bit alpha) - the format of the game's 64 x 64 portraits."""
     out = bytearray()
@@ -273,6 +329,111 @@ def write_wav(path, samples):
         w.writeframes(pcm)
 
 
+def radio(pcm, rate, seed):
+    """A voice line over a field radio: thin band (high- and low-pass), driven into soft clipping, hiss, and a squelch
+    click at both ends."""
+    rnd = random.Random(seed)
+    hp_a = math.exp(-2 * math.pi * 450 / rate)            # one-pole filters
+    lp_a = math.exp(-2 * math.pi * 1900 / rate)
+    out, hp, prev, lp = [], 0.0, 0.0, 0.0
+    squelch = int(rate * 0.06)
+    for i in range(squelch):                               # key-up burst
+        out.append(0.5 * rnd.uniform(-1, 1) * (1 - i / squelch))
+    for v in pcm:
+        x = v / 32768.0
+        hp = hp_a * (hp + x - prev)
+        prev = x
+        lp = lp_a * lp + (1 - lp_a) * hp
+        y = math.tanh(lp * 4.0) * 0.8 + 0.05 * rnd.uniform(-1, 1)
+        out.append(y)
+    for i in range(squelch):                               # release burst
+        out.append(0.35 * rnd.uniform(-1, 1) * (1 - i / squelch))
+    return out
+
+
+def speech_windows(a, b, rate, threshold=1500.0, gap=0.5, pad=0.12):
+    """Where a cutscene has speech, found by comparing its SAS and Delta mixes (same music and effects, different
+    actors): (start, end) sample ranges where the two differ, merged across short gaps and padded a little."""
+    win = rate // 20
+    loud = []
+    for w in range(0, min(len(a), len(b)) - win, win):
+        d = sum((a[i] - b[i]) ** 2 for i in range(w, w + win, 4)) / (win / 4)
+        loud.append(math.sqrt(d) > threshold)
+    spans = []
+    for i, on in enumerate(loud):
+        if not on:
+            continue
+        if spans and i - spans[-1][1] <= gap * 20:
+            spans[-1][1] = i
+        else:
+            spans.append([i, i])
+    n = min(len(a), len(b))
+    return [(max(0, s * win - int(pad * rate)), min(n, (e + 1) * win + int(pad * rate))) for s, e in spans]
+
+
+def radio_scene(left, right, windows, rate, seed):
+    """The cutscene's mix with the speech stretches heard over a field radio: in each window the sound is summed to
+    mono and run through the radio effect, faded in and out over 40 ms, with a squelch burst at both ends. The rest
+    of the scene - and its length - stays as it was."""
+    rnd = random.Random(seed)
+    left, right = list(left), list(right)
+    fade = int(rate * 0.04)
+    for start, end in windows:
+        seg = [(left[i] + right[i]) // 2 for i in range(start, end)]
+        wet = radio(seg, rate, seed + start)
+        squelch = int(rate * 0.06)
+        wet = wet[squelch:squelch + len(seg)]               # same length as the window (bursts added below)
+        for k, i in enumerate(range(start, end)):
+            mix = min(1.0, k / fade, (end - 1 - i) / fade)  # crossfade between the original and the radio
+            v = wet[k] * 32767 * 0.9
+            left[i] = int(left[i] * (1 - mix) + v * mix)
+            right[i] = int(right[i] * (1 - mix) + v * mix)
+        for at in (start, max(start, end - squelch)):     # key-up / release clicks
+            for k in range(squelch):
+                if at + k < len(left):
+                    burst = int(9000 * rnd.uniform(-1, 1) * (1 - k / squelch))
+                    left[at + k] = max(-32768, min(32767, left[at + k] + burst))
+                    right[at + k] = max(-32768, min(32767, right[at + k] + burst))
+    clip = lambda c: [max(-32768, min(32767, v)) for v in c]
+    return clip(left), clip(right)
+
+
+def radio_cutscene(game_dir, scene, folder):
+    """Cutscene `scene` (e.g. CS_M01_S01) with its speech over the radio, for both actors: Sound\\SAS (from the English
+    file) and Sound\\Delta (from the American one) - the same steps a modder takes with ds_sound.py stream / psf and an
+    audio editor."""
+    base = os.path.join(game_dir, "Data", "Sound")
+    rate, en_l, en_r = sound.decode_stream(open(os.path.join(base, "English", scene + ".psf"), "rb").read())
+    _, us_l, us_r = sound.decode_stream(open(os.path.join(base, "American", scene + ".psf"), "rb").read())
+    windows = speech_windows(en_l, us_l, rate)
+    for actors, (l, r) in (("SAS", (en_l, en_r)), ("Delta", (us_l, us_r))):
+        out_l, out_r = radio_scene(l, r, windows, rate, 7)
+        os.makedirs(os.path.join(folder, actors), exist_ok=True)
+        with open(os.path.join(folder, actors, scene + ".psf"), "wb") as f:
+            f.write(sound.encode_stream(out_l, out_r))
+    return windows, rate
+
+
+def radio_voice(game_dir, bank, folder):
+    """Every line of squad voice bank `bank` (Delta actor) with the radio effect, as <bank>_lineNN.wav."""
+    data = open(os.path.join(game_dir, "mission3.sch"), "rb").read()
+    cl = sound.chunks(data)
+    b = sound.bank_chunk(cl, bank)
+    have = sound.samples(cl)
+    os.makedirs(folder, exist_ok=True)
+    for k, i in enumerate(sound.bank_samples(b, have)):
+        chunk = next((c for c in have[i] if sound.sample_language(c) == 6), None) or have[i][0]
+        _sid, rate, bits, raw = sound.sample_info(chunk)
+        samples = radio(sound.decode(raw, bits), rate, k)
+        pcm = struct.pack("<%dh" % len(samples), *(max(-32767, min(32767, int(s * 32767))) for s in samples))
+        name = "%s_line%02d_%s.wav" % (bank, k + 1, sound.VOICE_LINES[k + 1])   # as ds_sound.py wav names them
+        with wave.open(os.path.join(folder, name), "wb") as w:
+            w.setnchannels(1)
+            w.setsampwidth(2)
+            w.setframerate(rate)
+            w.writeframes(pcm)
+
+
 def gunshot(seed, length=0.45, thump=90.0, crack=0.9, decay=11.0):
     """A synthetic gunshot: a noise crack plus a falling low thump, fading out."""
     rnd = random.Random(seed)
@@ -330,6 +491,17 @@ def build(game, out, work, blender):
               "dxt3")
     # BigHeadUniform: an olive uniform of its own (a body skin needs its own texture name - the body goes with it)
     write_dds(recolour(game.texture("HERO01_UK_01"), tint((150, 165, 105)), soldier_keep()), mod("BigHeadUniform", "BigHead_UK.dds"))
+    jacket = jacket_only(soldier_keep())
+    write_dds(quilted(recolour(game.texture("HERO01_UK_01"), navy, jacket), jacket), mod("QuiltedSAS", "QuiltedSAS_01.dds"))
+    w, h, px = images.decode_tga(game.get("HERO01BUMP_UK_01.TGA"))
+    w, h, px = quilted_normals((w, h, bytearray(px)), jacket)
+    with open(mod("QuiltedSAS", "QuiltedSAS_Bump.tga"), "wb") as f:
+        f.write(images.encode_tga(w, h, bytes(px)))
+    write_dds(recolour(game.texture("HERO01_UK_01"), tint((150, 128, 96)), soldier_keep()), mod("RadioSAS", "RadioSAS_01.dds"))
+    radio_voice(game.dir, "Bradley", mod("RadioSAS", "radio"))
+    print("cutscene sound")
+    windows, rate = radio_cutscene(game.dir, "CS_M01_S01", mod("RadioCutscene", "Sound"))
+    print("  CS_M01_S01 speech at", ", ".join("%.1f-%.1f s" % (a / rate, b / rate) for a, b in windows))
     delta = game.texture("HERO04_US_01")
     keep = soldier_keep(chest=True)
     write_dds(recolour(delta, winter_for(delta, keep), keep), mod("WinterDelta", "DeltaWinter_04.dds"))
