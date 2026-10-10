@@ -12,8 +12,9 @@
     return e;
   };
   async function call(cmd, args = {}) {
-    const r = await fetch('/api/' + cmd, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify(args) });
+    const token = document.querySelector('meta[name="editor-token"]')?.content || '';
+    const r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args),
+                                          headers: { 'Content-Type': 'application/json', 'X-Editor-Token': token } });
     const j = await r.json();
     if (!j.ok) throw new Error(j.error);
     return j.result;

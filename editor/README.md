@@ -100,6 +100,10 @@ hide it in a layer instead). Ids the DLL reaches through tables aren't seen.
 Every change is a named command in `editor/commands.py` (`POST /api/<command>` with JSON arguments; `GET /api/help`
 lists them with their arguments). The UI uses nothing else, so a script or an MCP client can do anything the UI does.
 
+Calls need `Content-Type: application/json` and the header `X-Editor-Token: <token>`; the token is new at every start
+and sits in the editor page (`<meta name="editor-token" content="…">` in `GET /`) - `mcp_server.editor_token(url)`
+reads it. This keeps other websites open in your browser from sending commands to the editor.
+
 
 ## AI assistants (MCP)
 

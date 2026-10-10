@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import urllib.error
 import urllib.request
@@ -46,18 +47,40 @@ Positions are game units: centimetres, y up. Records are addressed by their line
 inserts and deletes, so re-read them (scene / find) after changing the scene. Every change can be undone (undo)."""
 
 
+def editor_token(url, timeout=10):
+    """The running editor's per-launch API token: server.py puts it into index.html (<meta name="editor-token">)."""
+    with urllib.request.urlopen(url.rstrip("/") + "/", timeout=timeout) as r:
+        page = r.read().decode("utf-8", "replace")
+    m = re.search(r'<meta name="editor-token" content="([^"]+)"', page)
+    if not m:
+        raise RuntimeError(f"no editor token at {url} - an older editor? restart it")
+    return m.group(1)
+
+
 class Editor:
     """Forwards commands to the running editor server."""
 
     def __init__(self, url):
         self.url = url.rstrip("/")
+        self.token = None   # read on first use; again if the editor was restarted (new token)
 
-    def call(self, name, args):
-        req = urllib.request.Request(f"{self.url}/api/{name}", data=json.dumps(args or {}).encode(),
-                                     headers={"Content-Type": "application/json"}, method="POST")
+    def call(self, name, args, retry=True):
         try:
+            if self.token is None:
+                self.token = editor_token(self.url)
+            req = urllib.request.Request(f"{self.url}/api/{name}", data=json.dumps(args or {}).encode(),
+                                         headers={"Content-Type": "application/json", "X-Editor-Token": self.token},
+                                         method="POST")
             with urllib.request.urlopen(req, timeout=600) as r:
                 reply = json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            if e.code == 403 and retry:   # editor restarted since the token was read
+                self.token = None
+                return self.call(name, args, retry=False)
+            try:
+                reply = json.loads(e.read())
+            except ValueError:
+                raise RuntimeError(f"editor answered HTTP {e.code}") from None
         except urllib.error.URLError as e:
             raise RuntimeError(f"the editor isn't running at {self.url} ({e.reason}) - start it with "
                                f"python editor/server.py --data <extracted game folder>") from None

@@ -11,9 +11,11 @@ const toThree = (p) => new THREE.Vector3(p[0] / 100, p[1] / 100, -p[2] / 100);
 const toGame = (v) => [+(v.x * 100).toFixed(2), +(v.y * 100).toFixed(2), +(-v.z * 100).toFixed(2)];
 const deg = THREE.MathUtils.degToRad;
 
+// per-launch API token (server.py writes it into index.html; /api/* refuses calls without it)
+const editorToken = document.querySelector('meta[name="editor-token"]')?.content || '';
 async function api(cmd, args = {}) {
-  const r = await fetch('/api/' + cmd, { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                          body: JSON.stringify(args) });
+  const r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args),
+                                          headers: { 'Content-Type': 'application/json', 'X-Editor-Token': editorToken } });
   const j = await r.json();
   if (!j.ok) throw new Error(j.error);
   return j.result;

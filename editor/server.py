@@ -6,20 +6,27 @@ Serves the editor UI (editor/web) and a JSON API: POST /api/<command> with the a
 {"ok": true, "result": ...} or {"ok": false, "error": "..."} (the commands in editor/commands.py; GET /api/help lists
 them). GET /model/<LEVEL>/<MODEL>.glb converts and serves a model; GET /audio/<LEVEL>/<sample>.wav and
 /audio/<LEVEL>/<BANK>/<line>.wav decode a sound of the level's sound cache (studio.py). Only listens on 127.0.0.1.
+
+Cross-site protection: every request must carry Host 127.0.0.1:<port> / localhost:<port> (DNS rebinding) and no
+foreign Origin; /api/* calls also need Content-Type application/json (POST) and the per-launch token in the
+X-Editor-Token header. The token is put into index.html as <meta name="editor-token">; other local clients (the MCP
+server, test scripts) read it from there - see mcp_server.editor_token().
 """
 from __future__ import annotations
 
 import argparse
+import hmac
 import importlib
 import json
 import mimetypes
 import os
+import secrets
 import sys
 import threading
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import unquote
+from urllib.parse import unquote, urlsplit
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -31,6 +38,7 @@ from conflict_ds_tools.archive import find_game_dir  # noqa: E402
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
 mimetypes.add_type("text/javascript", ".js")
 mimetypes.add_type("model/gltf-binary", ".glb")
+TOKEN_HEADER = "X-Editor-Token"
 
 
 
@@ -39,6 +47,7 @@ class Editor:
         self.session = Session(data_dir, game_dir)
         self.models = ModelCache(data_dir, cache_dir)
         self.lock = threading.Lock()  # one command at a time
+        self.token = secrets.token_urlsafe(32)  # per launch: /api/* calls must send it (X-Editor-Token)
         self.commands_time = os.path.getmtime(commands.__file__)
 
     def reload_commands(self):
@@ -72,6 +81,44 @@ def make_handler(editor: Editor):
             self.end_headers()
             self.wfile.write(data)
 
+        def deny(self, code, error):
+            self.close_connection = True
+            return self.send(code, {"ok": False, "error": error})
+
+        def allowed_hosts(self):
+            port = self.server.server_address[1]
+            return {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+        def check_origin(self):
+            """Host must be this server (DNS rebinding) and any Origin one of its own. Returns False after denying."""
+            hosts = self.allowed_hosts()
+            if (self.headers.get("Host") or "").lower() not in hosts:
+                self.deny(403, "bad Host header")
+                return False
+            origin = self.headers.get("Origin")
+            if origin is not None:
+                o = urlsplit(origin)
+                if o.scheme != "http" or (o.netloc or "").lower() not in hosts:
+                    self.deny(403, "cross-origin request refused")
+                    return False
+            return True
+
+        def check_api(self, post):
+            """/api/* only: JSON body (POST) and the per-launch token. Returns False after denying."""
+            if post:
+                ctype = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+                if ctype != "application/json":
+                    self.deny(415, "Content-Type must be application/json")
+                    return False
+            if not hmac.compare_digest((self.headers.get(TOKEN_HEADER) or "").encode(), editor.token.encode()):
+                self.deny(403, "missing or wrong editor token")
+                return False
+            return True
+
+        def do_OPTIONS(self):  # no CORS: preflights fail
+            if self.check_origin():
+                self.deny(405, "method not allowed")
+
         def api(self, name, args):
             try:
                 with editor.lock:
@@ -86,8 +133,12 @@ def make_handler(editor: Editor):
                 return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
         def do_POST(self):
+            if not self.check_origin():
+                return
             if not self.path.startswith("/api/"):
                 return self.send(404, {"ok": False, "error": "not found"})
+            if not self.check_api(post=True):
+                return
             length = int(self.headers.get("Content-Length") or 0)
             try:
                 args = json.loads(self.rfile.read(length) or b"{}")
@@ -96,8 +147,12 @@ def make_handler(editor: Editor):
             self.send(200, self.api(self.path[5:], args))
 
         def do_GET(self):
+            if not self.check_origin():
+                return
             path = unquote(self.path.split("?")[0])
             if path.startswith("/api/"):
+                if not self.check_api(post=False):
+                    return
                 return self.send(200, self.api(path[5:], {}))
             if path.startswith("/audio/"):
                 # /audio/<LEVEL>/<sample>.wav (an ambient sound's file name) or /audio/<LEVEL>/<BANK>/<line>.wav
@@ -176,7 +231,11 @@ def make_handler(editor: Editor):
             if not inside or not os.path.isfile(full):
                 return self.send(404, b"not found", "text/plain")
             with open(full, "rb") as f:
-                self.send(200, f.read(), mimetypes.guess_type(full)[0] or "application/octet-stream")
+                body = f.read()
+            if rel == "index.html":   # the page gets this launch's API token
+                body = body.replace(b"<head>", b'<head>\n<meta name="editor-token" content="%s">'
+                                    % editor.token.encode(), 1)
+            self.send(200, body, mimetypes.guess_type(full)[0] or "application/octet-stream")
 
     return Handler
 
