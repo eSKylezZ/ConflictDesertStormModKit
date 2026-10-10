@@ -1257,6 +1257,7 @@ setInterval(async () => {
   polling = true;
   try {
     const h = await api('history');
+    dirty = !!h.dirty;
     if (knownRev !== null && h.revision !== knownRev) {
       const key = `${h.level}|${h.mission ? h.mission.join('/') : ''}`;
       if (key !== viewKey && h.level) {
@@ -1270,8 +1271,18 @@ setInterval(async () => {
   } catch { /* the server is restarting */ } finally { polling = false; }
 }, 1500);
 
+// Unsaved changes: the session's 'dirty' (updateHistory, the poll). Opening another level / mission or leaving the page
+// asks first.
+let dirty = false;
+async function confirmDiscard(what) {
+  try { dirty = !!(await api('history')).dirty; } catch { /* the last known state */ }
+  return !dirty || confirm(`The current level has unsaved changes (Save as mod / Save as mission keeps them).\n\n${what} anyway and lose them?`);
+}
+window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
 async function updateHistory() {
   const h = await api('history');
+  dirty = !!h.dirty;
   knownRev = h.revision; viewKey = `${h.level}|${h.mission ? h.mission.join('/') : ''}`;
   $('undo').disabled = !h.undo.length; $('redo').disabled = !h.redo.length;
   $('undo').title = h.undo.length ? `Undo: ${h.undo.at(-1)} (Ctrl+Z)` : 'Undo (Ctrl+Z)';
@@ -1335,7 +1346,8 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 });
 
 // ---- commands from the UI ----
-async function openLevel(name) {
+async function openLevel(name, ask = true) {
+  if (ask && !await confirmDiscard(`Open ${name}`)) return status('kept the unsaved changes');
   status(`opening ${name}…`);
   await run('open_level', { level: name });
   level = name; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
@@ -1366,6 +1378,7 @@ $('nl-make').onclick = async (e) => {
   e.preventDefault();
   const form = $('newlevel-dialog').querySelector('form');
   if (!form.reportValidity()) return;
+  if (!await confirmDiscard('Create a new level')) return status('kept the unsaved changes');
   try {
     const r = await run('new_level', { environment: $('nl-env').value, mod: $('nl-mod').value.trim(),
                                        name: $('nl-name').value.trim(), size: +$('nl-size').value }, 'creating the level…');
@@ -1390,6 +1403,7 @@ $('o-open').onclick = async (e) => {
   const v = $('o-list').value;
   if (!v) return;
   const m = JSON.parse(v);
+  if (!await confirmDiscard(`Open ${m.name}`)) return status('kept the unsaved changes');
   $('open-dialog').close();
   status(`opening ${m.name}…`);
   const r = await run('open_mission', m);
@@ -3471,4 +3485,16 @@ window.dse = {
 const levels = await api('list_levels');
 for (const l of levels) $('level').add(new Option(l, l));
 $('level').value = levels.includes('MISSION1') ? 'MISSION1' : levels[0];
-openLevel($('level').value);
+// The server keeps its session when the page is reloaded / reopened: unsaved changes there are shown, not replaced by a
+// fresh copy of the level, unless the user lets them go.
+const startH = await api('history').catch(() => null);
+const startName = startH?.mission ? startH.mission[1] : startH?.level;
+if (startH?.level && startH.dirty && !confirm(`The editor still has unsaved changes in ${startName}.\n\n`
+    + `OK: discard them and open ${$('level').value}. Cancel: keep working on ${startName}.`)) {
+  level = startH.level;
+  if (levels.includes(level)) $('level').value = level;
+  await buildScene(true); await updateHistory();
+  const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
+  if (hero) focusOn(toThree(hero.pos));
+  status(`${startName}: unsaved changes kept`);
+} else openLevel($('level').value, false);
