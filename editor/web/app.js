@@ -127,9 +127,41 @@ let level = null;
 function model(name) {
   const key = name.toUpperCase();
   if (!modelCache.has(key))
-    modelCache.set(key, loader.loadAsync(`/model/${level}/${encodeURIComponent(key)}.glb`).then((g) => g.scene)
+    modelCache.set(key, loader.loadAsync(`/model/${level}/${encodeURIComponent(key)}.glb`).then((g) => keepTree(g.scene))
                                 .catch(() => null));
   return modelCache.get(key);
+}
+// Level switch: the cached originals are freed by the next buildScene(true), once their clones have left the scene
+// (freed at once, a frame drawn in between would upload them again).
+const staleModels = [];
+function clearModelCache() { staleModels.push(...modelCache.values()); modelCache.clear(); }
+function disposeStaleModels() {
+  for (const p of staleModels.splice(0)) p.then((m) => { if (m) disposeObject(m, true); });
+}
+
+// ---- GPU memory: objects leaving the scene free their geometries, materials and textures (clearGroup) - except
+// resources that outlive one build: module-level geometries / materials (keep) and everything of a cached model
+// (keepTree: clones share its geometry and materials) or of texCache.
+const kept = new WeakSet();
+function keep(x) { kept.add(x); return x; }
+function keepTree(root) {
+  root.traverse((x) => {
+    if (x.geometry) kept.add(x.geometry);
+    for (const m of [].concat(x.material || [])) { kept.add(m); for (const v of Object.values(m)) if (v?.isTexture) kept.add(v); }
+  });
+  return root;
+}
+function disposeObject(root, all = false) {       // all: kept resources too (a cached model being dropped)
+  root.traverse((x) => {
+    if (x.geometry && (all || !kept.has(x.geometry))) x.geometry.dispose();
+    if (x.isSkinnedMesh) x.skeleton.dispose();      // its bone texture; every clone has its own skeleton
+    if (x.isInstancedMesh) x.dispose();             // instance matrix / colour buffers (not part of the geometry)
+    for (const m of [].concat(x.material || [])) {
+      if (!all && kept.has(m)) continue;
+      for (const v of Object.values(m)) if (v?.isTexture && (all || !kept.has(v))) v.dispose();
+      m.dispose();
+    }
+  });
 }
 
 // ---- building the overlays from the scene command ----
@@ -137,13 +169,13 @@ let data = null;
 const byLine = new Map();       // record line -> Object3D
 const objectColor = (o) => /^HERO/i.test(o.model) ? 0x4fd16b : /^IRAQ|Iraqi|^RU_|Russian/i.test(o.model + o.unit) ? 0xe05050
   : /VEH|TRUCK|TANK|BMP|T62|T72|HELI|HIND|BLACKHAWK|UH60|A10|MIG/i.test(o.model + o.unit) ? 0x5b8ff0 : 0xe0c040;
-const coneGeo = new THREE.ConeGeometry(0.35, 1.4, 10).translate(0, 0.7, 0);
-const ringGeo = new THREE.RingGeometry(0.45, 0.6, 24).rotateX(-Math.PI / 2).translate(0, 0.04, 0);
-const facingGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.05, 0.6), new THREE.Vector3(0, 0.05, 1.3)]);
-const ballGeo = new THREE.SphereGeometry(0.25, 10, 8);
+const coneGeo = keep(new THREE.ConeGeometry(0.35, 1.4, 10).translate(0, 0.7, 0));
+const ringGeo = keep(new THREE.RingGeometry(0.45, 0.6, 24).rotateX(-Math.PI / 2).translate(0, 0.04, 0));
+const facingGeo = keep(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.05, 0.6), new THREE.Vector3(0, 0.05, 1.3)]));
+const ballGeo = keep(new THREE.SphereGeometry(0.25, 10, 8));
 
-function clearGroup(g) {
-  for (const c of [...g.children]) { g.remove(c); }
+function clearGroup(g, except = null) {
+  for (const c of [...g.children]) { if (c === except) continue; g.remove(c); disposeObject(c); }
 }
 function marker(geo, color, rec, cat) {
   const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
@@ -163,6 +195,7 @@ async function buildScene(fresh) {
   if (fresh) { exitCamView(); logicInfo = null; if (!$('atmos').hidden) openAtmos().catch(() => {}); }
   pickable.length = 0; byLine.clear();
   for (const k of Object.keys(groups)) if (k !== 'world' || fresh) clearGroup(groups[k]);
+  if (fresh) disposeStaleModels();
   for (const [key] of LAYERS) if (data[key] || ['world', 'routes'].includes(key)) $('count-' + key).textContent = key === 'world' ? data.zones.length
     : key === 'routes' ? data.routes.length : (data[key] || []).length;
   // World pieces go where their scene record puts them (all at 0 in the campaign; MP_MISSION1's is offset 160 m).
@@ -250,8 +283,8 @@ async function buildScene(fresh) {
 
 // Switches: an orange keypad box, a dashed line to each door it drives (red box when a door / its region is gone).
 // Emitters: a ball in the particle colour with an arrow along the mean particle velocity; faint when off at the start.
-const switchGeo = new THREE.BoxGeometry(0.3, 0.45, 0.12).translate(0, 1.2, 0);
-const emitterGeo = new THREE.SphereGeometry(0.3, 12, 8);
+const switchGeo = keep(new THREE.BoxGeometry(0.3, 0.45, 0.12).translate(0, 1.2, 0));
+const emitterGeo = keep(new THREE.SphereGeometry(0.3, 12, 8));
 function drawInteractive() {
   for (const w of data.switches || []) {
     const m = marker(switchGeo, w.missing.length ? 0xff3030 : 0xff8c3a, w, 'switches');
@@ -340,7 +373,7 @@ const texCache = new Map();
 function gameTexture(name) {
   if (!texCache.has(name)) {
     texCache.set(name, api('texture_png', { name }).then((url) => {
-      const t = new THREE.TextureLoader().load(url);
+      const t = keep(new THREE.TextureLoader().load(url));
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
       return t;
     }).catch(() => null));
@@ -419,7 +452,7 @@ function addRoadMesh(holder, p) {
 let roadOpts = null, roadClicks = [];
 const roadPreview = new THREE.Group(); scene3.add(roadPreview);
 function drawRoadPreview() {
-  roadPreview.clear();
+  clearGroup(roadPreview);
   const dot = new THREE.SphereGeometry(0.4, 10, 8), mat = new THREE.MeshBasicMaterial({ color: 0xffd23f, depthTest: false });
   for (const p of roadClicks) { const s = new THREE.Mesh(dot, mat); s.position.copy(p); s.renderOrder = 11; roadPreview.add(s); }
   if (roadClicks.length > 1) {
@@ -894,7 +927,7 @@ async function placeAt(point, entry = placing) {
 
 // ---- drag from the library: a see-through preview follows the surface under the cursor, drop places it ----
 let dragEntry = null, ghost = null, ghostFor = null;
-const ghostMat = new THREE.MeshBasicMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.45, depthWrite: false });
+const ghostMat = keep(new THREE.MeshBasicMaterial({ color: 0x9fd0ff, transparent: true, opacity: 0.45, depthWrite: false }));
 const ghostCone = new THREE.Mesh(coneGeo, ghostMat);
 function surfaceAt(clientX, clientY) {
   const r = renderer.domElement.getBoundingClientRect();
@@ -906,7 +939,7 @@ async function ghostModel(e) {             // the template's model from its own 
   const key = e.prefab ? `prefab/${e.prefab}` : e.kit ? `kit/${e.name}` : `${e.level}/${e.model.toUpperCase()}`;
   if (ghostFor === key) return ghost;
   ghostFor = key;
-  if (ghost) scene3.remove(ghost);
+  if (ghost) { scene3.remove(ghost); disposeObject(ghost); }   // its model was loaded for it alone (not cached)
   ghost = new THREE.Group(); ghost.add(ghostCone.clone()); scene3.add(ghost); ghost.visible = false;
   if (e.prefab) return ghost;              // a group: the cone marks where its centre goes
   const want = ghost;
@@ -945,7 +978,7 @@ renderer.domElement.addEventListener('drop', async (ev) => {
 // ---- selection + properties ----
 let selection = null;          // {line} or {route: index}
 const many = new Set();        // objects selected together (Shift+click): the Layer box applies to all of them
-const selMark = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide });
+const selMark = keep(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
 const multiBoxes = new THREE.Group(); scene3.add(multiBoxes);
 function markSelected() {      // a white ring under every object of a multi-selection, a white box round every prop
   for (const h of groups.objects.children) {
@@ -954,7 +987,7 @@ function markSelected() {      // a white ring under every object of a multi-sel
     if (on && !ring) { ring = new THREE.Mesh(new THREE.RingGeometry(0.65, 0.8, 24).rotateX(-Math.PI / 2).translate(0, 0.05, 0), selMark); ring.name = 'multi'; h.add(ring); }
     if (ring) ring.visible = on;
   }
-  for (const b of [...multiBoxes.children]) { multiBoxes.remove(b); b.geometry.dispose(); }
+  clearGroup(multiBoxes);
   for (const line of many) {
     const h = data?.props.some((p) => p.line === line) && byLine.get(line);
     if (h) multiBoxes.add(new THREE.BoxHelper(h, 0xffffff));
@@ -1202,7 +1235,7 @@ setInterval(async () => {
     if (knownRev !== null && h.revision !== knownRev) {
       const key = `${h.level}|${h.mission ? h.mission.join('/') : ''}`;
       if (key !== viewKey && h.level) {
-        level = h.level; modelCache.clear(); clearGroup(groups.world); hiddenLayers.clear();
+        level = h.level; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
         if ($('level').value !== h.level) $('level').value = h.level;
         await buildScene(true); await select(null);
       } else await refresh();
@@ -1280,7 +1313,7 @@ renderer.domElement.addEventListener('dblclick', (e) => {
 async function openLevel(name) {
   status(`opening ${name}…`);
   await run('open_level', { level: name });
-  level = name; modelCache.clear(); clearGroup(groups.world); hiddenLayers.clear();
+  level = name; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
   await buildScene(true);
   await updateHistory();
   const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
@@ -1312,7 +1345,7 @@ $('nl-make').onclick = async (e) => {
     const r = await run('new_level', { environment: $('nl-env').value, mod: $('nl-mod').value.trim(),
                                        name: $('nl-name').value.trim(), size: +$('nl-size').value }, 'creating the level…');
     $('newlevel-dialog').close();
-    level = $('nl-env').value; modelCache.clear(); clearGroup(groups.world); hiddenLayers.clear();
+    level = $('nl-env').value; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
     await buildScene(true); await updateHistory();
     focusOn(toThree(r.start)); await select(null);
     status(`new level ${r.mission[1]} (Mods\${r.mission[0]}): Terrain… to shape the ground, Library to add props`);
@@ -1335,7 +1368,7 @@ $('o-open').onclick = async (e) => {
   $('open-dialog').close();
   status(`opening ${m.name}…`);
   const r = await run('open_mission', m);
-  level = r.base; modelCache.clear(); clearGroup(groups.world); hiddenLayers.clear();
+  level = r.base; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
   await buildScene(true); await updateHistory(); await select(null);
   const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
   if (hero) focusOn(toThree(hero.pos));
@@ -1732,7 +1765,7 @@ let pickMode = null;            // {hint, accept(userData), pick(userData), fini
 const patrolPreview = new THREE.Group(); scene3.add(patrolPreview);
 function startPick(mode) { pickMode = mode; renderer.domElement.style.cursor = 'crosshair'; status(mode.hint); }
 function endPick(cancelled) {
-  const m = pickMode; pickMode = null; renderer.domElement.style.cursor = ''; patrolPreview.clear();
+  const m = pickMode; pickMode = null; renderer.domElement.style.cursor = ''; clearGroup(patrolPreview);
   if (cancelled) status('picking cancelled');
   m?.done?.(cancelled);
 }
@@ -1765,7 +1798,7 @@ function addCameraGuides(c) {
     const t = new THREE.Mesh(new THREE.BoxGeometry(0.45, 0.45, 0.45), new THREE.MeshBasicMaterial({ color: 0xd9a8ff, wireframe: true }));
     t.position.copy(look);
     t.userData = { line: c.line, cat: 'cameras', camTarget: true,
-                   update: () => { line.geometry = new THREE.BufferGeometry().setFromPoints([eye, t.position]); line.computeLineDistances(); } };
+                   update: () => { line.geometry.dispose(); line.geometry = new THREE.BufferGeometry().setFromPoints([eye, t.position]); line.computeLineDistances(); } };
     pickable.push(t); groups.cameras.add(t); camTargets.set(c.line, t);
   }
 }
@@ -1935,7 +1968,7 @@ $('patrol-btn').onclick = () => {
   showLayer('waypoints');
   const picked = [];
   const redraw = () => {
-    patrolPreview.clear();
+    clearGroup(patrolPreview);
     const pts = [o.pos, ...picked.map((w) => w.pos)].map((p) => lift(toThree(p), 0.25));
     if (pts.length < 2) return;
     const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
@@ -2368,23 +2401,16 @@ const walkFoot = new THREE.Group(); walkGroup.add(walkFoot);
   $('layers').appendChild(row);
 }
 let walkLevel = null;
-const flatPlane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
+const flatPlane = keep(new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2));
 const overlayMat = (color, opacity) => new THREE.MeshBasicMaterial({ color, transparent: true, opacity, depthWrite: false,
   side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
-function disposeTree(g) {
-  for (const c of [...g.children]) {
-    if (c === walkFoot) continue;
-    g.remove(c);
-    c.traverse((x) => { if (x.geometry && x.geometry !== flatPlane) x.geometry.dispose(); if (x.material) [].concat(x.material).forEach((m) => m.dispose()); });
-  }
-}
 async function buildWalkMap(fresh = false) {
   if (!$('walk-toggle').checked || !level) return;
   const key = `${level}|${viewKey}`;
   const w = await run('walkability_grid', { cells: fresh || walkLevel !== key });
   if (w.cells) {
     walkLevel = key;
-    disposeTree(walkGroup);
+    clearGroup(walkGroup, walkFoot);
     const mtx = new THREE.Matrix4(), q = new THREE.Quaternion(), sc = new THREE.Vector3();
     const walk = w.cells.filter((c) => c.walkable), small = w.cells.filter((c) => !c.walkable && c.size <= 2000);
     const big = w.cells.filter((c) => !c.walkable && c.size > 2000);
@@ -2415,7 +2441,7 @@ async function buildWalkMap(fresh = false) {
   buildFootprints(w.footprints);
 }
 function buildFootprints(lines) {
-  disposeTree(walkFoot);
+  clearGroup(walkFoot);
   for (const line of lines) {
     const rec = findRec(line);
     if (!rec) continue;
@@ -2937,8 +2963,8 @@ function labelSprite(text, colour) {
   s.scale.set(1.6, 0.8, 1); s.renderOrder = 10;
   return s;
 }
-const silhouetteGeo = new THREE.CapsuleGeometry(0.28, 1.1, 4, 10).translate(0, 0.83, 0);
-const padGeo = new THREE.CylinderGeometry(0.75, 0.75, 0.06, 28).translate(0, 0.03, 0);
+const silhouetteGeo = keep(new THREE.CapsuleGeometry(0.28, 1.1, 4, 10).translate(0, 0.83, 0));
+const padGeo = keep(new THREE.CylinderGeometry(0.75, 0.75, 0.06, 28).translate(0, 0.03, 0));
 function spawnMarker(pos, colour, text) {
   const g = new THREE.Group(); g.position.copy(toThree(pos));
   const mat = new THREE.MeshBasicMaterial({ color: colour, transparent: true, opacity: 0.55, depthWrite: false });
@@ -2949,7 +2975,7 @@ function spawnMarker(pos, colour, text) {
 }
 async function loadSpawns(openPanel = true) {
   spawnInfo = await api('multiplayer_info');
-  spawnGroup.clear();
+  clearGroup(spawnGroup);
   const n = spawnInfo.max_players;
   for (const p of spawnInfo.coop) spawnMarker(p.pos, PLAYER_COLOUR[p.slot], `P${p.slot + 1}`);
   for (const [side, pts] of Object.entries(spawnInfo.deathmatch || {}))
@@ -3005,7 +3031,7 @@ $('sp-mode').onchange = showSpawnMode;
 $('sp-add-allied').onclick = () => addDmSpawn('allied');
 $('sp-add-iraqi').onclick = () => addDmSpawn('iraqi');
 $('spawns-btn').onclick = () => { if ($('spawns').hidden) loadSpawns().catch((e) => status(e.message, true)); else { $('spawns').hidden = true; endGroundPick(); } };
-$('sp-close').onclick = () => { $('spawns').hidden = true; endGroundPick(); spawnGroup.clear(); };
+$('sp-close').onclick = () => { $('spawns').hidden = true; endGroundPick(); clearGroup(spawnGroup); };
 
 // ---- export mod package ----
 $('export-btn').onclick = async () => {
@@ -3135,8 +3161,8 @@ const mineRing = new THREE.Mesh(new THREE.RingGeometry(0.94, 1, 64).rotateX(-Mat
                                 new THREE.MeshBasicMaterial({ color: 0xff3030, depthTest: false, transparent: true, opacity: 0.9 }));
 mineRing.visible = false; mineRing.renderOrder = 11; scene3.add(mineRing);
 const minePreview = new THREE.Group(); scene3.add(minePreview);
-const mineDotGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.08, 12);
-const mineDotMat = new THREE.MeshBasicMaterial({ color: 0xff3030 });
+const mineDotGeo = keep(new THREE.CylinderGeometry(0.22, 0.22, 0.08, 12));
+const mineDotMat = keep(new THREE.MeshBasicMaterial({ color: 0xff3030 }));
 function mineBrushOn() { return $('mf-brush').classList.contains('on'); }
 function groundHit(e) {
   const r = renderer.domElement.getBoundingClientRect();
