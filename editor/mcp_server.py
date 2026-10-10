@@ -43,8 +43,18 @@ Tactics: soldier_detection_profiles (enemy sight ranges / facing for stealth pat
 (anti-tank mines), emplacement_presets / place_emplacement (sandbag nest + tripod gun + gunner), set_air_support
 (laser-designated strikes compiled into the script), tactics_info. History: history (timeline of named changes) /
 history_jump (straight to any step).
+Working safely: status (what is open / unsaved / running; answers while busy) -> search (text, kind, near a point,
+paged) -> references (what uses a record: crews, doors, layers, rules, objectives, the base DLL, the Lua - read it
+before deleting) -> preview (any command, rolled back: shows exactly what it would change) -> batch (several commands
+as ONE undo step, all or nothing; "$0.line" passes step 0's result on) or set_fields (several fields of one record) ->
+check_mission (one issue list: errors / warnings with the fixing command) -> mission_report (changes against the base
+level; revert_record undoes one record's changes) -> save_mission (backs up the files it overwrites).
+Seeing: screenshot (the editor's 3D view as an image - aim it at a line, route marker, point or camera position; needs
+the editor page open) and focus (selects and frames a record for the user). Lost work: recovery_list /
+recovery_restore (copies written every 5 minutes of unsaved edits).
 Positions are game units: centimetres, y up. Records are addressed by their line in the scene file - lines shift after
-inserts and deletes, so re-read them (scene / find) after changing the scene. Every change can be undone (undo)."""
+inserts and deletes, so re-read them (search / find) after changing the scene. Every scene change can be undone (undo);
+an edit that changes nothing is reported as unchanged and leaves no undo step."""
 
 
 def editor_token(url, timeout=10):
@@ -105,22 +115,52 @@ class Standalone:
             raise ValueError(str(e)) from None
 
 
-def tool_list(backend):
+# Older editors' help has no writes_files flag: the commands that write files / start things
+_WRITES_FALLBACK = {"save_mod", "save_mission", "save_script", "play", "create_weapon", "create_skin", "upload_file",
+                    "open_level", "open_mission", "undo", "redo", "copy", "new_level", "kit_preview", "record_set",
+                    "record_new", "record_revert", "record_delete", "string_set", "string_revert", "save_minimap",
+                    "save_prefab", "delete_prefab", "campaign_save", "campaign_reorder", "briefing_burn_map",
+                    "export_mod_zip"}
+
+
+def _read_only(name, info):
+    return not info["changes_level"] and not info.get("writes_files", name in _WRITES_FALLBACK)
+
+
+def tool_list(backend, read_only=False):
     tools = []
     for name, info in sorted(backend.call("help", {}).items()):
-        props = {arg: {"description": desc} for arg, desc in info["args"].items()}
+        if info.get("internal"):
+            continue
+        ro = _read_only(name, info)
+        if read_only and not ro:
+            continue
+        types = info.get("types") or {}
+        props = {arg: {**types.get(arg, {}), "description": desc} for arg, desc in info["args"].items()}
         tools.append({
             "name": name,
             "description": info["description"] + (" (changes the scene - undo reverts it)" if info["changes_level"] else ""),
             "inputSchema": {"type": "object", "properties": props, "required": info.get("required", [])},
-            "annotations": {"readOnlyHint": not info["changes_level"] and name not in
-                            ("save_mod", "save_mission", "save_script", "play", "create_weapon", "create_skin",
-                             "upload_file", "open_level", "open_mission", "undo", "redo", "copy", "new_level",
-                             "kit_preview", "record_set", "record_new", "record_revert", "record_delete", "string_set",
-                             "string_revert", "save_minimap", "save_prefab", "delete_prefab", "campaign_save",
-                             "campaign_reorder", "briefing_burn_map", "export_mod_zip")},
+            # scene changes are undoable (not destructive); file writes aren't
+            "annotations": {"readOnlyHint": ro, "destructiveHint": not ro and not info["changes_level"],
+                            "openWorldHint": False},
         })
     return tools
+
+
+def call_result(value):
+    """A command's result as MCP content: JSON text (+ structuredContent for objects); an {"image": {data, mimeType}}
+    in it becomes an image block."""
+    content = []
+    if isinstance(value, dict) and isinstance(value.get("image"), dict) and value["image"].get("data"):
+        img = value["image"]
+        content.append({"type": "image", "data": img["data"], "mimeType": img.get("mimeType", "image/jpeg")})
+        value = {k: v for k, v in value.items() if k != "image"}
+    content.insert(0, {"type": "text", "text": json.dumps(value, indent=1, default=str)})
+    out = {"content": content, "isError": False}
+    if isinstance(value, dict):
+        out["structuredContent"] = json.loads(json.dumps(value, default=str))
+    return out
 
 
 def main():
@@ -129,6 +169,8 @@ def main():
     ap.add_argument("--standalone", action="store_true", help="own session instead of the running editor")
     ap.add_argument("--data", help="extracted game folder (standalone)")
     ap.add_argument("--game", help="game folder (standalone)")
+    ap.add_argument("--read-only", action="store_true",
+                    help="offer only tools that change nothing (no scene edits, no saving, no starting the game)")
     a = ap.parse_args()
     backend = Standalone(a.data, a.game) if a.standalone else Editor(a.url)
 
@@ -164,12 +206,13 @@ def main():
             elif method == "ping":
                 result = {}
             elif method == "tools/list":
-                result = {"tools": tool_list(backend)}
+                result = {"tools": tool_list(backend, a.read_only)}
             elif method == "tools/call":
                 try:
-                    value = backend.call(params.get("name"), params.get("arguments") or {})
-                    result = {"content": [{"type": "text", "text": json.dumps(value, indent=1, default=str)}],
-                              "isError": False}
+                    name = params.get("name")
+                    if a.read_only and name not in {t["name"] for t in tool_list(backend, True)}:
+                        raise ValueError(f"{name} changes things - this MCP server was started with --read-only")
+                    result = call_result(backend.call(name, params.get("arguments") or {}))
                 except (ValueError, RuntimeError) as e:
                     result = {"content": [{"type": "text", "text": str(e)}], "isError": True}
             else:

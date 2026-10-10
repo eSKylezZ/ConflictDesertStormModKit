@@ -314,6 +314,17 @@ def has_alpha(rgba):
     return rgba[3::4].count(255) != len(rgba) // 4
 
 
+def encode_tga(w, h, rgba):
+    """Uncompressed true-colour TGA, 32 bit BGRA, rows bottom up - the layout of the game's own normal maps."""
+    px = bytearray(w * h * 4)
+    for y in range(h):
+        src = rgba[(h - 1 - y) * w * 4:(h - y) * w * 4]
+        row = bytearray(src)
+        row[0::4], row[2::4] = src[2::4], src[0::4]
+        px[y * w * 4:(y + 1) * w * 4] = row
+    return struct.pack("<BBBHHBHHHHBB", 0, 0, 2, 0, 0, 0, 0, 0, w, h, 32, 8) + bytes(px)
+
+
 def flip_green(rgba):
     b = bytearray(rgba)
     b[1::4] = bytes(255 - x for x in b[1::4]) if np is None else \

@@ -37,6 +37,9 @@ soldier stays who he is), new recruits on the SOLDIER row, new weapons on the MA
 | **PinkSAS** | A pink uniform for Bradley: UNIFORM "SAS (PINK)" | `.skin` with `uniform name`: a new uniform for a soldier, with its own portrait | `PinkSAS.skin`, `SASPink_01.dds`, `PinkPortrait.dds` ([2](../docs/MAKING_MODS.md#2-your-first-mod-a-new-uniform), [4.2](../docs/MAKING_MODS.md#42-a-portrait-for-the-soldier-panel-pinksas)) |
 | **WinterDelta** | Winter camouflage for Foley: UNIFORM "US DELTA (WINTER)" | A Delta uniform, the soldier named by role | `WinterFoley.skin`, `DeltaWinter_04.dds` ([2](../docs/MAKING_MODS.md#2-your-first-mod-a-new-uniform)) |
 | **BigHeadUniform** | Bradley in olive with a bigger head: UNIFORM "SAS (BIG HEAD)" | `.skin` with `body`: a uniform that brings its own body mesh, only while it's worn | `BigHeadUniform.skin`, `BigHead_UK.dds`, `BIGHEAD_BRADLEY.evo` ([4.5](../docs/MAKING_MODS.md#45-a-uniform-with-its-own-body-bigheaduniform)) |
+| **RadioSAS** | Bradley as a radio operator: UNIFORM "SAS (RADIO)" | `.skin` with `voice` and `voice folder`: a uniform with its own voice - the Delta actor's lines over a crackly radio | `RadioSAS.skin`, `RadioSAS_01.dds`, `radio\Bradley_line01.wav` … `47` ([4.5c](../docs/MAKING_MODS.md#45c-a-voice-of-its-own-radiosas)) |
+| **RadioCutscene** | Mission 1's opening cutscene with all the speech over a crackly radio, music and effects untouched | Replacing a cutscene's sound per actor: `Sound\SAS\` and `Sound\Delta\` + the scene's file name; `ABOUT.md` has the steps | `Sound\SAS\CS_M01_S01.psf`, `Sound\Delta\CS_M01_S01.psf`, `ABOUT.md` ([4.5d](../docs/MAKING_MODS.md#45d-cutscene-and-objective-audio-radiocutscene)) |
+| **QuiltedSAS** | Bradley in a padded navy jacket: UNIFORM "SAS (QUILTED)" | `.skin` with `normal map`: a uniform with its own normal map - the quilting catches the light as he turns | `QuiltedSAS.skin`, `QuiltedSAS_01.dds`, `QuiltedSAS_Bump.tga` ([4.5](../docs/MAKING_MODS.md#45-a-uniform-with-its-own-body-bigheaduniform)) |
 | **GoldenEagle** | A gold Desert Eagle that fires with the Barrett's sound | `.weapon`: `texture`, `hud icon`, a `sound` borrowed from another weapon, damage / magazine / hearing range | `GoldenEagle.weapon`, `GoldEagle.dds`, `GoldEagle_Icon.png` ([4.8](../docs/MAKING_MODS.md#48-a-new-look-textures-also-for-extra-parts-goldeneagle-tigersaw), [4.9](../docs/MAKING_MODS.md#49-a-matching-hud--inventory-picture-tigersaw-goldeneagle-silencedsaw)) |
 | **TigerSAW** | A tiger-striped SAW firing 1000 rounds a minute from a 200-round belt | `.weapon`: textures for a two-part model, `hud icon`, own gunshots, `muzzle flash`, rate of fire, `column N` | `TigerSAW.weapon`, `TigerSAW.dds`, `TigerAmmoBox.dds`, `TigerSAW_Icon.png`, `tiger_shot1.wav`, `tiger_shot2.wav`, `tiger_tail.wav` ([4.8](../docs/MAKING_MODS.md#48-a-new-look-textures-also-for-extra-parts-goldeneagle-tigersaw), [4.11](../docs/MAKING_MODS.md#411-your-own-gunshots-tigersaw)) |
 | **SilencedSAW** | M249 SAW (Silenced), blue, with a suppressor on the model and in its picture | `.weapon`: `silenced`, own gunshot, a model made in Blender, `hud icon` | `SilencedSAW.weapon`, `MYSAW.evo`, `SAW_Blue.dds`, `SAW_Silenced_Icon.png`, `shot.wav` (and `SAW_Red.dds` for its commented-out `texture` line) ([4.12](../docs/MAKING_MODS.md#412-silenced-or-unsilenced-silencedsaw-loudmp5), [4.13](../docs/MAKING_MODS.md#413-a-new-model-silencedsaw-loudmp5)) |
@@ -66,6 +69,17 @@ to add a **recruit** instead: another man, with his own face, on the SOLDIER row
 - **Gunshots**: synthesised 16-bit WAVs - record or download your own. To start from the game's sounds:
   `python cli/ds_sound.py wav mission3.sch M16A2 out/`.
 - **Sound bank pack** (LoudMP5): `python cli/ds_sound.py pack mission3.sch REMMINGTON870 BREACHER.sch --rename BREACHER`.
+- **Quilted jacket** (QuiltedSAS): Bradley's texture turned plain navy, with the seams of a diamond pattern darkened on
+  the jacket and trousers (face, hands and boots left alone). The normal map is Bradley's own (`HERO01BUMP_UK_01`)
+  with the padded diamonds added on the same cloth, saved as a 32-bit TGA like the game's.
+- **Radio voice** (RadioSAS): Bradley's 47 voice lines from the Delta (American) actor, each run through a radio
+  effect (thin band, a little distortion and hiss, a squelch click at both ends) and saved as
+  `Bradley_lineNN_….wav`, named like `python cli/ds_sound.py wav mission3.sch Bradley lines/ --accent delta` names them.
+- **Radio cutscene** (RadioCutscene): Mission 1's opening cutscene sound, from the English (SAS) and American (Delta)
+  files. Comparing the two mixes finds where people speak (music and effects are the same in both, only the voices
+  differ); only those stretches get the radio effect, faded in and out, and the rest of the scene stays as it was.
+  By hand: `python cli/ds_sound.py stream` to a WAV, edit it in any audio editor, `python cli/ds_sound.py psf` back
+  (see `ABOUT.md`).
 
 `blender_examples.py` runs inside Blender (started by `build_examples.py`) and does the Blender steps:
 
@@ -93,7 +107,8 @@ to add a **recruit** instead: another man, with his own face, on the SOLDIER row
 - Every file is found by its **name**, so new textures, models and animations need names of their own. A file with a
   game file's name replaces it in every level (the `_` examples).
 - Tables (`.txt`) hold only your new rows. They are added to the game's rows and to other mods' rows, and they
-  can't hold comments.
+  can't hold comments. To change or delete the game's own rows, use `<table>.replace.txt`
+  ([4.22](../docs/MAKING_MODS.md#422-change-or-delete-game-rows-tablereplacetxt)).
 - Keep textures DXT-compressed and no bigger than the game's own.
 - The game keeps only one weapon each of a few kinds. A weapon based on the M16A2 becomes a plain assault rifle
   (only the M16A2 has the grenade launcher), and new weapons can't be based on the frag grenade.

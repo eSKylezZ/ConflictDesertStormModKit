@@ -3,7 +3,8 @@
 This guide takes you from nothing to your own uniform, then your own weapon, then further. You need:
 
 - Conflict: Desert Storm (Steam or GOG) with the [DesertStormFix](https://github.com/eSKylezZ/ConflictDesertStormPatch)
-  plugin installed (`dinput8.dll` next to `DesertStorm.exe`).
+  plugin installed (`dinput8.dll` next to `DesertStorm.exe`). Missions and levels (7), `.replace.txt` tables (4.22),
+  `.strings` texts (4.23) and a `.skin`'s voice or normal map (4.5, 4.5c) need **DesertStormFix 3.0 or later**.
 - A text editor (Notepad is fine).
 - For textures: a paint program that saves `.dds` ([paint.net](https://www.getpaint.net) does it out of the box;
   GIMP 2.10+ too), or this kit's `ds_texture.py`.
@@ -97,6 +98,8 @@ Not there? Open `Mods\DesertStormFix-report.txt` and look for `[fail]` lines tha
 - **A body of its own**: `body = MYBODY` gives whoever wears this skin the body mesh `MYBODY.evo` from your mod
   folder (see 4: made in Blender from that soldier's own body). Only for this skin - other uniforms keep the normal
   body, and nothing of the game is replaced.
+- **A normal map of its own**: `normal map = MyUniform_Bump` (a TGA made with `ds_texture.py normal`, see 4.5).
+- **A voice of its own**: `voice = Delta`, and your own WAV files for any line (see 4.5c).
 
 ## 3. Your first weapon
 
@@ -223,7 +226,99 @@ body         = BIGHEAD_BRADLEY
 ```
 
 He wears that body only with this uniform; any other uniform gives him his normal body back. Recruits (4.3) can have
-a `body` line too.
+a `body` line too. A body from a mod gets the soldier's normal map (the bumps of folds and pockets) unless the skin
+brings its own (below).
+
+**Its own normal map** (QuiltedSAS). The game's normal maps belong to the body, not the uniform: every SAS Bradley has
+`HERO01BUMP_UK_01`, every Delta Bradley `HERO01BUMP_US_01` (`HERO02` Connors, `HERO03` Jones, `HERO04` Foley). A
+uniform with new folds, pouches or straps can bring its own:
+
+1. Start from the soldier's: `python cli/ds_texture.py png extracted\chardata\HERO01BUMP_UK_01.TGA`. It uses the
+   same layout as the uniform texture.
+2. Paint or bake it (256 x 256 like the game's). The game's maps are DirectX style (green = down).
+3. Save it in the game's format: `python cli/ds_texture.py normal MyUniform_Bump.png`. Add `--opengl` if it comes
+   from Blender or another program that makes OpenGL-style maps (green = up).
+4. In the `.skin` file:
+
+```
+texture    = MyUniform_UK
+normal map = MyUniform_Bump        # MyUniform_Bump.tga (or .dds) in the mod folder
+```
+
+That works with or without a `body` line: the plugin gives the skin its own copy of the body for the new normal map,
+so the soldier's other uniforms keep theirs.
+
+#### 4.5c A voice of its own (RadioSAS)
+
+A `.skin` can bring a voice: whoever wears it speaks with it (the VOICE row of the loadout screen shows
+"AUTO - OWN (MOD)"; players can still pick SAS or DELTA there).
+
+1. Save the soldier's lines as WAV files, with the actors you want to start from:
+   `python cli/ds_sound.py wav "<game>\mission3.sch" Bradley lines --accent delta` (or `--accent sas`; the banks are
+   `Bradley`, `Foley`, `Ramirez` for Connors and `Jones`). That gives `Bradley_line01_watch_your_fire.wav` …
+   `Bradley_line47_unused.wav` - the number is what counts, the rest says what the line is (table below).
+2. Listen, then record or edit the ones you want to change. Keep the numbers; any sample rate, mono or stereo.
+3. In the `.skin` file:
+
+```
+voice        = Delta          # the actors for every line you don't replace: SAS or Delta
+voice from   = Bradley        # optional: another squad soldier's lines (Bradley, Foley, Connors, Jones)
+voice line 5 = hello.wav      # one line ...
+voice folder = lines          # ... or every ...lineNN.wav in a folder
+```
+
+`voice = Delta` alone (no WAVs) gives a uniform the American voice by default. Lines you don't replace keep the
+chosen actor, so a partly done voice still works - it just changes speaker on those lines.
+
+**The lines.** All four soldiers have the same 47, with the same numbers, for both actors. Most come in two takes: a
+*loud* one shouted in combat and a *quiet* one used while the squad is calm (fire at will off, nobody shooting, no
+enemy known). For a complete voice record lines 1-36 and 38-46 (45 lines); **37 and 47 are never played**, and **41 /
+42** are two short non-verbal sounds (a grunt / breath, picked at random) that all four soldiers share - replace them
+only if they clash with your voice.
+
+| Line | When he says it | Line | When he says it |
+|---|---|---|---|
+| 1 | "Watch your fire" - you shoot with a squadmate crouched in front of you | 25 | "Man down!" - he sees a squadmate fall |
+| 2 / 6 | Fire at will ON (loud / quiet) | 26 / 33 | Order: everybody down (quiet / loud) |
+| 3 / 27 | Order: everybody up (loud / quiet) | 28 | He destroyed a tank or tracked vehicle (radio) |
+| 4 / 9 | Order: advance to the marker (quiet / loud) | 29 / 14 | Spotted a manned gun - MG nest, AA, SAM (loud / quiet) |
+| 5 / 21 | "Fire in the hole" - throws a grenade / fires the M203 (quiet / loud) | 30 | He destroyed a jet, Scud or gun emplacement |
+| 7 / 23 | Placed C4 or a mine (quiet / loud) | 31 / 13 | Spotted a tank (loud / quiet) |
+| 8 | He destroyed a wheeled vehicle (radio) | 32 / 11 | Spotted a wheeled vehicle (quiet / loud) |
+| 10 | Death cry | 34 / 17 | Spotted a helicopter (loud / quiet) |
+| 12 / 20 | Hold fire - fire at will OFF (quiet / loud) | 35 / 19 | "Negative" - can't reach the marker (loud / quiet) |
+| 15 / 40 | Spotted enemy soldiers (quiet / loud) | 36 | He destroyed a helicopter |
+| 16 / 22 | "Moving" - answers an advance order (loud / quiet) | 37 | never played |
+| 18 | "I'm hit" - wounded (radio) | 38 | "Grenade!" - a grenade lands near him |
+| 24 | Killed an enemy soldier (radio) | 39 | Downed and bleeding out - calls for help, every ~10 s |
+| 41 / 42 | Grunt / breath, shared by all four | 43 / 44 | Order: hold position (quiet / loud) |
+| 45 / 46 | Order: follow me (quiet / loud) | 47 | never played |
+
+"Radio" lines play flat (no direction), as if over the squad radio. Orders are what he says as the leader when you
+control him; the reply lines (16 / 22, 35 / 19) are what he says when you order him. Mission scripts never use these
+lines, and the cutscenes have their own audio (4.5d).
+
+#### 4.5d Cutscene and objective audio (RadioCutscene)
+
+The cutscenes are played by the game engine, not videos; their sound is one file per scene in
+`<game>\Data\Sound\English` (the SAS voices) and `\American` (Delta's): `CS_M01_S01.psf` … for the cutscenes (`CS_T01`
+Training, `CS_OUTRO` the ending) and `OBJ_M1_1A.psf` … for the objective voice-overs. Each file is the whole mix -
+music, effects and every speaker - so a scene is replaced as a whole:
+
+1. `python cli/ds_sound.py stream "<game>\Data\Sound\English\CS_M01_S01.psf" scene.wav` (stereo, 44.1 kHz).
+2. Edit it in an audio editor - put your lines over the original, mute the speech you replace. Keep the length: the
+   pictures don't wait for the sound (a longer file plays on, a shorter one ends early). To find the speech, decode
+   the `American` file too and compare: music and effects are the same in both, so wherever they differ someone
+   talks (the RadioCutscene example's `ABOUT.md` walks through it).
+3. `python cli/ds_sound.py psf scene.wav CS_M01_S01.psf` and put it in your mod as `Sound\SAS\CS_M01_S01.psf` (the
+   SAS version), `Sound\Delta\CS_M01_S01.psf` (the Delta version) or `Sound\CS_M01_S01.psf` (both). Other language
+   folders work too (`Sound\French\…`).
+
+Which version plays follows the game's speech language - in the English game that is the SAS one now that uniforms are
+chosen per soldier (the ModKit's Delta voices are for the squad lines above). Many scenes have no squad speech at all
+and are the same in both folders (Mission 2 S02/S04/S05, 3 S01, 4 S02/S03, all of 5A and 12A, 6 S03/S04, 8, 9, 10 S01,
+11A, the Outro and Training); the rest carry SAS / Delta speech. The texts of what is said are in each mission's
+`MnnStrs.loc` (keys `SPEECHn`, `OBJ_Mn_*`).
 
 #### 4.6 Change a soldier's body for everyone (_BigHead)
 
@@ -284,7 +379,16 @@ python cli/ds_sound.py pack mission3.sch REMMINGTON870 BREACHER.sch --rename BRE
 ```
 
 The level sound caches (`mission1.sch` …) are next to `DesertStorm.exe`. Every `.sch` in a mod folder is added to
-every level.
+every level (banks and samples the level doesn't have yet). An `.sch` **named like a level's cache** (`MISSION1.SCH`)
+instead **replaces** that level's samples with the same id and language; the rest of the level stays as it is.
+
+**Better sound effects from a GameCube disc you own**: the GameCube version keeps every sound effect and voice line
+uncompressed, many at a higher sample rate (11 kHz on PC → 20 or 44.1 kHz). In Blender: **File › Import ›
+Conflict: Desert Storm GameCube Audio (.iso)**, pick the disc image. Or on the command line: `python cli/ds_gc_audio.py "<GameCube
+image>.iso"` (also `.gcm` / `.ciso`; `-g <game folder>` if the registry points at another install) writes
+`<game>\Mods\GameCubeAudio` with one replacement cache per level - only the samples that have a higher rate on the
+GameCube, re-encoded for the PC (it can only play its 4-bit ADPCM). `--list` shows what would change. Each player
+converts their own disc; nothing from it ships with DesertStormFix.
 
 #### 4.11 Your own gunshots (TigerSAW)
 
@@ -353,6 +457,20 @@ faction = Iraqi
 Its model has to be loadable in the mission; where it isn't, ship the game's model files (from the extracted
 files) in the mod.
 
+#### 4.16b Change a game weapon itself
+
+`based on` set to the weapon's **own id** changes the game's weapon in place - every soldier, pick-up and level that
+uses it gets the new numbers, and no new weapon appears:
+
+```
+id            = US_WPN_M16A2
+based on      = US_WPN_M16A2   # the same id: change it, don't copy it
+magazine size = 40
+damage        = 19
+```
+
+The editor's *Records…* window writes these files for you (only the values you changed).
+
 #### 4.17 Anything else in the weapon table
 
 Any column of the game's weapon table (`Weaps.txt`, in `extracted\catalog`) by number, counting from 1 like a
@@ -377,11 +495,108 @@ folder name) unless that's the point of the mod.
 2. Export it under the game's name: `OILDRUM.evo`. For one object only, give the new texture its own name (as here)
    rather than replacing the game texture (4.18), which other models may share.
 
+#### 4.19b What it collides with, and its shadow
+
+The game doesn't collide with the model you see but with a simpler collision mesh, and props cast their shadow from
+a separate shadow mesh. Import with **Helpers** ticked to see both in the `helpers` collection:
+
+- `#BSP_<name>` - the collision. Each face has a **surface**, shown as a material `Surface: <name>`, which picks the
+  footstep sounds and the bullet-hit effects (dirt, sparks, splinters …) and decides what the face stops:
+
+  | Surface | Soldiers | Bullets, grenades, rockets |
+  | --- | --- | --- |
+  | Sand, Metal, Wood, Concrete … (and their `Blocking …` twins) | stopped | stopped |
+  | `Blocking Invisible` / `Invisible` | stopped | fly through |
+  | `Player Barrier` | only your squad is stopped | fly through |
+  | `Enemy Barrier` | only the enemy is stopped | fly through |
+  | Chain Link Fence, Iron Railings, Wood Fence, Hedge, Forest Floor | stopped | fly through |
+  | Water | stopped | bullets fly through, rockets don't |
+
+  So: a solid wall = any normal surface; a wall soldiers can't pass but can shoot through = `Blocking Invisible`;
+  a wall only for the player = `Player Barrier`. (Tested in game: walking into and shooting at walls of Concrete,
+  Blocking Invisible and Player Barrier; the other rows come from the game's code. The panel has these three as
+  **Blocks All / Soldiers Only / Your Squad** buttons.) Each surface also has a `Blocking …`
+  twin, which marks obstacles for the computer-controlled soldiers' route map: plain for ground, floors and ramps
+  they should walk on, Blocking for walls, props and anything they should go around. The game levels come with their
+  route maps already made (`<level>.qtd` / `.rmd`), so a changed level piece blocks everyone straight away but the AI
+  only plans around it once the level's routes are redone - the level editor (`editor/`) does that.
+- `#SHA_<name>` - the shadow mesh. Some props and vehicles have one; a static model (prop, weapon, building) without one
+  gets one when you export a `#SHA_` object with it (the panel's **Shadow Mesh (Hull)** makes one). Keep it low-poly and **closed** (no holes):
+  the game casts no shadow from an open edge.
+
+To change them, edit those objects (move, scale, model a new shape, change face materials) and select them with the
+model when you export. The exporter's **Collision** option:
+
+| Collision | Result |
+| --- | --- |
+| From #BSP_ Objects (default) | the selected `#BSP_` objects are the collision; with none selected the original's is kept |
+| From the Model | every exported part collides with its own mesh (a quick start for a new prop) |
+| Keep the Original | the collision of the model it's based on, whatever you changed |
+| None | nothing collides (soldiers and bullets pass through) |
+
+Faces whose material isn't a surface get the **Default Surface** (Blocking Concrete). Level pieces (whole streets,
+cliffs) work the same way: each piece's collision object is tied to its own part of the level. A new collision object of your
+own: name it `#BSP_` + the model's name and give its faces `Surface: …` materials (or materials named just after a
+surface, e.g. `Metal`). The exporter's report lists the surfaces it wrote. Keep collision simple - boxes and big flat
+faces; every triangle costs time each frame something moves near it.
+
+#### 4.19c Points: muzzle, shell ejection, ladder tops
+
+Some models carry a few points, imported (with **Helpers**) as empties you can move:
+
+| Empty | What it is |
+| --- | --- |
+| `#PT_MUZZLE` | where bullets and tracers leave the gun - just past the end of the barrel (guns, vehicle cannons, rocket pods) |
+| `#PT_LAUNCHER` | the under-barrel grenade launcher's muzzle (M16 + M203) |
+| `#PT_EJECT` | where spent shells fly out; on rocket launchers the back blast |
+| `#PT_LADDER_BOTTOM` / `#PT_LADDER_TOP` | where soldiers get on and off a ladder |
+
+Made the barrel longer or added a suppressor? Move `#PT_MUZZLE` to the new end and select it with the gun when you
+export. A taller ladder needs `#PT_LADDER_TOP` at its new top. Points you don't select keep the original's position.
+
+#### Exporter options worth knowing
+
+- **Into a Mod Folder** writes straight into `<game>\Mods\<Mod>` (with the new textures). Normally that's a new
+  model, named like the file you pick, and a new weapon or body gets a starter `.weapon` / `.skin` next to it, already
+  pointing at the model - open it and fill in the rest. Tick **Replace the Game's Model** to save it under the
+  original's name instead (4.19). Check the **Game Folder** if you have the game twice (Steam and GOG).
+- **Check Only** lists what the game would trip over - too many vertices, missing or oversized textures, no UV map,
+  a model far bigger or smaller than the original (usually a wrong **Scale**) - and writes nothing. The same checks
+  run on every export; problems that would break the model stop it.
+- Vertex colours (the baked lighting on buildings and many props) are exported from the mesh's colour attribute, as
+  the import made it.
+- **Based On › Auto / Generic Prop** builds a brand-new prop without a game model to start from (on the game's
+  `BH_BODGEPLATE`, found in your extracted folders or read from your game archives). Without a `#BSP_` object it
+  collides with its own mesh; its origin is Blender's world origin. The same happens when nothing at all is given.
+- Images loaded from the extracted game folders aren't saved into the mod again - the game has them already.
+- After one export **Into a Mod Folder**, the sidebar's **Export to Mod** button repeats it for the selection in one
+  click (same options, mod and model name - both editable in the sidebar).
+
+#### Sidebar tools (3D View › N › Desert Storm)
+
+- **Model check**: vertices and triangles; export vertices per texture (positions × UV seams - hard edges add a few
+  more) against the game's 65535; images over 1024 or not a power of two; collision triangles (over 3000 is slow).
+  Counts follow the mesh in Object Mode; **Refresh** after UV edits.
+- **Show Collision Surfaces**: `#BSP_` objects drawn solid, one colour per surface (the list shows the active
+  object's), instead of wireframes. In Edit Mode the eyedropper beside the surface list takes the active face's
+  surface, so **Assign** can paint it elsewhere.
+- **Check Skin Weights** (a mesh bound to a character's skeleton): the game blends at most 4 bones per vertex - the
+  export keeps the 4 strongest quietly; this does it visibly and normalises the rest. Vertices with no bone weight
+  (they'd stick to the root bone) are selected in Edit Mode; vertex groups that aren't bones are listed.
+- **Generate Road** (active object a curve - Add › Curve): cross-sections every **Sample Every** along its first
+  spline, **Width**, a game texture by name (`M01_ROAD01` … from mission1) repeated every **Texture Repeat**, lifted a
+  few cm, plus a `#BSP_` copy on a walkable surface (Tarmac, Baked Earth, Sand …). Running it again on the same curve
+  replaces the road. Select both and export with **Auto / Generic Prop**; the road keeps the curve's world position.
+
 #### 4.20 Replace a game animation (_HeadTilt, _BouncyRun)
 
 Steps 1-3 of 4.14, but export under the game animation's own name (`upright_relaxed_with_rifle.prb` is the standing
-idle). Walk and run cycles keep the game animation's footstep sounds when the name is the same (or pick one in the
-exporter's **Footsteps From**).
+idle). Footsteps are timeline markers on the action (Action Editor › View › Show Pose Markers): `FS_LEFT` /
+`FS_RIGHT` = a walk step, `FS_LEFT_25` / `FS_RIGHT_25` = a run step (the number is the game's value for it; the sign
+tells the feet apart - which one is left isn't confirmed), `EVENT_2` / `EVENT_3` sit on stance animations. The
+import makes them, the export writes whatever markers the action has (move them to retime the steps, add them to a
+new cycle; other marker names are ignored with a warning). An action without markers keeps the footsteps of the game
+animation with the same name (or the one in the exporter's **Footsteps From**).
 
 ### For experts: tables
 
@@ -399,10 +614,55 @@ sNames.txt         OKAFOR,5001
 
 `.skin` and `.weapon` files write these rows for you, so you rarely need this.
 
+#### 4.22 Change or delete game rows (`<table>.replace.txt`)
+
+A file named `<table>.replace.txt` (`Units.replace.txt`, `UnitWpns.replace.txt`, `HStat.replace.txt` …) holds rows
+that **replace** the game's rows with the same first column; the rest of the table stays. Tables with several rows per
+key - a soldier type's kit in `UnitWpns.txt`, a vehicle's guns in `VehWpns.txt` - are replaced key by key: list all
+the rows the key should have. A line `-<key>` deletes the key. Example - Iraqi conscripts carry an AK-74 and a pistol,
+and have less health:
+
+```
+UnitWpns.replace.txt   Iraqi_Conscript,IR_WPN_AK74,WEAPON,0
+                       Iraqi_Conscript,IR_WPN_Makarov,WEAPON,0
+HStat.replace.txt      IR_Infantryman00,20,0,0,0,0,90,60.00,10,0.00,0.00,0.00,0.00,90,100.00,100,5.00,1.50
+```
+
+Plain `<table>.txt` files still only add rows. The editor's *Records…* window shows every table with named columns
+and links between them (a soldier type → its stats, experience level and kit; a vehicle → its stats and guns) and
+writes these files.
+
+#### 4.23 Texts: change the game's, add your own (`.strings`)
+
+A `.strings` file in a mod: `KEY = text` lines (`#` comments, `\n` for a new line). A key the game has replaces its
+text everywhere - menus, objectives, messages (`S_PLAYER = CAMPAIGN` renames SINGLE PLAYER on the main menu). A new
+key is a text for your mission: the game finds it by the key's hash, which the editor's *Records… › Texts* tab shows
+(the same number `conflict_ds_tools.records.hash_key("MY_KEY")` gives) - pass it where a mission script takes a
+text, e.g. an objective. One text for all languages.
+
+Each mission also has its own texts (objectives, briefing pages, cutscene subtitles, the date and place of its intro)
+in a file named after it: `M01` = Mission 1, `T02` = Training 2, `M05B` = the second part of Mission 5. Missions
+reuse keys with different texts (`MOV_TXT1` is every mission's date, `SPEECH1` its first subtitle), so put a mission's
+changes under its name - they apply only while that mission runs:
+
+```
+S_PLAYER = CAMPAIGN            # every level
+[M03]
+MOV_TXT1 = 17:00, January 17, 1991
+OBJECTIVE1A = Reach the radar site before nightfall.
+[all]                          # every level again
+```
+
+The *Texts* tab lists a mission key once per mission (search `M03` for one mission's texts) and writes the section
+for you.
+
 ## 5. Sharing
 
 Zip your mod's folder. Players unzip it into their `Mods` folder; it needs the DesertStormFix plugin. Don't include
 the game's own files (textures, models, sounds you didn't change) - only what you made.
+
+Missions saved by the level editor are ready to share as they are: they hold no game files (the plugin builds what
+they borrow from each player's own copy of the game), so zip the mod folder without changing it.
 
 ## 6. When something doesn't work
 
@@ -426,3 +686,160 @@ Not in the report at all:
 - **"Out of memory" when a mission loads**: a texture is too big or uncompressed.
 - **A replaced texture doesn't change**: the file name must be exactly the game texture's name (check the
   extracted files), and the level has to be loaded again - restart the mission after changing a file.
+
+## 7. Missions and levels
+
+Your own missions - on a campaign level or on a new level of your own - need **DesertStormFix 3.0 or later**, for you
+and for the players you share them with.
+
+### 7.1 Make one in the editor
+
+The kit's level editor runs in your browser and makes a whole mission without code:
+
+```
+python editor/server.py --data extracted
+```
+
+1. Open a level (Mission 1 …), or **New level…** for an empty one with a ground you can sculpt.
+2. Place soldiers, vehicles and props from the Library; give soldiers a patrol path (**Paths & Regions…**); place
+   trigger regions and cameras.
+3. **Objectives…**: what the player has to do (kill or destroy, reach a region, survive, or done by a rule), and
+   **Event rules** (*When … Only if … Do …*) for everything else - reinforcements, doors, radio lines, cutscenes, the
+   mission's end.
+4. **Save as mission…** with a mod name and a mission name (and a campaign name to list it in the game's menu), then
+   **▶ Play** starts the game straight into it.
+
+A mission made from a campaign level keeps that level's own mission logic (briefing, cutscenes, objectives), and
+yours runs on top. The mod holds only your changes, so it can be shared as it is (5). The full tour of the editor:
+[editor/README.md](../editor/README.md).
+
+### 7.2 A custom campaign (`campaign.txt`)
+
+A `campaign.txt` in a mod's folder lists missions to play in order:
+
+```
+name = Operation Sandstorm
+mission = sandstorm1.lua
+mission = sandstorm2.lua
+```
+
+`#` starts a comment. In the game: **SINGLE PLAYER › CUSTOM CAMPAIGNS** lists every campaign, then the difficulty,
+then the first mission. Winning a mission goes on to the next one, and back to the main menu after the last. The
+editor writes this file when you give a campaign name on *Save as mission*.
+
+### 7.3 Start a mission straight away
+
+```
+DesertStorm.exe +level sandstorm1.lua
+```
+
+skips the launcher and the menus and loads that mission (the editor's *Play* does this). Also works with a game
+mission (`+level Mission3.dll`).
+
+### 7.4 Writing a mission script by hand (Lua)
+
+A mission is a Lua 5.4 script, `<name>.lua`, anywhere in a mod folder (the editor writes one for you, and you can
+change it in its *Script…* window). Lines at the top say which level it is built on:
+
+| Line | Meaning |
+| --- | --- |
+| `--@archive mission1` | Use Mission 1's level data and sounds (`none`: the level's files are loose in the mod) |
+| `--@base Mission1.dll` | Run Mission 1's own mission logic first; your script runs after it |
+| `--@scene MYMISSION.ENV` | The scene to load with `--@base` (default: the script's name) |
+
+The game calls these functions of your script:
+
+| Function | When |
+| --- | --- |
+| `init()` | Once, while the level loads. Set up the level, objectives and kits here |
+| `update()` | Every frame while the player has control (not during cutscenes) |
+| `on_message(id, a, b, c, d, e)` | Something happened (`id` is one of `game.EVENT`, `a` … `e` its details). For a question (`…_QUERY`), return `true` / `false` or a number to answer it |
+
+`game.EVENT` names: `KILLED` (a victim, b killer), `REMOVED`, `DROPPED` / `PICKED_UP` (a soldier, b item), `COMBAT`
+(an enemy reached combat alert), `DESTROYED`, `WAYPOINT` (a unit, b waypoint), `PATH_DONE`, `ARRIVED`, `HEALED`,
+`DAMAGED`, `SWITCH`, `RADIO_CALL`, `LASER`, `SPAWN`, `COMPLETE`, `START` (play begins), `ACTION`, `DOOR` (a door, b 0
+closing / 1 opening / 2 closed / 3 open), `TIMER` (a timer id), `PLANTED`, `EXPLOSION`, `MOUNTED` / `DISMOUNTED` (a
+soldier, b vehicle), `SEAT`, `LAUNCHER_DROPPED`, `VEHICLE_DAMAGED`, `OBJECTIVES_SCREEN`, `SPOTTED` (a observer, b
+target), `SHOT` (a weapon, b shooter), `FIRE_MODE`, `ZOOM`, `TRIGGER`, `UNLOCK`, `SAVE_LOADED`, `ENTERED` / `LEFT` (a
+region name, b player 0-3); questions: `MOUNT_QUERY`, `ACTION_QUERY`, `DROP_QUERY`, `PICKUP_QUERY`,
+`VEHICLE_ITEMS_QUERY`, `SWITCH_SOLDIER_QUERY`, `GIVE_QUERY`, `LADDER_QUERY`, `ORDERS_QUERY`, `INVENTORY_QUERY`.
+
+Objects are named by their **script id** (the number the editor shows for each soldier, vehicle or item). Texts are
+**text hashes**: `game.text("MY_KEY", "Reach the radio mast")` makes one, or use a key from a `.strings` file (4.23).
+
+| Function | What it does |
+| --- | --- |
+| **Objectives and the end** | |
+| `game.add_objective(title[, description])` | Adds an objective (text hashes), returns its number - keep it, don't guess it |
+| `game.show_objective(i)` / `hide_objective(i)` | Shows (and tracks) / hides it |
+| `game.complete_objective(i)` / `reopen_objective(i)` | Marks it done (with the game's sound) / not done |
+| `game.end_mission(result)` | 2 = success, 1 = failure: the game's end screen |
+| `game.set_next_level(name)` | The level after a success (`"Mission2.dll"`, `"next.lua"`); without it the campaign's next mission, the main menu after the last |
+| `game.next_mission()` | The name of the campaign's next mission |
+| **Timers and saved games** | |
+| `game.timer(id, seconds[, repeating])` | `on_message(game.EVENT.TIMER, id)` after that many seconds of game time (repeating: every time) |
+| `game.stop_timer(id)` | Stops a repeating timer after its next tick |
+| `game.time_ms()` | Game time in milliseconds |
+| `game.state` | A table kept in saved games (numbers, strings, booleans and tables of them; up to 2 KB) |
+| `game.loading_save()` | True in `init()` when a saved game is being loaded (skip your intro); `SAVE_LOADED` follows |
+| `game.allow_pause(on)` | Pause menu (and so saving) on or off - off around your own cutscenes |
+| **Objects** | |
+| `game.activate(id)` / `deactivate(id)` | Brings an object into play / takes it out |
+| `game.layers`, `game.show_layer(name)` / `hide_layer(name)` | Named groups of script ids (the editor writes them), brought into / out of play together |
+| `game.position(id)`, `game.distance(id, x, y, z)` | An object's position (cm) / its distance from a point |
+| `game.set_team(id, team)` | A soldier's side (0 = the squad) |
+| `game.captive(id, on[, keep_kit])` | Makes a soldier a prisoner like Foley in Mission 1 (`false` frees him into the squad) |
+| `game.keep_awake(id, on)` | The game lets enemy soldiers the player hasn't seen yet sleep, so their patrols and orders wait until the player comes near; this keeps one awake. Returns true when it worked |
+| **Players and regions** | |
+| `game.player_soldier(n)`, `game.player_position(n)` | Player n's (0-3) soldier / position, nil when there is none |
+| `game.regions` | Trigger regions by name (the editor writes them); entering / leaving one sends `ENTERED` / `LEFT` |
+| `game.in_region(name, x, y, z)`, `game.player_in_region(name[, n])` | Is the point / player n in the region |
+| **Texts, kits and the briefing** | |
+| `game.text(key, text)` | A text of your own, returns its hash |
+| `game.set_string(key, text)` | Replaces one of the level's own texts by key (e.g. the loading screen's `SECTIONHDR`, `SECTIONTEXT`) |
+| `game.popup(text[, seconds])` | A message in the bar at the bottom of the screen |
+| `game.set_briefing_text(hash, slot)` | The briefing: slot 0 title, 1 date, 2 place, 3 and up the next page |
+| `game.briefing(text)` | The text on the loadout screen's BRIEFING tab |
+| `game.kit(id, {uniform = …, main = …, sidearm = …, launcher = …, grenades = …, lock = true})` | A soldier's uniform (skin texture) and weapons (weapon ids, `"-"` = none) at the start; `lock` = the player can't change them |
+| `game.loadout(false)` | No loadout screen at the start (kits still apply) |
+| **Films and sound** | |
+| `game.film(true, draw)` / `game.film(false)` | World frozen, player input off and HUD hidden; `draw()` runs every frame to draw the film |
+| `game.image(name)` | Loads a `.png` / `.dds` of the mod, returns a handle |
+| `game.draw(img, x, y, w, h[, alpha, rot, argb])`, `game.draw_part(…, u0, v0, u1, v1 …)`, `game.fill(x0, y0, x1, y1, argb)` | Draws an image, part of one, or a rectangle. Units are screen heights, x from the centre |
+| `game.screen()` | Half the screen's width and its height in those units |
+| `game.music(name[, loop])` / `game.music()` | Plays a `.wav` of the mod / stops it |
+| `game.clock()` | Real seconds (runs while the world is frozen) |
+| `game.skip_pressed()` | Esc / Enter / Space / pad Cross pressed since the last call |
+| **Level set-up** (the editor writes these) | |
+| `game.load_scene(file)`, `load_strings`, `load_sound_bank`, `load_map_image`, `game.anim(state, file)`, `game.set_level_bounds(…)` | Load a level's scene, texts, sounds, map and animations |
+| `game.set_time_of_day(hour)`, `game.get_time_of_day()` | The hour of the day |
+| **Other** | |
+| `print(…)`, `game.log(…)` | A line in `DesertStormFix.log` (dev builds of the plugin) |
+| `game.call(slot, …)`, `game.callf(slot, …)` | **For experts**: calls one of the game's own mission functions by its number, with up to 12 arguments (a whole / a decimal result). The editor's rule action *Call a game function* lists them by name. A wrong number or wrong arguments can crash the game |
+
+A small mission on Mission 1's map:
+
+```lua
+--@archive mission1
+
+function init()
+    game.load_scene("MISSION1.ENV")
+    game.loadout(false)
+    if game.loading_save() then return end
+    game.timer(1, 0.5)                  -- set the objective up once the mission runs
+end
+
+function on_message(id, a)
+    if id == game.EVENT.TIMER and a == 1 then
+        game.state.goal = game.add_objective(game.text("MY_GOAL", "Hold out for two minutes"))
+        game.show_objective(game.state.goal)
+        game.timer(2, 120)
+    elseif id == game.EVENT.TIMER and a == 2 then
+        game.complete_objective(game.state.goal)
+        game.end_mission(2)
+    end
+end
+```
+
+A real level needs more set-up than this (sounds, map, animations) - start from a script the editor wrote. Script
+errors go to `Mods\DesertStormFix-report.txt` with their line numbers (the editor's *Script…* window shows them).

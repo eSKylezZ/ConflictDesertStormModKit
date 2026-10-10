@@ -5,26 +5,37 @@ Switches (scene SWITCH lines, conflict_ds_tools/env.py; game: switches.cpp FUN_0
 a Switches.txt type (two models: off / on, e.g. KeyPad_Red / KeyPad_Green), a REGN the player must stand in, and up to
 two door objects (HLOI script ids whose unit is a Doors.txt row). Using it toggles the models, opens / closes both doors
 through the door code (other switches on the same doors follow) and sends script message 0x0D (game.EVENT.SWITCH) with
-a = the archive hash of the switch's name, b = 1.0, c = the soldier - which the editor's "switch used" rule trigger
+a = the hash of the switch's name as written (name_hash), b = 1.0, c = the soldier - which the editor's "switch used" rule trigger
 listens for. The game has no lock or key for these: a door a switch drives just opens.
 
 Emitters ("* ..." rows between <EMIT> and </EMIT>; game: Particles.cpp FUN_004f2d70, run by FUN_004f2840): a particle
 type (4 flash, 6 smoke, 8 / 9 dust, 11 fire, 12 flame, 18 flare - named after the shipped emitters that use them),
 spawn interval, velocity / size / life ranges, colour, optionally a REGN to spawn anywhere inside (stored as the
-region name's archive hash) or a parent object to follow. New emitters start as a copy of a shipped one (a preset).
+region name's hash (as written)) or a parent object to follow. New emitters start as a copy of a shipped one (a preset).
 """
 from __future__ import annotations
 
 import os
 
 from commands import CommandError, Session, command, _catalog, _find_file, _nearest_zone, _unique, _vec  # noqa: F401
-from conflict_ds_tools.archive import archive_hash
+from conflict_ds_tools.evo import _HA, _HB
 
 PARTICLE_TYPES = {4: "Flash / flak burst", 6: "Smoke", 8: "Dust (small)", 9: "Dust (large)", 11: "Fire", 12: "Flame",
                   18: "Flare"}
 DEFAULT_SWITCH = "IR_SWITCH_HangerDoor"
 AUTO_LINK = 3000         # cm: switch_add links the nearest door only within this distance
 _PRESETS = None          # [{id, name, level, type, label, text}] from every extracted scene (built once)
+
+
+def name_hash(name: str) -> int:
+    """The game's hash of a scene name as written - FUN_004b9a10, the archive LFSR (start 1) WITHOUT upper-casing
+    (the archive path upper-cases before calling it). What a switch stores and message 0x0D reports, and how an
+    emitter names its region. Checked in game: "switch_0" -> E7AF852A, "switch_2" -> E7AF8547."""
+    a0, a1, a2, a3 = _HA
+    x = 1
+    for c in str(name).encode("latin-1", "replace"):
+        x = a0[x & 255] ^ a1[x >> 8 & 255] ^ a2[x >> 16 & 255] ^ a3[x >> 24] ^ _HB[c]
+    return x
 
 
 def signed(h: int) -> int:
@@ -79,7 +90,7 @@ def switch_models(s: Session, rec) -> list[str]:
 def decorate_scene(s: Session, out: dict):
     """scene command: switches (with their doors and region) and emitters (with their region's name)."""
     env = _scene(s)
-    by_hash = {archive_hash(n): n for n in _regions(s)}
+    by_hash = {name_hash(n): n for n in _regions(s)}
     ids = {r["script_id"]: r for r in env.find("HLOI") if r.fields}
     types = _switch_types(s)
     out["switches"], out["emitters"] = [], []
@@ -94,7 +105,7 @@ def decorate_scene(s: Session, out: dict):
                 "type": r["type"], "model": t.get("model_off") or "", "region": r["region"], "targets": targets,
                 "target_pos": [list(ids[i]["pos"]) for i in targets if i in ids],
                 "missing": [i for i in targets if i not in ids] + ([] if r["region"] in _regions(s) else [r["region"]]),
-                "message_a": signed(archive_hash(r["name"]))})
+                "message_a": signed(name_hash(r["name"]))})
         elif r.kind == "EMITTER":
             out["emitters"].append({
                 "line": r.index + 1, "name": r["name"], "pos": list(r["pos"]), "type": r["type"],
@@ -230,7 +241,7 @@ def switch_add(s: Session, pos, door_a=None, door_b=None, yaw=0.0, type=DEFAULT_
         env.delete(reg)
         raise CommandError(str(e)) from None
     return {"line": rec.index + 1, "name": name, "region": region, "region_line": reg.index + 1,
-            "doors": [d for d in (door_a, door_b) if d != -1], "message_a": signed(archive_hash(name))}
+            "doors": [d for d in (door_a, door_b) if d != -1], "message_a": signed(name_hash(name))}
 
 
 @command("Change a switch: its doors (script ids, -1 none), type, or the size of its use region (cm).", mutates=True,
@@ -305,7 +316,7 @@ def emitter_set(s: Session, line, region=None, colour=None, on=None, type=None):
             raise CommandError("this scene's emitters have no region field (scene version < 53)")
         if region and region not in _regions(s):
             raise CommandError(f"no region {region!r} in this scene")
-        r["region"] = signed(archive_hash(region)) if region else 0
+        r["region"] = signed(name_hash(region)) if region else 0
     if colour is not None:
         c = [float(v) for v in colour]
         if len(c) != 4 or not all(0 <= v <= 1 for v in c):

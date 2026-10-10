@@ -1,6 +1,7 @@
 """Conflict: Desert Storm tools - Blender add-on and library.
 
-Modules: evo (meshes, skeletons, animations, vehicle data), archive (.dat extraction), images (DDS/TGA/PNG),
+Modules: evo (meshes, skeletons, animations, vehicle data), evo_write (new models from game models: geometry,
+collision, points), bsp (collision trees), archive (.dat extraction), images (DDS/TGA/PNG),
 sound (level sound caches, banks, ADPCM samples <-> WAV).
 The Blender UI lives in blender.py and is only loaded inside Blender, so the command-line tools
 (ds_extract.py, evo_convert.py, ds_texture.py, ds_sound.py) can import this package with plain Python.
@@ -8,10 +9,10 @@ The Blender UI lives in blender.py and is only loaded inside Blender, so the com
 bl_info = {
     "name": "Conflict: Desert Storm tools",
     "author": "eSKylezZ",
-    "version": (1, 2, 0),
+    "version": (1, 4, 0),
     "blender": (3, 6, 0),
     "location": "File > Import / Export > Conflict: Desert Storm",
-    "description": "Import and export .EVO meshes (props, vehicles, characters) and .prb animations, extract the game archives",
+    "description": "Import and export .EVO meshes (props, vehicles, characters, collision, shadows, points), .prb animations and level scenes, extract the game archives",
     "category": "Import-Export",
 }
 

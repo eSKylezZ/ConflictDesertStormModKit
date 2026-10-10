@@ -11,6 +11,7 @@ Coordinates in commands are game units (centimetres, left-handed, Y up), as in t
 from __future__ import annotations
 
 import copy as _copy
+import itertools
 import json
 import re
 import glob
@@ -54,6 +55,9 @@ def _find_file(folder, name):
     return hashed[0] if hashed else None
 
 
+_entry_ids = itertools.count(1)       # undo entries' ids (Session._state_token)
+
+
 class Session:
     def __init__(self, data_dir, game_dir=None):
         self.data_dir = os.path.abspath(data_dir)
@@ -72,11 +76,30 @@ class Session:
         self.kits = {}             # KIT_<MODEL>_<n> -> {"level", "source", "index", "centre"} (kits.py pieces)
         self.objectives, self.rules, self.patrols, self.objectives_win = [], [], {}, False   # logic.py
 
+    # --- unsaved changes: the history position at the last save / open, compared with the current one, so undoing back
+    # to the saved state is clean again. Each undo entry carries an id that moves with it between the undo and redo
+    # stacks. dirty = False marks the current position as saved; dirty = True forces "unsaved" until the next save.
+    def _state_token(self):
+        top = self.undo_stack[-1] if self.undo_stack else None
+        return top[3] if top is not None and len(top) > 3 else (0 if top is None else id(top))
+
+    @property
+    def dirty(self):
+        if self.__dict__.pop("dirty", None):         # a session from before this was a property (server reload)
+            self._saved_token = object()             # kept unsaved: its undo history is cleared by the reload
+        return self._state_token() != getattr(self, "_saved_token", 0)
+
+    @dirty.setter
+    def dirty(self, value):
+        self.__dict__.pop("dirty", None)
+        self._saved_token = object() if value else self._state_token()
+
     # --- undo: a snapshot of the scene lines and the route markers before each change ---------------------------
     def _snapshot(self):
         return (list(self.env.lines), _copy.deepcopy(self.routes.markers) if self.routes else None, dict(self.layers),
                 dict(self.layer_start), {k: t.dumps() for k, t in getattr(self, "terrains", {}).items()},
-                {k: r.dumps() for k, r in getattr(self, "roads", {}).items()}, json.dumps(logic.extras(self)))
+                {k: r.dumps() for k, r in getattr(self, "roads", {}).items()}, json.dumps(logic.extras(self)),
+                _copy.deepcopy(getattr(self, "kits", {})))
 
     def _restore(self, snap):
         lines, markers, layers, starts = snap[:4]
@@ -88,6 +111,8 @@ class Session:
             self.roads = {k: Road.from_json(json.loads(v)) for k, v in snap[5].items()}
         if len(snap) > 6:
             logic.set_extras(self, json.loads(snap[6]))
+        if len(snap) > 7:
+            self.kits = _copy.deepcopy(snap[7])
         self.layers, self.layer_start = dict(layers), dict(starts)
         self.env.lines = list(lines)
         self.env._parse()
@@ -109,21 +134,26 @@ class Session:
         fn, _, _, mutates = COMMANDS[name]
         if mutates:
             if self.env is None:
-                raise CommandError("no level open")
+                raise CommandError("no level open - open_level or open_mission first")
             before = self._snapshot()
             subject = _subject(self, args or {})     # named before the change: a delete removes the record
             try:
                 result = fn(self, **(args or {}))
-            except Exception:
+            except Exception as e:
                 self._restore(before)
+                workflow.log_edit(self, name, args, error=e)
                 raise
             title = _action_title(name, subject, result)
+            if self._snapshot() == before:           # same value, a dry run: nothing to undo, nothing unsaved
+                workflow.log_edit(self, name, args, title, unchanged=True)
+                return {**result, "unchanged": True} if isinstance(result, dict) else result
             if isinstance(result, dict) and "action" not in result:
                 result = {**result, "action": title}
-            self.undo_stack.append((title, before, name))
+            self.undo_stack.append((title, before, name, next(_entry_ids)))
             self.redo_stack.clear()
-            self.dirty = True
             self.revision = getattr(self, "revision", 0) + 1   # the browser redraws when someone else changed it
+            workflow.log_edit(self, name, args, title)
+            workflow.after_change(self)
             return result
         result = fn(self, **(args or {}))
         if name in _CHANGES_VIEW:
@@ -132,11 +162,14 @@ class Session:
 
     def record(self, line):
         if self.env is None:
-            raise CommandError("no level open")
+            raise CommandError("no level open - open_level or open_mission first")
         try:
             return self.env.record_at(int(line))
         except KeyError:
-            raise CommandError(f"no record on line {line}") from None
+            raise CommandError(f"no record on line {line} - lines shift after inserts / deletes; search or find "
+                               "gives the current ones") from None
+        except (TypeError, ValueError):
+            raise CommandError(f"line: a record's line number, not {line!r}") from None
 
 
 # --- action titles for the undo history ("Move T-72 Battle Tank", "Paint Minefield") -----------------------------
@@ -256,8 +289,9 @@ def scene(s: Session):
     _spread_lifts(s)
     if s.env is None:
         raise CommandError("no level open")
-    out = {"level": s.level, "mission": list(s.mission) if s.mission else None, "zones": [], "props": [], "objects": [], "waypoints": [], "regions": [], "cameras": [],
+    out = {"level": s.level, "mission": list(s.mission) if s.mission else None, "zones": [], "chunks": [], "props": [], "objects": [], "waypoints": [], "regions": [], "cameras": [],
            "sounds": [], "lights": [], "routes": []}
+    chunks = _chunk_map(s)
     for r in s.env.records:
         k, line = r.kind, r.index + 1
         try:
@@ -267,9 +301,18 @@ def scene(s: Session):
                     out["props"].append({"line": line, "name": r["name"], "model": r["model"], "pos": list(ground.origin),
                                          "rot": (0, 0, 0), "scale": (1, 1, 1), "terrain": ground.to_json(),
                                          "ground": True})
-                elif r["type"] == 5 and r["parent"].upper() == "ROOT":
+                elif r["type"] == 5 and r["parent"].upper() == "ROOT" and str(r["model"]).upper() not in chunks:
                     out["zones"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
                                          "rot": r["rot"], "scale": r["scale"]})   # MP_MISSION1's sits at (600,10,-16000)
+                elif r["type"] == 5 and str(r["model"]).upper() in chunks:      # one chunk of a zone model
+                    c = chunks[str(r["model"]).upper()]
+                    if c["root"]:
+                        out["zones"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
+                                             "rot": r["rot"], "scale": r["scale"], "chunked": True})
+                    out["chunks"].append({"line": line, "name": r["name"], "model": str(r["model"]).upper(),
+                                          "zone": c["zone"], "index": c["index"], "root": c["root"], "pos": r["pos"],
+                                          "rot": r["rot"], "scale": r["scale"],
+                                          "pivot": list(_kit_centre_world(r, c))})
                 elif r["type"] == 0:
                     out["props"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
                                          "rot": r["rot"], "scale": r["scale"] if "scale.x" in r.fields else (1, 1, 1)})
@@ -291,7 +334,8 @@ def scene(s: Session):
                                        "active": r["in_play"], "layer": s.layers.get(r["script_id"], ""),
                                        "cutscene": bool(r["flags"] & 0x20000)})
             elif k == "NEWENVWAYPT" and r.fields:
-                out["waypoints"].append({"line": line, "id": r["id"], "name": r["name"], "pos": r["pos"]})
+                out["waypoints"].append({"line": line, "id": r["id"], "name": r["name"], "pos": r["pos"],
+                                         "next": r.get("next", -1), "wait": (r.get("wait_ms") or 0) / 1000})
             elif k == "REGN" and r.fields:
                 reg = {"line": line, "name": r["name"], "type": r["type"], "pos": r["pos"]}
                 if r["type"] == 1:
@@ -310,6 +354,7 @@ def scene(s: Session):
         out["routes"] = [m.as_dict(i) for i, m in enumerate(s.routes.markers)]
     logic.decorate_scene(s, out)
     interactive.decorate_scene(s, out)
+    vanilla.decorate_scene(s, out)
     return out
 
 
@@ -430,8 +475,9 @@ def list_layers(s: Session):
          line="record line", field="field name (vectors: pos, rot, scale)", value="new value")
 def set_field(s: Session, line, field, value):
     r = s.record(line)
-    kit = getattr(s, "kits", {}).get(str(r.get("model")).upper()) if r.kind == "ENVI" else None
-    if kit and field == "rot" and isinstance(value, list):
+    _chunk_guard(s, r, "changed")
+    kit = (getattr(s, "kits", {}).get(str(r.get("model")).upper()) or _chunk(s, r)) if r.kind == "ENVI" else None
+    if kit and field == "rot" and isinstance(value, list):   # kit pieces / zone chunks turn about their centre
         from conflict_ds_tools import kits as _k
         centre = _kit_centre_world(r, kit)
         r["rot"] = _vec(value)
@@ -442,6 +488,8 @@ def set_field(s: Session, line, field, value):
         if unit:
             raise CommandError(f"{value} is a vehicle ({unit}) - as a zone prop it crashes the game. Place it from the "
                                f"Library's objects instead (or use a wreck model such as {value}DEAD if there is one)")
+    if r.kind == "HLOI" and field == "script_id":
+        _check_script_id(s, r, value)
     if isinstance(value, list):
         value = _vec(value)
     try:
@@ -453,6 +501,26 @@ def set_field(s: Session, line, field, value):
     return get_record(s, line)
 
 
+def _check_script_id(s: Session, r, value):
+    """Script ids are how scripts (and the base mission's DLL) find objects: unique, and the DLL's ones fixed."""
+    try:
+        new = int(value)
+    except (TypeError, ValueError):
+        raise CommandError("script_id: a whole number") from None
+    old = r["script_id"]
+    if new == old:
+        return
+    targets = logic.base_targets(s)
+    dll = _base_dll(s, s.level) or "the base mission's DLL"
+    if old in targets:
+        raise CommandError(f"script id {old} is DLL critical: {dll} uses it (API slots "
+                           f"{', '.join('+0x%X' % x for x in targets[old])}) - changing it would break or crash the level")
+    if new in targets:
+        raise CommandError(f"script id {new} is reserved: {dll} addresses that object directly")
+    if any(o is not r and o["script_id"] == new for o in s.env.find("HLOI") if o.fields):
+        raise CommandError(f"script id {new} is already used by another object")
+
+
 @command("Move a record (props, objects, waypoints, regions, cameras, sounds) to a position.", mutates=True,
          line="record line", pos="[x, y, z] game units")
 def move(s: Session, line, pos):
@@ -461,8 +529,9 @@ def move(s: Session, line, pos):
     if t is not None and t.zone:                # a level's ground: world-space vertices around its origin
         t.origin = tuple(_vec(pos))
         return get_record(s, line)
-    kit = getattr(s, "kits", {}).get(str(r.get("model")).upper()) if r.kind == "ENVI" else None
-    if kit:                                     # a kit piece: pos = where its centre goes (its pivot is the origin)
+    _chunk_guard(s, r, "moved")
+    kit = (getattr(s, "kits", {}).get(str(r.get("model")).upper()) or _chunk(s, r)) if r.kind == "ENVI" else None
+    if kit:                                     # a kit piece / zone chunk: pos = where its centre goes (pivot = origin)
         from conflict_ds_tools import kits as _k
         return set_field(s, line, "pos", list(_k.placement(kit["centre"], _vec(pos), r["rot"][1])))
     if r.kind == "SWITCH" and r.fields:            # its use region (switch_add's box) moves with it
@@ -482,8 +551,15 @@ def duplicate(s: Session, line, pos=None):
         changes["pos"] = _vec(pos)
     if r.kind == "HLOI":
         changes["script_id"] = max(o["script_id"] for o in s.env.find("HLOI")) + 1
+    if r.kind == "NEWENVWAYPT":
+        changes["id"] = paths._free_ids(s, 1)[0]
+        changes["next"] = -1
+    if r.kind == "ENVI" and r.fields and "name" in r.fields:
+        _chunk_guard(s, r, "duplicated")
+        changes["name"] = _unique(s, "ENVI", "name", str(r["name"]))   # world piece / prop names are unique per scene
     crew = _crew_texts(s.env, r) if r.kind == "HLOI" else []
     new = s.env.duplicate(r, **changes)
+    _drop_rinfo_flag(new)
     new = _attach_crew(s, new, crew)
     return {"line": new.index + 1, **({"script_id": changes["script_id"]} if "script_id" in changes else {})}
 
@@ -538,6 +614,38 @@ def _turn(offset, yaw_deg):
     return (x * math.cos(a) + z * math.sin(a), y, -x * math.sin(a) + z * math.cos(a))
 
 
+RINFO_FOLLOWS = 0x1000000
+
+
+def _drop_rinfo_flag(r):
+    """A copied prop record loses ENVI flag 0x1000000 = "a RINFO line follows" (the scene loader FUN_004f8d00 then reads
+    the next line as the prop's render info, FUN_004fb2c0 - its baked colour for the original spot). Copies are made of
+    the ENVI line alone, so with the flag left on the loader ate the following record and every read after it was off
+    (a copied CRATE2 made the next crate "100 active lights" - its break health 100.0 read as a light count)."""
+    if r.kind == "ENVI" and r.fields and "flags" in r.fields and int(r["flags"]) & RINFO_FOLLOWS:
+        r["flags"] = int(r["flags"]) & ~RINFO_FOLLOWS
+
+
+def _missing_rinfo(s: Session):
+    """ENVI records with the RINFO flag whose next line isn't a RINFO line."""
+    out = []
+    for r in s.env.find("ENVI"):
+        if r.fields and "flags" in r.fields and int(r["flags"]) & RINFO_FOLLOWS:
+            nxt = next((x for x in s.env.records if x.index > r.index + len(r.children)), None)
+            if nxt is None or nxt.kind != "RINFO":
+                out.append(r)
+    return out
+
+
+@command("Clear the RINFO flag of props whose RINFO line is missing (copies made by older editor versions).",
+         mutates=True)
+def fix_rinfo(s: Session):
+    fixed = [r.index + 1 for r in _missing_rinfo(s)]
+    for ln in fixed:
+        _drop_rinfo_flag(s.record(ln))
+    return {"fixed": fixed}
+
+
 def _paste_entries(s: Session, entries, pos, yaw=0.0, anchor=None):
     """Insert copied records ({kind, text, pos, crew}) so that `anchor` (default: the first one's position) lands on
     pos, the group turned by yaw degrees about it; new script ids / waypoint ids / unique names, nearest zones.
@@ -554,6 +662,7 @@ def _paste_entries(s: Session, entries, pos, yaw=0.0, anchor=None):
         s.env._parse()
         new_lines = [l + 1 if l >= at + 1 else l for l in new_lines]   # earlier pastes below the insertion move
         r = s.env.record_at(at + 1)
+        _drop_rinfo_flag(r)
         off = _turn([c - a for c, a in zip(e["pos"], anchor)], yaw)
         target = tuple(p + o for p, o in zip(pos, off))
         r["pos"] = target
@@ -576,7 +685,8 @@ def _paste_entries(s: Session, entries, pos, yaw=0.0, anchor=None):
             if zone:
                 r["parent"] = zone
         elif r.kind == "NEWENVWAYPT":
-            r["id"] = max(w["id"] for w in s.env.find("NEWENVWAYPT")) + 1
+            r["id"] = paths._free_ids(s, 1)[0]         # the game's table holds ids 0-599
+            r["next"] = -1
             r["name"] = _unique(s, "NEWENVWAYPT", "name", r["name"])
         elif "name" in r.fields:
             r["name"] = _unique(s, r.kind, "name", r["name"])
@@ -606,6 +716,74 @@ def _crew(rec):
     if not _is_vehicle(rec):
         return []
     return [(rec[f"kit{k}.item"], rec[f"kit{k}.category"], rec[f"kit{k}.amount"]) for k in range(rec["kit_count"])]
+
+
+# Inven.txt column 2 (the item's type) -> its kit category: the game's own table (strcmp chain at 0x493B40 in
+# DesertStorm.exe). Weapons (Weaps.txt) are category 5.
+ITEM_TYPES = {"HUMAN": 1, "MACHINE": 2, "BUILDING": 3, "FEATURE": 4, "WEAPON": 5, "UNIFORM": 6, "PHRASE BOOK": 7,
+              "MEDI KIT": 8, "C4 DETONATOR": 9, "RADIO": 10, "BODY ARMOUR": 11, "HEAD ARMOUR": 12, "AMMO": 14, "DOOR": 15,
+              "BINOCULARS": 16, "NIGHT VISION GOGGLES": 17, "LASER DESIGNATOR": 18, "KEY": 20, "TARGET": 21,
+              "MISCELLANEOUS": 22, "COMPUTER HACKING KIT": 24, "WIRECUTTERS": 25, "BOMB DEFUSING KIT": 26}
+
+
+def _kit_categories(s: Session):
+    """Kit item -> category: weapons 5, inventory items by their Inven.txt type."""
+    out = {w: 5 for w in _table_keys(s, "WEAPS.TXT")}
+    for cols in _table_rows(s, "INVEN.TXT"):
+        if len(cols) > 1 and cols[1].upper() in ITEM_TYPES:
+            out[cols[0]] = ITEM_TYPES[cols[1].upper()]
+    return out
+
+
+def _table_rows(s: Session, name):
+    folder = os.path.join(s.data_dir, "catalog")
+    path = _find_file(folder, name) if os.path.isdir(folder) else None
+    if not path:
+        return []
+    return [[c.strip() for c in line.split(",")] for line in open(path, errors="replace").read().splitlines() if "," in line]
+
+
+def _table_keys(s: Session, name):
+    return [cols[0] for cols in _table_rows(s, name)]
+
+
+@command("What a soldier's kit can hold: weapons (Weaps.txt, category 5) and inventory items (Inven.txt) with their kit "
+         "category (from the item's type column, the game's own table; null = a type the game doesn't know).")
+def kit_options(s: Session):
+    cats = _kit_categories(s)
+    return {"weapons": [{"id": w, "category": 5} for w in _table_keys(s, "WEAPS.TXT")],
+            "items": [{"id": i, "category": cats.get(i)} for i in _table_keys(s, "INVEN.TXT")]}
+
+
+@command("Replace a soldier's / object's starting kit (not a vehicle's: its kit list is the crew - assign_crew).",
+         mutates=True, line="HLOI record line", items="[{item, amount, category}] - category: 5 for weapons, else the "
+         "item's own (kit_options)")
+def set_kit(s: Session, line, items):
+    r = s.record(line)
+    if r.kind != "HLOI":
+        raise CommandError("only objects (HLOI) have a kit")
+    if _is_vehicle(r):
+        raise CommandError("a vehicle's kit list is its crew - use the Crew section (assign_crew)")
+    cats = _kit_categories(s)
+    entries = []
+    for it in items or []:
+        name = str(it.get("item") or "").strip()
+        if not name or any(c in name for c in '" \t'):
+            raise CommandError(f"kit item: a Weaps.txt / Inven.txt id, not {name!r}")
+        cat = it.get("category")
+        cat = int(cat) if cat not in (None, "") else cats.get(name)
+        if cat is None:
+            raise CommandError(f"{name}: not a Weaps.txt / Inven.txt id - give its kit category (weapons 5, keys 20, "
+                               "goggles 17 ...)")
+        try:
+            amount = int(it.get("amount", 1))
+        except (TypeError, ValueError):
+            raise CommandError(f"{name}: amount is a whole number") from None
+        entries.append((name, cat, max(0, amount)))
+    s.env.set_list(r, "kit_count", entries)
+    if s.env.problems:
+        raise CommandError("; ".join(s.env.problems[:3]))
+    return {"line": line, "kit": [list(e) for e in entries]}
 
 
 def _crew_texts(env, rec):
@@ -683,10 +861,17 @@ def fix_crews(s: Session):
     return {"fixed": fixed}
 
 
-@command("Delete a record (and an ENVI's VAMI / ANMI lines).", mutates=True, line="record line")
-def delete(s: Session, line):
+@command("Delete a record (and an ENVI's VAMI / ANMI lines). Objects the base mission's DLL uses (DLL critical) are "
+         "refused unless force - hide them in a layer instead.", mutates=True, line="record line",
+         force="true: delete a DLL-critical object anyway")
+def delete(s: Session, line, force=False):
     r = s.record(line)
+    _chunk_guard(s, r, "deleted")
     sid = r["script_id"] if r.kind == "HLOI" and "script_id" in r.fields else None
+    if sid is not None and sid in logic.base_targets(s) and not force:
+        raise CommandError(f"DLL critical: {_base_dll(s, s.level) or 'the base mission'} uses script id {sid} - "
+                           "deleting it breaks the level's logic (it can crash). Put it in a layer that starts hidden "
+                           "instead, or delete with force")
     own_region = None
     if r.kind == "SWITCH" and r.fields and str(r["region"]).upper().endswith("_USE") and not any(
             o is not r and o.fields and o["region"] == r["region"] for o in s.env.find("SWITCH")):
@@ -709,7 +894,6 @@ def undo(s: Session):
     title, snap, *cmd = s.undo_stack.pop()
     s.redo_stack.append((title, s._snapshot(), *cmd))
     s._restore(snap)
-    s.dirty = True
     return {"undone": title}
 
 
@@ -720,7 +904,6 @@ def redo(s: Session):
     title, snap, *cmd = s.redo_stack.pop()
     s.undo_stack.append((title, s._snapshot(), *cmd))
     s._restore(snap)
-    s.dirty = True
     return {"redone": title}
 
 
@@ -920,6 +1103,7 @@ def place(s: Session, template, pos, yaw=0.0, scale=None):
     s.env.lines.insert(at, e["text"])
     s.env._parse()
     new = s.env.record_at(at + 1)
+    _drop_rinfo_flag(new)
     new["pos"] = pos
     rot = new["rot"]
     new["rot"] = (rot[0], float(yaw) % 360.0, rot[2])
@@ -1096,6 +1280,56 @@ def _kit_centre_world(rec, kit):
     cx, cy, cz = kit["centre"]
     px, py, pz = rec["pos"]
     return (px + cx * math.cos(a) + cz * math.sin(a), py + cy, pz - cx * math.sin(a) + cz * math.cos(a))
+
+
+# Zone chunks: a level's ground / building models (ENVI type 5) are hundreds of objects, and the scene gives every
+# object its own record - the zone's root record (parent Root, model = the file) is object 0, then one record per
+# object (model = the object's own name, e.g. MIS1_ZONE4013) hanging from it. The game creates each object from its
+# record (FUN_004f8d00 -> FUN_004dd740 by name, FUN_004ddb10, placed by FUN_004fb4d0), so deleting a record removes that
+# chunk and its pos / rot move it. Their vertices are in world space (records at 0), so they move by their centre like
+# kit pieces. Objects without a record are never created.
+def _chunk_map(s: Session):
+    """{OBJECT NAME: {"zone", "index", "centre", "root"}} for the open level's zone models (files read once per level)."""
+    cached = getattr(s, "_chunk_models", None)
+    known = cached[1] if cached and cached[0] == s.level else {}
+    out = {}
+    from conflict_ds_tools import evo
+    for r in s.env.find("ENVI"):
+        if not r.fields or r.get("type") != 5 or str(r.get("parent")).upper() != "ROOT":
+            continue
+        model = str(r["model"]).upper()
+        if model in getattr(s, "terrains", {}):
+            continue
+        if model not in known:
+            try:
+                nodes = evo.read(_kit_data(s, s.level, model))
+            except (CommandError, evo.EvoError, OSError, ValueError):
+                known[model] = {}
+                continue
+            objs = {}
+            for i, n in enumerate(nodes):
+                (x0, y0, z0), (x1, y1, z1) = n.bbox
+                objs[str(n.model).upper()] = {"zone": model, "index": i, "root": i == 0,
+                                              "centre": ((x0 + x1) / 2, (y0 + y1) / 2, (z0 + z1) / 2)}
+            known[model] = objs
+        out.update(known[model])
+    s._chunk_models = (s.level, known)
+    return out
+
+
+def _chunk_guard(s: Session, r, action):
+    """A zone's root record carries every other chunk of the zone (they hang from it): it stays where it is."""
+    c = _chunk(s, r)
+    if c and c["root"]:
+        raise CommandError(f"{r['name']} is the root of zone {c['zone']} - every chunk of the zone hangs from it, so it "
+                           f"can't be {action}. Select one of its chunks instead")
+
+
+def _chunk(s: Session, r):
+    """The zone chunk a record places (see _chunk_map), or None."""
+    if r.kind != "ENVI" or not r.fields or r.get("type") != 5:
+        return None
+    return _chunk_map(s).get(str(r.get("model")).upper())
 
 
 def _kit_data(s: Session, level, model):
@@ -1423,13 +1657,17 @@ def new_level(s: Session, environment, mod, name, size=400, vertices=65):
     s.env.lines = lines
     s.env._parse()
     g = next(r for r in s.env.find("ENVI"))
-    g["name"], g["model"], g["pos"], g["rot"] = "GROUND-1", "GROUND", (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
+    # the ground model is named after the level: models are found by file name across all mods, so two new levels
+    # both called GROUND took each other's ground (a mission loaded another mod's GROUND.EVO)
+    ground = "GROUND_" + re.sub(r"[^A-Z0-9_]", "_", str(name).upper())
+    zone = ground + "-1"                       # record name = model + "-1", like every shipped zone (MIS1_ZONE1-6821 ...)
+    g["name"], g["model"], g["pos"], g["rot"] = zone, ground, (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)
     n = int(vertices)
-    s.terrains = {"GROUND": Terrain(n=n, cell=float(size) * 100 / (n - 1), texture=_ground_textures(s)[0],
+    s.terrains = {ground: Terrain(n=n, cell=float(size) * 100 / (n - 1), texture=_ground_textures(s)[0],
                                     steep_texture=_steep_default(s), zone=True, origin=(centre[0], centre[1] - 10, centre[2]))}
     k = 0
     for h in s.env.find("HLOI"):
-        h["zone"] = "GROUND-1"
+        h["zone"] = zone
         h["in_play"] = 1
         h["pos"] = (centre[0] + 200 * k, centre[1], centre[2])     # the squad side by side at the start
         k += 1
@@ -1439,15 +1677,32 @@ def new_level(s: Session, environment, mod, name, size=400, vertices=65):
     s.undo_stack.clear(); s.redo_stack.clear()
     saved = save_mission(s, mod, name)
     s.revision = getattr(s, "revision", 0) + 1
-    return {"mission": [mod, name.upper()], "level": saved["level"], "ground": "GROUND", "start": list(centre)}
+    return {"mission": [mod, name.upper()], "level": saved["level"], "ground": ground, "start": list(centre)}
 
 
 # ---------------------------------------------------------------------------------------------------- save --
-@command("Write the edited scene (and routes) as a mod: <game>\\Mods\\<mod>\\<LEVEL>.ENV / .RMD.", mod="mod folder name",
-         game_dir="game folder (default: the session's)")
-def save_mod(s: Session, mod, game_dir=None):
+def _same_as_shipped(s: Session):
+    """The open scene (and routes) are exactly the level's shipped files."""
+    path = _find_file(s.folder, s.level + ".ENV") if s.folder and os.path.isdir(s.folder) else None
+    if not path or EnvFile.load(path).lines != s.env.lines:
+        return False
+    rmd = _find_file(s.folder, s.level + ".RMD")
+    if s.routes is None or rmd is None:
+        return s.routes is None and rmd is None
+    with open(rmd, "rb") as f:
+        return f.read() == s.routes.to_bytes()
+
+
+@command("Write the edited scene (and routes) as a mod: <game>\\Mods\\<mod>\\<LEVEL>.ENV / .RMD. Refuses a scene identical "
+         "to the shipped level (it would only copy game files into the mod) unless allow_unchanged.",
+         mod="mod folder name", game_dir="game folder (default: the session's)",
+         allow_unchanged="write it even when nothing differs from the shipped level")
+def save_mod(s: Session, mod, game_dir=None, allow_unchanged=False):
     if s.env is None:
         raise CommandError("no level open")
+    if not allow_unchanged and _same_as_shipped(s):
+        raise CommandError("no changes: the scene is exactly the shipped level - saving would only copy the game's "
+                           f"{s.level}.ENV / .RMD into the mod (and Export refuses copies of game files)")
     game = game_dir or s.game_dir
     if not game or not os.path.isdir(game):
         raise CommandError("game folder unknown - start the editor with --game")
@@ -1455,6 +1710,7 @@ def save_mod(s: Session, mod, game_dir=None):
         raise CommandError("bad mod name")
     folder = os.path.join(game, "Mods", mod)
     os.makedirs(folder, exist_ok=True)
+    backup = workflow.backup_files(s, folder, [s.level + ".ENV", s.level + ".RMD"], mod, s.level)
     written = []
     s.env.save(os.path.join(folder, s.level + ".ENV"))
     written.append(s.level + ".ENV")
@@ -1464,7 +1720,7 @@ def save_mod(s: Session, mod, game_dir=None):
     if problems := s.env.problems:
         raise CommandError("saved, but the scene has problems: " + "; ".join(problems[:3]))
     s.dirty = False
-    return {"folder": folder, "files": written}
+    return {"folder": folder, "files": written, "backup": backup}
 
 
 # ------------------------------------------------------------------------------------------ save as mission --
@@ -1569,10 +1825,11 @@ function init()
 end
 
 function update()
+{logic.HOOK_UPDATE}
 end
 
-function on_message(id, a, b)
-{logic.HOOK_MSG.format(args="id, a, b")}
+function on_message(id, a, b, c)
+{logic.HOOK_MSG.format(args="id, a, b, c")}
 end
 """
 
@@ -1601,10 +1858,11 @@ function init()
 end
 
 function update()
+{logic.HOOK_UPDATE}
 end
 
-function on_message(id, a, b)
-{logic.HOOK_MSG.format(args="id, a, b")}
+function on_message(id, a, b, c)
+{logic.HOOK_MSG.format(args="id, a, b, c")}
 end
 """
     return _mission_script_standalone(s, name, base)
@@ -1651,14 +1909,15 @@ end
 
 {goal}local started = false
 function update()
+{logic.HOOK_UPDATE}
     if not started and game.time_ms() > 0 then
         started = true
 {start}
     end
 end
 
-function on_message(id, a, b)
-{logic.HOOK_MSG.format(args="id, a, b")}
+function on_message(id, a, b, c)
+{logic.HOOK_MSG.format(args="id, a, b, c")}
     if id == game.EVENT.KILLED and enemies[a] then
         enemies[a] = nil
         if next(enemies) == nil then
@@ -1911,6 +2170,7 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
     folder = os.path.join(game, "Mods", mod)
     os.makedirs(folder, exist_ok=True)
     up = name.upper()
+    backup = workflow.backup_files(s, folder, workflow.mission_files(folder, up), mod, up)   # before overwriting
     written = []
     # No game files in the mod (gamerefs.py): the scene and routes as changes against the base level's, the base's
     # nav files and the models / banks placed from other levels as references to the player's own install.
@@ -1979,7 +2239,7 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
     s.mission = (mod, up)
     return {"folder": folder, "files": written, "script_kept": kept, "packed_models": packed, "packed_banks": banks,
             "removed_game_copies": removed,
-            "level": name.lower() + ".lua"}
+            "level": name.lower() + ".lua", "backup": backup}
 
 
 def _script_path(s: Session):
@@ -2049,6 +2309,8 @@ def play(s: Session):
         s.call("fix_crews")
     if "hidden" in found:
         s.call("fix_hidden")
+    if "rinfo" in found:
+        s.call("fix_rinfo")
     problems = scene_problems(s)
     if problems:
         raise CommandError("fix these first - they crash the game: " +
@@ -2058,7 +2320,17 @@ def play(s: Session):
     import time
     proc = subprocess.Popen([exe, "+level", saved["level"]], cwd=game, creationflags=0x00000008)   # DETACHED_PROCESS
     s.game = {"proc": proc, "start": time.time(), "level": saved["level"], "mod": mod, "crash": None}
-    return {"level": saved["level"], "mod": mod}
+    return {"level": saved["level"], "mod": mod, "mods": _enabled_mods(game)}
+
+
+def _enabled_mods(game):
+    """The Mods folders the game loads (all of them, in name order - a later one wins a file both have); a _ / .
+    prefix switches one off."""
+    root = os.path.join(game or "", "Mods")
+    if not os.path.isdir(root):
+        return []
+    return sorted((m for m in os.listdir(root) if os.path.isdir(os.path.join(root, m)) and not m.startswith(("_", "."))),
+                  key=str.lower)
 
 
 # ------------------------------------------------------------------------------------------------ game console --
@@ -2112,6 +2384,10 @@ def scene_problems(s: Session):
                 out.append({"line": r.index + 1, "name": r.get("stat"), "fix": "crews",
                             "problem": f"{r['model']}'s crew seat {seat} ({unit}) is object {cid}, which here is "
                                        f"{what} - the game would put it in the vehicle and crash. Fix removes it"})
+    for r in _missing_rinfo(s):
+        out.append({"line": r.index + 1, "name": r.get("name"), "fix": "rinfo",
+                    "problem": f"prop {r.get('name')} says a RINFO line follows but none does (copied before the editor "
+                               f"knew) - the game misreads every record after it. Fix clears the flag"})
     for r in s.env.find("ENVI"):
         unit = vehicles.get(str(r.get("model", "")).upper())
         if unit:
@@ -2209,11 +2485,21 @@ def game_console(s: Session, offset=0, all_lines=False):
         offset += len(chunk)
         lines = chunk.decode("utf-8", "replace").splitlines()
     shown = lines if all_lines else [l for l in lines if not any(n in l for n in _NOISE)]
+    if game:                                   # last seen: the press-any-key prompt, or the level running past it
+        for l in lines:
+            if "PLEASE PRESS ANY KEY" in l.upper():
+                game["waiting"] = True
+            elif game.get("waiting") and ("levelInitialise" in l or "DONE" in l):
+                game["waiting"] = False
     state = {"log": path if os.path.exists(path) else None, "offset": offset, "lines": shown,
-             "running": _game_running(), "level": game and game["level"], "exit_code": None, "crash": None}
+             "running": _game_running(), "level": game and game["level"], "exit_code": None, "crash": None,
+             "mods": _enabled_mods(s.game_dir),
+             # the loading screen waits for a key (the game's own "PLEASE PRESS ANY KEY TO BEGIN")
+             "waiting_for_key": False}
     if game:
         code = game["proc"].poll()
         state["running"] = code is None
+        state["waiting_for_key"] = bool(game.get("waiting")) and code is None
         if code is not None:
             state["exit_code"] = code
             if code != 0 and game["crash"] is None:
@@ -2418,8 +2704,39 @@ def help(s: Session):  # noqa: A001
     for n, (fn, d, a, m) in COMMANDS.items():
         params = list(inspect.signature(fn).parameters.values())[1:]
         out[n] = {"description": d, "args": a, "changes_level": m,
-                  "required": [p.name for p in params if p.default is inspect.Parameter.empty and p.name in a]}
+                  "required": [p.name for p in params if p.default is inspect.Parameter.empty and p.name in a],
+                  "types": {p.name: t for p in params if p.name in a and (t := _arg_type(p.default, a[p.name]))},
+                  "writes_files": n in workflow.WRITES_FILES, "internal": n in workflow.INTERNAL}
     return out
+
+
+def _arg_type(default, desc):
+    """A JSON Schema type for an argument (MCP tool schemas): from its default value, else from its description
+    ("[x, y, z]" -> array of 3 numbers, "{...}" -> object). None = any (the command converts it itself)."""
+    import inspect
+    if default is not inspect.Parameter.empty and default is not None:
+        if isinstance(default, bool):
+            return {"type": "boolean"}
+        if isinstance(default, int):
+            return {"type": "number"}      # sizes / counts given as 2.5 too; the command converts
+        if isinstance(default, float):
+            return {"type": "number"}
+        if isinstance(default, str):
+            return {"type": "string"}
+        if isinstance(default, (list, tuple)):
+            return {"type": "array"}
+        if isinstance(default, dict):
+            return {"type": "object"}
+    d = str(desc).lstrip().lower()
+    if d.startswith(("[x, y, z]", "optional [x, y, z]", "camera [x, y, z]")):
+        return {"type": "array", "items": {"type": "number"}, "minItems": 3, "maxItems": 3}
+    if d.startswith(("{", "optional {", "its arguments {")):
+        return {"type": "object"}
+    if d.startswith(("[{", "list of", "[")):
+        return {"type": "array"}
+    if d.startswith(("record line", "1-based line", "the soldier's hloi line", "0-based")):
+        return {"type": "integer"}
+    return None
 
 import logic  # noqa: E402  (objectives, rules, AI profiles, atmosphere, cameras: editor/logic.py)
 if getattr(logic, "_registered", False):     # reloaded: register its commands into the new COMMANDS
@@ -2441,7 +2758,27 @@ import tactics  # noqa: E402  (vision cones, minefields, emplacements, air suppo
 if getattr(tactics, "_registered", False):
     importlib.reload(tactics)
 tactics._registered = True
+import missionlogic  # noqa: E402  (the base mission's DLL logic, readable: editor/missionlogic.py)
+if getattr(missionlogic, "_registered", False):
+    importlib.reload(missionlogic)
+missionlogic._registered = True
+import paths  # noqa: E402  (AI paths / waypoints / regions: editor/paths.py)
+if getattr(paths, "_registered", False):
+    importlib.reload(paths)
+paths._registered = True
+import missionrules  # noqa: E402  (the rule catalogue and Lua compiler logic.py uses)
+if getattr(missionrules, "_registered", False):
+    importlib.reload(missionrules)
+missionrules._registered = True
 import interactive  # noqa: E402  (switches + doors, particle emitters: editor/interactive.py)
 if getattr(interactive, "_registered", False):
     importlib.reload(interactive)
 interactive._registered = True
+import vanilla  # noqa: E402  (vanilla lineage: status / revert / restore against the shipped scene: editor/vanilla.py)
+if getattr(vanilla, "_registered", False):
+    importlib.reload(vanilla)
+vanilla._registered = True
+import workflow  # noqa: E402  (status, batch, preview, references, check_mission, recovery, screenshot: editor/workflow.py)
+if getattr(workflow, "_registered", False):
+    importlib.reload(workflow)
+workflow._registered = True

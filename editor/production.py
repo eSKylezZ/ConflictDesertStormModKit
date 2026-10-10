@@ -980,9 +980,9 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
                 replaces.append(rel)
             files.append(rel)
     if copies:
-        raise CommandError("the mod holds byte-for-byte copies of game files, which can't be shared: "
-                           + ", ".join(copies[:6]) + " - re-save the mission (Save as mission) so they become "
-                           "references in its .uses, or delete them")
+        raise CommandError(f"{len(copies)} file(s) in the mod are exact copies of game files, which can't be shared: "
+                           + ", ".join(copies[:6]) + ("…" if len(copies) > 6 else "") + ". Remove them (Remove "
+                           "game copies), or re-save the mission so it references them in its .uses instead")
     if not files:
         raise CommandError("nothing to package")
     campaign = None
@@ -1012,3 +1012,27 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
     return {"zip": out, "bytes": os.path.getsize(out), "files": listed, "left_out": left_out,
             "replaces_game_files": replaces, "missions": [m["mission"] for m in summaries],
             "url": f"/download/{os.path.basename(out)}", "readme": readme}
+
+
+@command("Move the files of a mod that are exact copies of game files (what export_mod_zip refuses - e.g. a Save as mod "
+         "of an unchanged level) out of the mod into the editor's backups. Copies the mod's .uses builds anyway go too.",
+         mutates=False, mod="mod folder")
+def remove_game_copies(s: Session, mod):
+    import workflow
+    folder = _mod_folder(s, mod, create=False)
+    if not os.path.isdir(folder):
+        raise CommandError(f"no mod folder {mod}")
+    found = []
+    for dirpath, dirs, names in os.walk(folder):
+        dirs[:] = [d for d in dirs if not d.startswith((".", "__"))]
+        for f in names:
+            p = os.path.join(dirpath, f)
+            if _game_copy(s, p):
+                found.append(os.path.relpath(p, folder))
+    if not found:
+        return {"removed": [], "backup": None}
+    backup = workflow.backup_files(s, folder, found, mod, "game-copies")
+    for rel in found:
+        os.remove(os.path.join(folder, rel))
+    return {"removed": [r.replace(os.sep, "/") for r in found], "backup": backup}
+

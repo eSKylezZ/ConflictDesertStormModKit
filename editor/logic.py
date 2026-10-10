@@ -37,7 +37,8 @@ def extras(s: Session) -> dict:
 def set_extras(s: Session, d: dict | None):
     d = d or {}
     s.objectives = [dict(o) for o in d.get("objectives") or []]
-    s.rules = [dict(r) for r in d.get("rules") or []]
+    import missionrules
+    s.rules = [missionrules.upgrade(dict(r)) for r in d.get("rules") or []]
     s.patrols = {str(k): dict(v) for k, v in (d.get("patrols") or {}).items()}
     s.objectives_win = bool(d.get("objectives_win"))
     s.base_overrides = {str(k): dict(v) for k, v in (d.get("base_overrides") or {}).items()}
@@ -161,92 +162,70 @@ def set_objectives(s: Session, objectives, win_when_all_done=None):
         s.objectives_win = bool(win_when_all_done)
     used = {o["id"] for o in s.objectives}
     for i, r in enumerate(getattr(s, "rules", [])):     # rules may only point at objectives that still exist
-        for a in r["actions"]:
-            if a["type"] in ("complete_objective", "show_objective") and a["target"] not in used:
-                raise CommandError(f"rule {i + 1} uses objective {a['target']} - change that rule first")
+        for item in [r["trigger"], *r["conditions"], *r["actions"]]:
+            if "objective" in item and item["objective"] not in used:
+                raise CommandError(f"rule {i + 1} uses objective {item['objective']} - change that rule first")
     return {"objectives": s.objectives, "win_when_all_done": s.objectives_win}
 
 
 # ----------------------------------------------------------------------------------------------------- rules --
-TRIGGERS = {"region_enter": "a player enters a region", "region_leave": "a player leaves a region",
-            "killed": "an object is killed / destroyed", "timer": "seconds after the mission starts",
-            "switch": "a player uses a switch"}
-ACTIONS = {"show_layer": "show a layer", "hide_layer": "hide a layer", "show_objective": "show an objective",
-           "complete_objective": "complete an objective", "end_mission": "end the mission (win / loss)"}
+def _rule_catalog():
+    import missionrules
+    return missionrules.catalog()
 
 
-def _check_rule(s, r):
-    if not isinstance(r, dict) or not isinstance(r.get("trigger"), dict):
-        raise CommandError("a rule is {trigger: {type, target}, actions: [{type, target}], once}")
-    t = r["trigger"]
-    kind, target = t.get("type"), t.get("target")
-    if kind not in TRIGGERS:
-        raise CommandError(f"trigger type is one of {', '.join(TRIGGERS)}")
-    if kind in ("region_enter", "region_leave"):
-        if str(target) not in set(_regions(s)):
-            raise CommandError(f"no region {target!r} in this scene")
-        target = str(target)
-    elif kind == "killed":
-        target = _ids(target)[0]
-        if target not in _script_ids(s):
-            raise CommandError(f"no object with script id {target} in this scene")
-    elif kind == "switch":
-        if str(target) not in set(_switches(s)):
-            raise CommandError(f"no switch {target!r} in this scene")
-        target = str(target)
-    else:
-        try:
-            target = float(target)
-        except (TypeError, ValueError):
-            raise CommandError("timer trigger: target = seconds") from None
-        if not 0 < target <= 36000:
-            raise CommandError("timer trigger: 1 - 36000 seconds")
-    layers = set(getattr(s, "layers", {}).values())
-    objectives = {o["id"] for o in getattr(s, "objectives", [])}
-    actions = []
-    for a in r.get("actions") or []:
-        at, av = a.get("type"), a.get("target")
-        if at not in ACTIONS:
-            raise CommandError(f"action type is one of {', '.join(ACTIONS)}")
-        if at in ("show_layer", "hide_layer"):
-            if str(av) not in layers:
-                raise CommandError(f"no layer {av!r} - put objects into it first (their Layer box)")
-            av = str(av)
-        elif at in ("show_objective", "complete_objective"):
-            try:
-                av = int(av)
-            except (TypeError, ValueError):
-                raise CommandError(f"{at}: target = objective id") from None
-            if av not in objectives:
-                raise CommandError(f"no objective {av} - add it in Objectives... first")
-        else:
-            if av in ("win", 2, "2", "success"):
-                av = "win"
-            elif av in ("loss", 1, "1", "failure", "lose"):
-                av = "loss"
-            else:
-                raise CommandError("end_mission: target win or loss")
-        actions.append({"type": at, "target": av})
-    if not actions:
-        raise CommandError("a rule needs at least one action")
-    return {"trigger": {"type": kind, "target": target}, "actions": actions, "once": bool(r.get("once", True))}
+def _check_rule(s, r, index=None):
+    import missionrules
+    return missionrules.check_rule(s, r, index)
 
 
-@command("Replace the mission's event rules (whole list). Rule: {trigger: {type: region_enter / region_leave (target = "
-         "region name) / killed (target = script id) / timer (target = seconds after the start)}, actions: [{type: "
-         "show_layer / hide_layer (target = layer) / show_objective / complete_objective (target = objective id) / "
-         "end_mission (target = win / loss)}], once: true (default) = only the first time}. Compiled into the script.",
-         mutates=True, rules="list of rules")
+@command("Replace the mission's rules (the whole list). Rule: {name, enabled, once, trigger: {type, ...}, conditions: "
+         "[{type, ..., not}], actions: [{type, ...}]} - rule_catalog lists every trigger / condition / action type with "
+         "its parameters. Compiled into the mission script on save.", mutates=True, rules="list of rules")
 def set_rules(s: Session, rules):
-    s.rules = [_check_rule(s, r) for r in rules or []]
+    s.rules = [_check_rule(s, r, k) for k, r in enumerate(rules or [])]
     return {"rules": s.rules}
 
 
-@command("Add one event rule (see set_rules for the fields).", mutates=True, trigger="{type, target}",
-         actions="[{type, target}]", once="fire only the first time (default true)")
-def add_rule(s: Session, trigger, actions, once=True):
-    s.rules = list(getattr(s, "rules", [])) + [_check_rule(s, {"trigger": trigger, "actions": actions, "once": once})]
-    return {"index": len(s.rules) - 1, "rule": s.rules[-1]}
+@command("Every rule trigger, condition and action type with its parameters (name, type, label, default, choices) - "
+         "what set_rules / add_rule accept and the rule builder offers.")
+def rule_catalog(s: Session):
+    import missionrules
+    return missionrules.catalog()
+
+
+@command("Replace one rule (by its index) with a new version.", mutates=True, index="0-based rule index", rule="the rule")
+def update_rule(s: Session, index, rule):
+    rules = list(getattr(s, "rules", []))
+    if not 0 <= int(index) < len(rules):
+        raise CommandError(f"no rule {index}")
+    rules[int(index)] = _check_rule(s, rule, int(index))
+    s.rules = rules
+    return {"index": int(index), "rule": rules[int(index)]}
+
+
+@command("Move a rule up or down in the list (rules run in list order when several fire at once).", mutates=True,
+         index="0-based rule index", to="new index")
+def move_rule(s: Session, index, to):
+    rules = list(getattr(s, "rules", []))
+    i, j = int(index), int(to)
+    if not (0 <= i < len(rules) and 0 <= j < len(rules)):
+        raise CommandError("index out of range")
+    rules.insert(j, rules.pop(i))
+    s.rules = rules
+    return {"rules": rules}
+
+
+@command("Add one rule (see set_rules / rule_catalog): either rule = the whole rule, or trigger + actions (+ "
+         "conditions, name, once).", mutates=True, rule="the rule", trigger="{type, ...}", actions="[{type, ...}]",
+         conditions="[{type, ...}]", name="a name", once="fire only the first time (default true)")
+def add_rule(s: Session, rule=None, trigger=None, actions=None, conditions=None, name="", once=True):
+    r = rule or {"name": name, "trigger": trigger, "conditions": conditions or [], "actions": actions or [],
+                 "once": once, "enabled": True}
+    rules = list(getattr(s, "rules", []))
+    rules.append(_check_rule(s, r, len(rules)))
+    s.rules = rules
+    return {"index": len(rules) - 1, "rule": rules[-1]}
 
 
 @command("Delete an event rule by its index in the list.", mutates=True, index="0-based rule index")
@@ -260,14 +239,25 @@ def delete_rule(s: Session, index):
 
 
 # -------------------------------------------------------------------------------------------------- patrols --
-@command("Give a soldier a patrol route through waypoints (NEWENVWAYPT names or ids, in order); an empty list removes "
-         "it. Stored with the mission and written into the script as editor.patrols - data only for now: the script "
-         "command that sends a soldier along waypoints isn't mapped yet.", mutates=True,
-         line="the soldier's HLOI line", waypoints="waypoint names or ids", loop="back to the first one at the end")
-def set_patrol(s: Session, line, waypoints, loop=True):
-    r = s.record(line)
-    if r.kind != "HLOI":
-        raise CommandError("patrols are for soldiers (HLOI records)")
+@command("Give soldiers a patrol route through waypoints (names or ids, in order); an empty list removes it. "
+         "At mission start (or when a rule's 'Walk a path' action runs) they walk it: the chain is set with "
+         "set_waypoint_next (API +0xA4) and each soldier started with set_path (+0x110) + set_ai_state 0 (+0x114) - "
+         "the shipped missions' pattern.", mutates=True,
+         line="a soldier's HLOI line (or lines)", waypoints="waypoint names or ids", loop="back to the first one at the end",
+         movement="walk / run / crouch / prone", start="mission (at mission start) or rule (only when a rule says so)",
+         lines="several soldiers")
+def set_patrol(s: Session, line=None, waypoints=None, loop=True, movement="walk", start="mission", lines=None,
+               unseen=True):
+    """unseen: keep walking while the player can't see the soldier. The game puts enemy soldiers to sleep when they
+    were never on screen / not for 60 s / are beyond the fog (FUN_00428110 -> soldier +0x280): a shipped guard's route
+    only starts once the player comes near. False = the game's own behaviour."""
+    targets = [int(x) for x in (lines or [])] or ([int(line)] if line is not None else [])
+    if not targets:
+        raise CommandError("line: the soldier's record line")
+    if movement not in ("walk", "run", "crouch", "prone"):
+        raise CommandError("movement: walk / run / crouch / prone")
+    if start not in ("mission", "rule"):
+        raise CommandError("start: mission or rule")
     by_name = {str(w["name"]).upper(): str(w["name"]) for w in _waypoints(s)}
     by_id = {w["id"]: str(w["name"]) for w in _waypoints(s)}
     names = []
@@ -276,14 +266,60 @@ def set_patrol(s: Session, line, waypoints, loop=True):
         if name is None:
             raise CommandError(f"no waypoint {w!r} in this scene")
         names.append(name)
-    sid = str(r["script_id"])
     if len(names) == 1:
         raise CommandError("a patrol needs at least two waypoints")
-    if names:
-        s.patrols[sid] = {"waypoints": names, "loop": bool(loop)}
-    else:
-        s.patrols.pop(sid, None)
-    return {"script_id": r["script_id"], "patrol": s.patrols.get(sid)}
+    out = []
+    for ln in targets:
+        r = s.record(ln)
+        if r.kind != "HLOI":
+            raise CommandError("patrols are for soldiers (HLOI records)")
+        sid = str(r["script_id"])
+        if names:
+            s.patrols[sid] = {"waypoints": names, "loop": bool(loop), "movement": movement, "start": start,
+                              "unseen": bool(unseen)}
+        else:
+            s.patrols.pop(sid, None)
+        out.append({"script_id": r["script_id"], "patrol": s.patrols.get(sid)})
+    return {"patrols": out}
+
+
+def _patrols_lua(s) -> list[str]:
+    """editor.start_patrols(): chain each patrol's waypoints and start its soldiers (fresh missions; a loaded save
+    keeps the game's own AI state)."""
+    ids = {str(w["name"]): w["id"] for w in _waypoints(s)}
+    L = ["function editor.patrol(o, chain, loop, stance, retry, unseen)   -- chain = waypoint ids in order",
+         "    for i = 1, #chain - 1 do game.call(0x0A4, chain[i], chain[i + 1]) end",
+         "    game.call(0x0A4, chain[#chain], loop and chain[1] or -1)",
+         "    -- the game puts enemy soldiers the player hasn't seen to sleep (their route waits for the player)",
+         "    if unseen and game.keep_awake then game.keep_awake(o, true) end",
+         "    game.call(0x184, o, 0)   -- a 'Hold position' made him ignore order changes",
+         "    game.call(0x198, o, 0)   -- the shipped missions' order: distractions on, path, AI state 0, stance",
+         "    game.call(0x110, o, chain[1])",
+         "    game.call(0x114, o, 0)",
+         "    game.call(stance, o)",
+         "    if not retry and editor.patrol_retry then",
+         "        editor.patrol_retry[o] = { chain = chain, loop = loop, stance = stance, unseen = unseen, tries = 0,",
+         "                                   last = game.time_ms() }",
+         "    end",
+         "end",
+         "editor.patrols = {   -- soldier script id -> its route (Assign path / set_patrol)"]
+    stances = {"walk": "0x208", "run": "0x20C", "crouch": "0x210", "prone": "0x218"}
+    for sid, p in sorted(getattr(s, "patrols", {}).items(), key=lambda kv: int(kv[0])):
+        chain = [ids[n] for n in p["waypoints"] if n in ids]
+        if len(chain) < 2:
+            continue
+        L.append(f"    [{int(sid)}] = {{ chain = {{ {', '.join(map(str, chain))} }}, loop = "
+                 f"{'true' if p.get('loop', True) else 'false'}, stance = {stances.get(p.get('movement', 'walk'), '0x208')}, "
+                 f"at_start = {'true' if p.get('start', 'mission') == 'mission' else 'false'}, "
+                 f"unseen = {'true' if p.get('unseen', True) else 'false'} }},"
+                 f"   -- {' -> '.join(p['waypoints'][:6])}{' ...' if len(p['waypoints']) > 6 else ''}")
+    L += ["}",
+          "function editor.start_patrols()",
+          "    for o, p in pairs(editor.patrols) do",
+          "        if p.at_start then editor.patrol(o, p.chain, p.loop, p.stance, false, p.unseen) end",
+          "    end",
+          "end"]
+    return L
 
 
 # ------------------------------------------------------------------------------------------- AI profiles --
@@ -398,6 +434,24 @@ SCALARS = {"FOGSTART": "fog_start", "FOGSTOP": "fog_stop", "XFOGSTART": "far_fog
            "TIMEOFDAY": "time_of_day"}
 
 
+SKY_FIELDS = {"SKYTEXTURE": "texture", "SKYTILEFACTOR": "tile", "SKYFIXEDY": "fixed_y", "SKYSPEED": "speed",
+              "SKYCURVATURE": "curvature", "SKYHEIGHT": "height"}
+
+
+def _sky_layers(env) -> list[dict]:
+    """The cloud layers: each starts with SKYTEXTURE and has its tiling, speed (x, z, ?), dome curvature, height (cm)."""
+    layers = []
+    for r in env.records:
+        if r.kind not in SKY_FIELDS or len(r.tokens) < 2:
+            continue
+        if r.kind == "SKYTEXTURE" or not layers:
+            layers.append({"index": len(layers), "lines": {}})
+        vals = [t.value for t in r.tokens[1:]]
+        layers[-1][SKY_FIELDS[r.kind]] = vals if r.kind == "SKYSPEED" else vals[0]
+        layers[-1]["lines"][SKY_FIELDS[r.kind]] = r.index + 1
+    return layers
+
+
 def _sun(env):
     lights = [r for r in env.find("DLGT") if r.fields]
     return next((r for r in lights if "SUN" in str(r["name"]).upper()), lights[0] if lights else None)
@@ -418,6 +472,7 @@ def get_atmosphere(s: Session):
     out["colours"] = {k: {TIME_KEYS[i] if i < 4 else str(i): e["rgba"] for i, e in enumerate(v)}
                       for k, v in colours.items() if v}
     out["colour_names"] = COLOUR_NAMES
+    out["sky_layers"] = _sky_layers(env)
     sun = _sun(env)
     if sun:
         try:
@@ -443,9 +498,10 @@ def _rgba(v, what):
          "time_of_day, and the game moves the sun with the hour.", mutates=True,
          time_of_day="hour 0-24", fog_start="cm", fog_stop="cm", far_fog_start="cm", far_fog_stop="cm",
          colours="{KEY: {time key: rgba}}", sun_colour="[r, g, b, a]", sun_ambient="[r, g, b, a]",
-         sun_tilt="degrees", sun_heading="degrees")
+         sun_tilt="degrees", sun_heading="degrees",
+         sky="[{index: cloud layer, tile, speed: [x, z, w], curvature, height (cm)}] - only what is given")
 def set_atmosphere(s: Session, time_of_day=None, fog_start=None, fog_stop=None, far_fog_start=None, far_fog_stop=None,
-                   colours=None, sun_colour=None, sun_ambient=None, sun_tilt=None, sun_heading=None):
+                   colours=None, sun_colour=None, sun_ambient=None, sun_tilt=None, sun_heading=None, sky=None):
     env = _scene(s)
     want = {"TIMEOFDAY": time_of_day, "FOGSTART": fog_start, "FOGSTOP": fog_stop, "XFOGSTART": far_fog_start,
             "XFOGSTOP": far_fog_stop}
@@ -475,6 +531,27 @@ def set_atmosphere(s: Session, time_of_day=None, fog_start=None, fog_stop=None, 
             for k in range(4):
                 recs[i].set_token(1 + k, rgba[k])
             changed.append(f"{key}.{TIME_KEYS[i] if i < 4 else i}")
+    layers = _sky_layers(env)
+    for want_layer in sky or []:
+        try:
+            lay = layers[int(want_layer.get("index"))]
+        except (TypeError, ValueError, IndexError, AttributeError):
+            raise CommandError(f"sky: no cloud layer {want_layer!r} (this scene has {len(layers)})") from None
+        for key in ("tile", "speed", "curvature", "height"):
+            if key not in want_layer or want_layer[key] is None:
+                continue
+            if key not in lay["lines"]:
+                raise CommandError(f"sky layer {lay['index']} has no {key} line")
+            rec = env.record_at(lay["lines"][key])
+            vals = want_layer[key] if key == "speed" else [want_layer[key]]
+            if not isinstance(vals, (list, tuple)) or len(vals) > len(rec.tokens) - 1:
+                raise CommandError(f"sky {key}: {len(rec.tokens) - 1} value(s)")
+            for k, v in enumerate(vals):
+                v = float(v)
+                if key == "height" and not 100 <= v <= 1000000:
+                    raise CommandError("sky height: 100 - 1000000 cm")
+                rec.set_token(1 + k, v)
+            changed.append(f"sky{lay['index']}.{key}")
     if any(v is not None for v in (sun_colour, sun_ambient, sun_tilt, sun_heading)):
         sun = _sun(env)
         if sun is None:
@@ -578,22 +655,20 @@ def _warnings(s):
             out.append(f"objective {o['id']}: a target object is no longer in the scene")
         if o["type"] == "region" and o["target"] not in regions:
             out.append(f"objective {o['id']}: region {o['target']} is gone")
+    if any(o.get("texts_missing") for o in base_objectives(s)):
+        out.append("the base mission's objective texts weren't found - start the editor with --game <game folder> "
+                   "once (they are remembered in the data folder's _editor_cache afterwards)")
     gone = sorted(i for i in base_targets(s) if i not in ids)
     if gone:
         out.append(f"script id{'s' if len(gone) > 1 else ''} {', '.join(map(str, gone))}: used by "
                    f"{_base_dll(s, s.level) or 'the base mission'} but no longer in the scene - its logic for "
                    "them won't work (put objects in a hidden layer instead of deleting them)")
+    import missionrules
     for i, r in enumerate(getattr(s, "rules", [])):
-        t = r["trigger"]
-        if t["type"].startswith("region") and t["target"] not in regions:
-            out.append(f"rule {i + 1}: region {t['target']} is gone")
-        if t["type"] == "killed" and t["target"] not in ids:
-            out.append(f"rule {i + 1}: object {t['target']} is gone")
-        if t["type"] == "switch" and t["target"] not in set(_switches(s)):
-            out.append(f"rule {i + 1}: switch {t['target']} is gone")
-        for a in r["actions"]:
-            if a["type"] in ("show_layer", "hide_layer") and a["target"] not in layers:
-                out.append(f"rule {i + 1}: layer {a['target']} is gone")
+        try:
+            missionrules.check_rule(s, r, i)
+        except CommandError as e:
+            out.append(str(e))
     for sid, p in getattr(s, "patrols", {}).items():
         if int(sid) not in ids:
             out.append(f"patrol of {sid}: the soldier is gone")
@@ -738,8 +813,9 @@ def get_objectives(s: Session):
     base = []
     for o in base_objectives(s):
         c = ov.get(o["id"], {})
-        base.append({**o, "original_title": o["title"], "title": c.get("title") or o["title"],
-                     "hidden": bool(c.get("hidden")), "start": "base mission"})
+        base.append({**o, "original_title": o["title"], "original_description": o["description"],
+                     "title": c.get("title") or o["title"], "hidden": bool(c.get("hidden")),
+                     "is_overridden": bool(c), "hash": "0x%08X" % o["hash"], "start": "base mission"})
     custom = [{**o, "source": "custom", "base": False} for o in getattr(s, "objectives", [])]
     return {"objectives": base + custom, "base_count": len(base), "first_free_index": first_free_index(s)}
 
@@ -848,8 +924,8 @@ def mission_logic(s: Session):
     _scene(s)
     return {**extras(s), "win_when_all_done": getattr(s, "objectives_win", False),
             "base_objectives": [o for o in get_objectives(s)["objectives"] if o["source"] == "base"],
-            "first_free_index": first_free_index(s), "objective_types": OBJECTIVE_TYPES, "triggers": TRIGGERS,
-            "actions": ACTIONS, "regions": sorted(_regions(s)), "switches": _switches(s), "layers": sorted(set(getattr(s, "layers", {}).values())),
+            "first_free_index": first_free_index(s), "objective_types": OBJECTIVE_TYPES, "catalog": _rule_catalog(),
+            "rule_texts": _rule_texts(s), "regions": sorted(_regions(s)), "switches": _switches(s), "layers": sorted(set(getattr(s, "layers", {}).values())),
             "waypoints": [{"line": w.index + 1, "id": w["id"], "name": w["name"]} for w in _waypoints(s)],
             "warnings": _warnings(s), "lua": blocks_text(s)}
 
@@ -861,6 +937,7 @@ SHOW_TIMER, OBJ_TIMER, RULE_TIMER = 8999, 9000, 9100      # game.timer ids the b
 KILL = "(id == game.EVENT.KILLED or id == game.EVENT.DESTROYED)"
 HOOK_INIT = "    editor_init()   -- the editor's objectives and rules (Objectives..., Events & Actions)"
 HOOK_MSG = "    editor_on_message({args})   -- the editor's objectives and rules"
+HOOK_UPDATE = "    editor_update()   -- the editor's rules: waits, timed rules, conditions"
 
 
 def _describe_objective(o):
@@ -875,25 +952,15 @@ def _describe_objective(o):
     return "completed by a rule or your script"
 
 
+def _rule_texts(s):
+    import missionrules
+    ctx = missionrules.Ctx(s)
+    return [missionrules.describe(r, ctx) for r in getattr(s, "rules", [])]
+
+
 def _describe_rule(r):
-    t = r["trigger"]
-    if t["type"] == "region_enter":
-        when = f'a player enters region "{t["target"]}"'
-    elif t["type"] == "region_leave":
-        when = f'a player leaves region "{t["target"]}"'
-    elif t["type"] == "killed":
-        when = f"object {t['target']} is killed / destroyed"
-    elif t["type"] == "switch":
-        when = f'a player uses switch "{t["target"]}"'
-    else:
-        when = f"{t['target']:g} s into the mission"
-    acts = []
-    for a in r["actions"]:
-        acts.append({"show_layer": f'show layer "{a["target"]}"', "hide_layer": f'hide layer "{a["target"]}"',
-                     "show_objective": f"show objective {a['target']}",
-                     "complete_objective": f"complete objective {a['target']}",
-                     "end_mission": f"mission {'success' if a['target'] == 'win' else 'failed'}"}[a["type"]])
-    return f"when {when} -> {', '.join(acts)}{' (once)' if r['once'] else ''}"
+    import missionrules
+    return missionrules.describe(r)
 
 
 def _objectives_block(s) -> str:
@@ -939,12 +1006,14 @@ def _objectives_block(s) -> str:
           "    for _, i in ipairs(editor.objectives) do",
           "        if st.shown[i] and not st.done[i] and editor.idx[i] then game.show_objective(editor.idx[i]) end",
           "    end",
+          "    if editor.rules_start then editor.rules_start(fresh) end",
           "end",
           "function editor.complete(i)   -- objective i done (once); with win_when_all_done the last one wins",
           "    local st = editor.state()",
           "    if st.done[i] then return end",
           "    st.done[i] = true",
           "    if editor.idx[i] then game.complete_objective(editor.idx[i]) end",
+          "    if editor.rules_on_message then editor.rules_on_message(editor.OBJECTIVE_DONE, i) end",
           "    if not editor.win_when_all_done then return end",
           "    for _, j in ipairs(editor.objectives) do",
           "        if not st.done[j] then return end",
@@ -1036,63 +1105,33 @@ def _base_lua(s) -> list[str]:
     return L
 
 
-def _action_lua(a):
-    t = a["target"]
-    return {"show_layer": f"game.show_layer({_lua_value(t)})", "hide_layer": f"game.hide_layer({_lua_value(t)})",
-            "show_objective": f"editor.show({t})", "complete_objective": f"editor.complete({t})",
-            "end_mission": f"game.end_mission({2 if t == 'win' else 1})"}[a["type"]]
-
-
 def _switch_hash(name) -> int:
     """What message 0x0D carries in a: the archive hash of the switch's name, as a signed int (interactive.py)."""
-    from interactive import signed
-    from conflict_ds_tools.archive import archive_hash
-    return signed(archive_hash(str(name)))
+    from interactive import name_hash, signed
+    return signed(name_hash(str(name)))
 
 
 def _rules_block(s) -> str:
+    import missionrules
     rules = list(getattr(s, "rules", []))
-    L = [f"{RULES_BEGIN} (rewritten by the editor on every save - change them in Events & Actions)",
-         "function editor.first(rule)   -- true only the first time (rules that fire once; kept in save games)",
-         "    local st = editor.state()",
-         "    if st.fired[rule] then return false end",
-         "    st.fired[rule] = true",
-         "    return true",
-         "end",
+    L = [f"{RULES_BEGIN} (rewritten by the editor on every save - change them in Objectives... > Rules)",
          "function editor_init()   -- called from init()",
          "    if game.loading_save() then return end   -- a loaded save: editor.start(false) on SAVE_LOADED",
-         f"    game.timer({SHOW_TIMER}, 0.5)   -- add the objectives and show the starting ones",
-         "    editor.objective_timers()"]
-    for n, r in enumerate(rules, 1):
-        if r["trigger"]["type"] == "timer":
-            L.append(f"    game.timer({RULE_TIMER + n}, {r['trigger']['target']:g})   -- rule {n}")
-    L += ["end",
-          "function editor_on_message(id, a, b)   -- called from on_message()",
-          f"    if id == game.EVENT.TIMER and a == {SHOW_TIMER} then editor.start(true) end",
-          "    if id == game.EVENT.SAVE_LOADED then editor.start(false) end",
-          f"    if id == game.EVENT.TIMER and a == {BASE_TIMER} then editor.hide_base() end"]
-    for n, r in enumerate(rules, 1):
-        t = r["trigger"]
-        cond = {"region_enter": f"id == game.EVENT.ENTERED and a == {_lua_value(t['target'])}",
-                "region_leave": f"id == game.EVENT.LEFT and a == {_lua_value(t['target'])}",
-                "killed": f"{KILL} and a == {t['target']}",
-                "timer": f"id == game.EVENT.TIMER and a == {RULE_TIMER + n}",
-                "switch": f"id == game.EVENT.SWITCH and a == {_switch_hash(t['target'])}"}[t["type"]]
-        if r["once"] and t["type"] != "timer":
-            cond += f" and editor.first({n})"
-        L += [f"    -- rule {n}: {_describe_rule(r)}", f"    if {cond} then"]
-        L += [f"        {_action_lua(a)}" for a in r["actions"]]
-        L.append("    end")
-    L += ["    editor.objectives_on_message(id, a, b)   -- after the rules: a rule that shows an objective comes first",
-          "    editor.snapshot_base()   -- the base objectives' state, for loaded saves",
-          "end",
-          "-- patrol routes (Assign patrol): waypoint names per soldier script id. Data only for now - the script",
-          "-- command that sends a soldier along waypoints isn't mapped yet; your code can read editor.patrols.",
-          "editor.patrols = {"]
-    for sid, p in sorted(getattr(s, "patrols", {}).items(), key=lambda kv: int(kv[0])):
-        names = ", ".join(_lua_value(w) for w in p["waypoints"])
-        L.append(f"    [{int(sid)}] = {{ loop = {'true' if p.get('loop', True) else 'false'}, {names} }},")
-    L += ["}", RULES_END]
+         f"    game.timer({SHOW_TIMER}, 0.5)   -- add the objectives, start the rules and patrols",
+         "    editor.objective_timers()",
+         "end",
+         "function editor_on_message(id, a, b, c)   -- called from on_message()",
+         f"    if id == game.EVENT.TIMER and a == {SHOW_TIMER} then editor.start(true) end",
+         "    if id == game.EVENT.SAVE_LOADED then editor.start(false) end",
+         f"    if id == game.EVENT.TIMER and a == {BASE_TIMER} then editor.hide_base() end",
+         "    editor.rules_on_message(id, a, b, c)",
+         "    editor.objectives_on_message(id, a, b)   -- after the rules: a rule that shows an objective comes first",
+         "    editor.snapshot_base()   -- the base objectives' state, for loaded saves",
+         "end"]
+    L += _patrols_lua(s)
+    cams = [str(r["name"]) for r in s.env.records if r.kind.startswith("CAM") and r.fields] if s.env else []
+    L += missionrules.rules_lua(rules, _regions(s), waits_for_start=_has_base(s), cameras=cams)
+    L.append(RULES_END)
     return "\n".join(L)
 
 
@@ -1131,10 +1170,16 @@ def ensure_hooks(text):
         m = re.search(r"^function on_message\(([^)]*)\)[^\n]*\n", text, re.M)
         if m:
             params = [p.strip() for p in m.group(1).split(",") if p.strip() and p.strip() != "..."]
-            args = (params + ["nil", "nil", "nil"])[:3]
+            args = (params + ["nil", "nil", "nil", "nil"])[:4]
             text = text[:m.end()] + HOOK_MSG.format(args=", ".join(args)) + "\n" + text[m.end():]
         else:
-            text = text.rstrip("\n") + "\n\nfunction on_message(id, a, b)\n" + HOOK_MSG.format(args="id, a, b") + "\nend\n"
+            text = text.rstrip("\n") + "\n\nfunction on_message(id, a, b, c)\n" + HOOK_MSG.format(args="id, a, b, c") + "\nend\n"
+    if not re.search(r"^\s*editor_update\(\)", own, re.M):
+        m = re.search(r"^function update\(\)[^\n]*\n", text, re.M)
+        if m:
+            text = text[:m.end()] + HOOK_UPDATE + "\n" + text[m.end():]
+        else:
+            text = text.rstrip("\n") + "\n\nfunction update()\n" + HOOK_UPDATE + "\nend\n"
     return text
 
 
@@ -1162,4 +1207,4 @@ def _without_blocks(text):
 def strip(text):
     """The script without the objectives / rules blocks and the hook lines (to compare scripts)."""
     return "\n".join(l for l in _without_blocks(text).splitlines()
-                     if "editor_init()" not in l and "editor_on_message(" not in l)
+                     if "editor_init()" not in l and "editor_on_message(" not in l and "editor_update()" not in l)

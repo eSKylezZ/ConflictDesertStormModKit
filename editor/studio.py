@@ -61,6 +61,73 @@ def _qtd_leaf(nodes, x, z):
     return nodes[i]
 
 
+def _walk_nodes(s: Session):
+    """The level's .QTD nodes (cached per file), or None when the level has none. A new level (new_level: s.blank)
+    has none either - its session still names the environment level, whose map is another place; the game builds the
+    new level's walk map from the scene at load."""
+    if getattr(s, "blank", False):
+        return None
+    path = _find_file(s.folder, s.level + ".QTD") if s.folder and s.level else None
+    if not path:
+        return None
+    cache = getattr(s, "_qtd_cache", None)
+    if not cache or cache[0] != path:
+        s._qtd_cache = cache = (path, _read_qtd(open(path, "rb").read()))
+    return cache[1]
+
+
+def walkable_at(s: Session, x, z):
+    """True / False = the walk-map cell under (x, z) is walkable / blocked (outside the map counts as blocked); None
+    when the level has no walk map. Blocked cells: AI soldiers can't plan a route to or from there (indoor routes use
+    hand-placed markers instead, so a blocked waypoint is a risk, not always a failure)."""
+    nodes = _walk_nodes(s)
+    if nodes is None:
+        return None
+    leaf = _qtd_leaf(nodes, x, z)
+    return bool(leaf and leaf[0] == 3)
+
+
+def nearest_walkable(s: Session, x, z):
+    """Centre [x, y, z] of the nearest walkable cell (y = its ground: the route marker 51 cm above it, or None)."""
+    nodes = _walk_nodes(s)
+    if nodes is None:
+        return None
+    best = None
+    for kind, d, child, cx, cz, h in nodes:
+        if child or kind != 3:
+            continue
+        # distance to the cell (0 inside it), then to its centre - so a point next to a big cell lands inside it
+        dx, dz = max(abs(x - cx) - h, 0.0), max(abs(z - cz) - h, 0.0)
+        key = (dx * dx + dz * dz, (x - cx) ** 2 + (z - cz) ** 2)
+        if best is None or key < best[0]:
+            best = (key, cx, cz, h, d)
+    if best is None:
+        return None
+    _, cx, cz, h, d = best
+    y = None
+    if s.routes and 0 <= d < len(s.routes.markers):
+        y = s.routes.markers[d].pos[1] - MARKER_LIFT
+    # inside a big cell: the point itself moved just inside the cell, else the centre
+    px = min(max(x, cx - h + 30), cx + h - 30) if h > 60 else cx
+    pz = min(max(z, cz - h + 30), cz + h - 30) if h > 60 else cz
+    return [round(px, 1), None if y is None else round(y, 1), round(pz, 1)]
+
+
+@command("Walk-map check of points: is each on a walkable cell of the level's AI walk map (blocked = soldiers can't "
+         "plan a route there), and the nearest walkable spot. walkable null = the level has no walk map.",
+         points="[[x, y, z], ...] (cm)")
+def walk_check(s: Session, points):
+    _need_level(s)
+    out = []
+    for p in points or []:
+        x, z = float(p[0]), float(p[2])
+        ok = walkable_at(s, x, z)
+        n = None if ok in (True, None) else nearest_walkable(s, x, z)
+        out.append({"pos": [x, float(p[1]), z], "walkable": ok,
+                    **({"nearest": n, "distance": round(math.hypot(n[0] - x, n[2] - z))} if n else {})})
+    return out
+
+
 class _Nearest:
     """Nearest walkable height by x / z (bucketed)."""
 
@@ -129,7 +196,8 @@ def walkability_grid(s: Session, resolution=0, blocked=True, cells=True):
     _need_level(s)
     if not cells:
         return {"footprints": _new_obstacles(s)}
-    path = _find_file(s.folder, s.level + ".QTD") if s.folder else None
+    # a new level (s.blank) has no map yet: its session names the environment level, whose map is another place
+    path = _find_file(s.folder, s.level + ".QTD") if s.folder and not getattr(s, "blank", False) else None
     ground = _ground_y(s)
     cells, source = [], None
     if path:

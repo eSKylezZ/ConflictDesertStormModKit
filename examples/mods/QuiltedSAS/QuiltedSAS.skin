@@ -1,0 +1,11 @@
+# A quilted SAS jacket for Bradley - on the Squad Loadout screen pick UNIFORM "SAS (QUILTED)".
+#
+# Shows: "normal map" - a uniform with its own normal map. The diamond quilting is mostly in the normal map
+# (QuiltedSAS_Bump.tga: Bradley's own, HERO01BUMP_UK_01, with padded diamonds added on the cloth), so the seams catch
+# the light as he turns. Only this uniform gets it: Bradley's other uniforms keep his normal one.
+
+uniform      = SAS
+uniform name = SAS (Quilted)
+soldier      = Bradley
+texture      = QuiltedSAS_01       # QuiltedSAS_01.dds - Bradley's layout (HERO01_UK_01)
+normal map   = QuiltedSAS_Bump     # QuiltedSAS_Bump.tga: 256 x 256, 32-bit, DirectX style (ds_texture.py normal)

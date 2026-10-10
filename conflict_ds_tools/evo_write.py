@@ -8,8 +8,12 @@ The template keeps everything the game needs that isn't geometry - the object li
   VBOB   one VBUF (version 6) per texture: vertices {pos, normal, BGRA colour, uv} in the part's own space, a
          triangle strip (the game draws strips: every model has one) + the same triangles as a list, empty VSTP
          and FACE, VBPL with a zero entry per strip triangle, and the template's two trailing u32s.
-Everything else of the template object (header, MATL, BSP data, keys, NEXT/DONE) is copied; the model name in every
-object header can be renamed.
+Everything else of the template object (header, MATL, collision trees, keys, NEXT/DONE) is copied; the model name in
+every object header can be renamed. Collision can be replaced too (rebuild(collision=...)): the object's BSPT entries
+become one u = 0 tree built by bsp.py (the game skips u = 1 render trees), the header's BSPT count and collision source
+name ("THIS" / "NOBSP", or the template's "#BSP_" helper, whose mesh is rebuilt) follow, and both bounding boxes grow
+to take the collision in. Shadow (#SHA_) objects are plain meshes - give them new geometry through `parts`; the game
+computes their face table itself.
 
 Static parts (geometry kinds 0 and 3: weapons, props, vehicles) take Parts; a character's skin (kind 2) takes a
 SkinPart: SKIN {u32 has-strip, vertex count, strip count, list count, texture hash, material hash (the template's),
@@ -22,7 +26,7 @@ Game space: Direct3D left-handed, Y up, centimetres, front towards -Z. Pure Pyth
 import math
 import struct
 
-from . import evo
+from . import bsp, evo
 
 
 class Part:
@@ -281,23 +285,171 @@ def _skin(part, header, bones, bone_world, max_influences=4):
     return bytes(out), unbound
 
 
-def rebuild(template, parts, model_name=None, warnings=None):
+def _header_offsets(data, start):
+    """(collision name, shadow name, BSPT count) offsets in an EOBJ header."""
+    p = start + 8 + 128 + 16 + 24 + 64 + 4
+    nbones = struct.unpack_from("<I", data, p)[0]
+    p += 4 + nbones * 132 + 4
+    return p, p + 128, p + 256
+
+
+def _bspt_end(data, p, count):
+    """End of `count` BSPT entries starting at p."""
+    for _ in range(count):
+        size = struct.unpack_from("<I", data, p)[0]
+        p += 8 + (8 + size if size else 0)
+    return p
+
+
+def _name128(name):
+    return name.encode("latin-1")[:127].ljust(128, b"\0")
+
+
+def _boxes(data, bbox):
+    """The two (min, max) boxes stored at a BBOX offset."""
+    return [(struct.unpack_from("<3f", data, bbox + 4 + k * 144), struct.unpack_from("<3f", data, bbox + 16 + k * 144))
+            for k in range(2)]
+
+
+def _corners(box):
+    mn, mx = box
+    return [(x, y, z) for x in (mn[0], mx[0]) for y in (mn[1], mx[1]) for z in (mn[2], mx[2])]
+
+
+def _bounds_pts(first, second):
+    """BBOX + BSPH for two point sets (the object's own bounds, then the second pair)."""
+    out = b""
+    for pts in (first, second):
+        pts = pts or [(0.0, 0.0, 0.0)]
+        mn = [min(p[i] for p in pts) for i in range(3)]
+        mx = [max(p[i] for p in pts) for i in range(3)]
+        centre = [(mn[i] + mx[i]) / 2 for i in range(3)]
+        radius = max(math.sqrt(sum((p[i] - centre[i]) ** 2 for i in range(3))) for p in pts)
+        planes = [(0, 0, 1, -mn[2]), (0, 0, -1, mx[2]), (1, 0, 0, -mn[0]), (-1, 0, 0, mx[0]), (0, 1, 0, -mn[1]),
+                  (0, -1, 0, mx[1])]
+        out += b"BBOX" + struct.pack("<6f", *mn, *mx) + b"".join(struct.pack("<4f", *pl) for pl in planes)
+        out += b"BSPH" + struct.pack("<4f", *centre, radius)
+    return out
+
+
+def _helper_part(triangles, texture, to_helper):
+    """Part for a #BSP_ helper object: the collision triangles moved into the helper's space, flat normals."""
+    positions, normals, uvs, tris = [], [], [], []
+    for (a, b, c), _surface in triangles:
+        a, b, c = (tuple(evo.mat_apply(to_helper, v)) for v in (a, b, c))
+        n = bsp._cross(bsp._sub(b, a), bsp._sub(c, a))
+        length = math.sqrt(bsp._dot(n, n)) or 1.0
+        n = (n[0] / length, n[1] / length, n[2] / length)
+        k = len(positions)
+        positions += [a, b, c]
+        normals += [n, n, n]
+        uvs += [(0.0, 0.0)] * 3
+        tris.append((k, k + 1, k + 2))
+    return Part(texture, positions, normals, uvs, tris)
+
+
+def _points_block(points, roles):
+    """Header points: u32 n, n x vec3, 5 x i32 role -> index (nothing more when n = 0)."""
+    if not points:
+        return struct.pack("<I", 0)
+    return (struct.pack("<I", len(points)) + b"".join(struct.pack("<3f", *p) for p in points) +
+            struct.pack("<5i", *roles))
+
+
+def _shadow_object(template, root, new, name, model):
+    """A new shadow object for a static model, laid out like the game's (335 props / weapons): a copy of the root's
+    header with name #SHA_<model>, flags 0x130, parent ROOT, collision source THIS, shadow NOSHADOW, no BSPT, no
+    points, no keys; the root's TEXL / MATL; bounds and one VBUF (flags 0xC0, not drawn) per Part; ends DONE."""
+    head = bytearray(template[root.start:root.texl])
+    col_off, sha_off, count_off = (x - root.start for x in _header_offsets(template, root.start))
+    head[8:8 + 64] = _name64(name)                       # helpers carry their own name in the model field too
+    head[72:72 + 64] = _name64(name)
+    struct.pack_into("<I", head, 144, 0x130)              # every game shadow object (all 335 under a 0x30 root)
+    ntris = sum(len(p.triangles) for p in new)
+    nverts = sum(len(p.positions) for p in new)
+    struct.pack_into("<2I", head, 152, ntris, nverts)
+    head[176:176 + 64] = _name64("ROOT")
+    nbones = struct.unpack_from("<I", head, 244)[0]
+    if nbones:
+        raise evo.EvoError("the model's first object is skinned - a shadow mesh can't be added to it")
+    struct.pack_into("<I", head, 248, 0)                 # has keys
+    head[col_off:col_off + 128] = _name128("THIS")
+    head[sha_off:sha_off + 128] = _name128("NOSHADOW")
+    npts = struct.unpack_from("<I", head, count_off + 4)[0]
+    head = head[:count_off] + struct.pack("<2I", 0, 0) + head[count_off + 8 + (npts * 12 + 20 if npts else 0):]
+    textures = [t for t in dict.fromkeys(p.texture for p in new)]
+    texl = b"TEXL" + struct.pack("<I", len(textures)) + b"".join(
+        struct.pack("<I", texture_hash(t)) + _name64(t) for t in textures)
+    matl = template[root.matl:root.bbox]
+    material = root.materials[0].hash if root.materials else 0
+    vbob = b"VBOB" + struct.pack("<I", len(new)) + b"".join(_vbuf(p, 0xC0, material) for p in new)
+    return bytes(head) + texl + matl + _bounds(new) + vbob + b"DONE"
+
+
+def rebuild(template, parts, model_name=None, warnings=None, collision=None, points=None, add_shadow=None):
     """A new .EVO from `template` (bytes): parts = {object name: [Part, ...] for static objects, or a SkinPart for a
     character's skin} replaces those objects' geometry; model_name renames the model in every object header.
-    Problems that don't stop the export are appended to `warnings`. Returns bytes."""
+    collision = {object name: [((v0, v1, v2), surface), ...] in that object's own space (cm, game winding), or [] for
+    none} replaces the object's collision tree (bsp.py; surface = Default.spl row or name) - when the template keeps
+    the collision in a #BSP_ helper object, that helper's mesh is rebuilt from the same triangles. Objects without an
+    entry keep the template's collision. points = {object name: {role: (x, y, z) or None}} moves / adds / removes the
+    object's points (role = evo.POINT_ROLES index or name, object space, cm); roles not given keep the template's.
+    add_shadow = [Part, ...] gives a static model (first object type 0: props, weapons, buildings) that has no shadow
+    object a new one (#SHA_<model>, appended last, the root's shadow name set) - the game attaches it at load and works
+    out its faces itself; a model that has one takes new shadow geometry through `parts` as usual.
+    Keys of parts / collision / points are object names or object indices (file order) - level pieces have hundreds of
+    unnamed objects, which only an index tells apart; a name key applies to every object of that name.
+    Problems that don't stop the export are appended to `warnings`."""
+    points = points or {}
     warnings = warnings if warnings is not None else []
+    collision = collision or {}
     scene = None
     objs = walk(template)
     names = {o.name for o in objs}
-    unknown = set(parts) - names
+    keys = set(parts) | set(collision) | set(points)
+    unknown = {k for k in keys if not (isinstance(k, int) and 0 <= k < len(objs)) and k not in names}
     if unknown:
-        raise evo.EvoError("the template has no object named %s" % ", ".join(sorted(unknown)))
+        raise evo.EvoError("the template has no object %s" % ", ".join(sorted(map(str, unknown))))
+
+    def pick(d, i, o):
+        return d[i] if i in d else d.get(o.name)
+
+    def index_of(key):
+        return key if isinstance(key, int) else next(i for i, x in enumerate(objs) if x.name == key)
+
+    parts = dict(parts)
+    trees = {}
+    if collision:
+        scene = evo.Scene(evo.read(template))
+        for owner, tris in collision.items():
+            tris = [(t, bsp.surface_index(s)) for t, s in tris]
+            oi = index_of(owner)
+            o = objs[oi]
+            col_off, _sha, _n = _header_offsets(template, o.start)
+            source = template[col_off:col_off + 128].split(b"\0", 1)[0].decode("latin-1")
+            built = bsp.from_triangles(tris)
+            if tris and not built:
+                warnings.append("%s: the collision mesh has no usable (non-degenerate) triangles" % (o.name or oi))
+            helper = source if source in names and source != o.name else None
+            trees[owner] = (built, helper)
+            if helper:
+                hi = index_of(helper)
+                if pick(parts, hi, objs[hi]) is None:
+                    to_helper = evo.mat_mul(evo.mat_invert_affine(scene.objects[hi].world), scene.objects[oi].world)
+                    texture = next((t for _h, t in scene.objects[hi].node.textures), "Default")
+                    parts[hi] = [_helper_part(tris, texture, to_helper)]
     out = bytearray()
-    for o in objs:
+    for i, o in enumerate(objs):
         chunk = bytearray(template[o.start:o.end])
+        rel = lambda off: off - o.start  # noqa: E731
+        col_off, _sha_off, count_off = (x - o.start for x in _header_offsets(template, o.start))
+        nbspt = struct.unpack_from("<I", template, o.start + count_off)[0]
+        bspt_start, bspt_end = o.geom_end, _bspt_end(template, o.geom_end, nbspt)
+        old_bspt = template[bspt_start:bspt_end]
+        render_pts = None
         if model_name:
             chunk[8:8 + 64] = _name64(model_name)
-        new = parts.get(o.name)
+        new = pick(parts, i, o)
         if new is not None and o.kind == 2:
             # character skin: the template's TEXL / MATL / bounds stay (the game picks the uniform texture), the
             # geometry becomes a new SKIN chunk bound to the template's bone list
@@ -312,8 +464,8 @@ def rebuild(template, parts, model_name=None, warnings=None):
             if unbound:
                 warnings.append("%s: %d vertices had no weight on a bone of the skeleton (bound to the root)"
                                 % (o.name, unbound))
-            rel = lambda off: off - o.start  # noqa: E731
             chunk = chunk[:rel(o.geom)] + skin + chunk[rel(o.geom_end):]
+            bspt_start = o.start + len(chunk) - (o.end - o.geom_end)    # the same tail follows the new geometry
         elif new is not None:
             new = merge(new)
             if o.kind not in (0, 3):
@@ -326,11 +478,89 @@ def rebuild(template, parts, model_name=None, warnings=None):
                 struct.pack("<I", texture_hash(t)) + _name64(t) for t in textures)
             material = o.materials[0].hash if o.materials else 0
             vbob = b"VBOB" + struct.pack("<I", len(new)) + b"".join(_vbuf(p, o.vbuf_flags, material) for p in new)
-            rel = lambda off: off - o.start  # noqa: E731
-            chunk = (chunk[:rel(o.texl)] + texl + chunk[rel(o.matl):rel(o.bbox)] + _bounds(new) + vbob +
-                     chunk[rel(o.geom_end):])
+            render_pts = [p for part in new for p in part.positions]
+            head = chunk[:rel(o.texl)] + texl + chunk[rel(o.matl):rel(o.bbox)]
+            chunk = head + _bounds(new) + vbob + chunk[rel(o.geom_end):]
+            o_bbox = len(head)                                           # bounds now start here (chunk-relative)
+            bspt_start = o.start + len(head) + len(_bounds(new)) + len(vbob)
+        tree = pick(trees, i, o)
+        if new is not None and o.kind != 2 or tree is not None:
+            # bounds: the object's own (render geometry, kept collision included like the game's props) and the second
+            # pair (vehicle roots: the whole hierarchy - kept when the template's differed)
+            if tree is not None:
+                tree_pts = [v for p in bsp.polygons(bsp.read(tree[0])) for v in p.verts] if tree[0] else []
+            else:
+                kept = [e for e in _bspt_entries(old_bspt) if e[0] == 0]
+                tree_pts = [v for p in bsp.polygons(bsp.read(kept[0][1])) for v in p.verts] if kept else []
+            first, second = _boxes(template, o.bbox)
+            if render_pts is not None:
+                base1 = list(render_pts)
+                base2 = list(render_pts) + (_corners(second) if first != second else [])
+            else:
+                base1, base2 = _corners(first), _corners(second)
+            bounds = _bounds_pts(base1 + tree_pts, base2 + tree_pts)
+            at = o_bbox if render_pts is not None else rel(o.bbox)
+            chunk[at:at + len(bounds)] = bounds
+        moved = pick(points, i, o)
+        if moved is not None:
+            # header points sit right after the BSPT count (offsets before them are unchanged)
+            p0 = count_off + 4
+            old_n = struct.unpack_from("<I", chunk, p0)[0]
+            old_len = 4 + (old_n * 12 + 20 if old_n else 0)
+            node = evo.read_node(evo.Reader(template, o.start))
+            by_role = {r: node.points[i] for r, i in enumerate(node.point_roles) if 0 <= i < len(node.points)}
+            for role, pos in moved.items():
+                role = evo.POINT_ROLES.index(role.upper()) if isinstance(role, str) else int(role)
+                if pos is None:
+                    by_role.pop(role, None)
+                else:
+                    by_role[role] = tuple(float(c) for c in pos)
+            order = sorted(by_role)
+            block = _points_block([by_role[r] for r in order],
+                                  [order.index(r) if r in by_role else -1 for r in range(5)])
+            chunk = chunk[:p0] + block + chunk[p0 + old_len:]
+            bspt_start += len(block) - old_len
+            if render_pts is not None:
+                o_bbox += len(block) - old_len
+        if tree is not None:
+            built, helper = tree
+            new_bspt = bsp.chunk(built, 0) if built else b""
+            at = bspt_start - o.start
+            chunk = chunk[:at] + new_bspt + chunk[at + len(old_bspt):]
+            struct.pack_into("<I", chunk, count_off, 1 if built else 0)
+            if not helper:
+                chunk[col_off:col_off + 128] = _name128("THIS" if built else "NOBSP")
         out += chunk
+    if add_shadow:
+        root = objs[0]
+        if any(struct.unpack_from("<I", template, o.start + 144)[0] & 0x100 for o in objs):
+            raise evo.EvoError("the model already has a shadow mesh - give it new geometry instead")
+        if struct.unpack_from("<I", template, root.start + 140)[0] != 0:
+            raise evo.EvoError("shadow meshes can only be added to static models (props, weapons, buildings); "
+                               "vehicles and characters attach theirs differently")
+        model = model_name or root.model
+        name = "#SHA_" + model.upper()
+        new = merge(add_shadow)
+        shadow = _shadow_object(template, root, new, name, model)
+        # the root names its shadow; the file's last object now has one after it
+        col_off, sha_off, _n = _header_offsets(template, root.start)
+        sha_off -= root.start
+        out[sha_off:sha_off + 128] = _name128(name)
+        if bytes(out[-4:]) != b"DONE":
+            raise evo.EvoError("unexpected end of the model file")
+        out[-4:] = b"NEXT"
+        out += shadow
     return bytes(out)
+
+
+def _bspt_entries(raw):
+    """[(u, tree bytes)] of an object's BSPT entries."""
+    out, p = [], 0
+    while p < len(raw):
+        size, u = struct.unpack_from("<2I", raw, p)
+        out.append((u, raw[p + 16:p + 16 + size] if size else b""))
+        p += 8 + (8 + size if size else 0)
+    return out
 
 
 # ------------------------------------------------------------------------------------------------ animations --
@@ -346,6 +576,14 @@ def prb_events(template):
     _v, ntracks, nbounds, nevents, frames, flag = struct.unpack_from("<6I", template, 0)
     o = 32 + nbounds * 160
     return template[o:o + 40 * nevents], nevents, flag, frames
+
+
+def pack_events(events):
+    """(bytes, count) of .prb events [(type, time in frames, value)] (see evo.Animation.events): 40 B each, the game's
+    layout - u32 type, f32 time, 2 x 0, f32 value (footsteps: sign = foot, 1 walk / 25 run), 5 x 0."""
+    out = b"".join(struct.pack("<If8xf20x", int(t), float(time), float(value))
+                   for t, time, value in sorted(events, key=lambda e: e[1]))
+    return out, len(events)
 
 
 def write_prb(tracks, fps, points, events=b"", nevents=0, flag=None, template_frames=None, pad=40.0):

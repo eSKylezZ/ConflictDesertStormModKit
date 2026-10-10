@@ -23,6 +23,7 @@ import os
 import secrets
 import sys
 import threading
+import time
 import traceback
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -121,9 +122,16 @@ def make_handler(editor: Editor):
 
         def api(self, name, args):
             try:
+                # status and the browser link (screenshot waits for the page's ui_reply) don't wait for the lock
+                if name in getattr(commands.workflow, "UNLOCKED", ()):
+                    return {"ok": True, "result": editor.session.call(name, args)}
                 with editor.lock:
                     editor.reload_commands()
-                    return {"ok": True, "result": editor.session.call(name, args)}
+                    editor.session.busy = (name, time.time())
+                    try:
+                        return {"ok": True, "result": editor.session.call(name, args)}
+                    finally:
+                        editor.session.busy = None
             except commands.CommandError as e:
                 return {"ok": False, "error": str(e)}
             except TypeError as e:

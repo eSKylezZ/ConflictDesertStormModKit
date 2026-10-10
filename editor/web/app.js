@@ -33,17 +33,35 @@ async function api(cmd, args = {}) {
   if (!j.ok) throw new Error(j.error || `HTTP ${r.status} ${r.statusText}`);
   return j.result;
 }
-const POLL_COMMANDS = new Set(['history', 'game_console']);
+const POLL_COMMANDS = new Set(['history', 'game_console', 'ui_poll', 'ui_reply', 'status']);
 // commands that convert models / textures, build the walk map or write files: up to 5 minutes
 const SLOW_COMMANDS = new Set(['open_level', 'open_mission', 'new_level', 'save_mod', 'save_mission', 'play', 'export_mod_zip',
   'save_minimap', 'briefing_burn_map', 'briefing_map_image', 'kit_preview', 'kit_pieces', 'kit_models', 'library',
   'asset_options', 'upload_file', 'create_weapon', 'create_skin', 'walkability_grid', 'scene_budget', 'texture_png',
-  'terrain_new', 'terrain_noise', 'terrain_set', 'road_new', 'road_set', 'save_script', 'campaign_save']);
-function status(text, bad = false) { const s = $('status'); s.textContent = text; s.classList.toggle('bad', bad); }
+  'terrain_new', 'terrain_noise', 'terrain_set', 'road_new', 'road_set', 'save_script', 'campaign_save',
+  'batch', 'check_mission', 'mission_report', 'recovery_restore']);
+function status(text, bad = false, detail = '') {
+  const s = $('status'); s.textContent = text; s.classList.toggle('bad', bad);
+  s.title = detail ? `${text}\n(${detail})` : text;            // the line is cut off with … - the full text on hover
+}
 async function run(cmd, args, what) {
   try { const r = await api(cmd, args); if (what) status(what); return r; }
-  catch (e) { status(`${cmd}: ${e.message}`, true); throw e; }
+  catch (e) { status(e.message, true, `command ${cmd}`); throw e; }
 }
+
+// ---- header menus (File / Mission / World / Data): click opens, a click on an item, outside or Esc closes; while one
+// is open, pointing at another menu switches to it ----
+function closeMenus(except = null) {
+  for (const m of document.querySelectorAll('.menu')) if (m !== except) { m.classList.remove('open'); m.querySelector('.menu-list').hidden = true; }
+}
+for (const m of document.querySelectorAll('.menu')) {
+  const btn = m.querySelector('.menu-btn'), list = m.querySelector('.menu-list');
+  btn.onclick = () => { const open = list.hidden; closeMenus(); m.classList.toggle('open', open); list.hidden = !open; };
+  btn.onmouseenter = () => { if (document.querySelector('.menu.open') && !m.classList.contains('open')) btn.click(); };
+  list.addEventListener('click', (e) => { if (e.target.closest('button')) closeMenus(); });
+}
+document.addEventListener('pointerdown', (e) => { if (!e.target.closest('.menu')) closeMenus(); }, true);
+window.addEventListener('keydown', (e) => { if (e.key === 'Escape' && document.querySelector('.menu.open')) { closeMenus(); e.stopImmediatePropagation(); } }, true);
 
 // ---- three.js set-up ----
 const view = $('view');
@@ -55,8 +73,12 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 view.appendChild(renderer.domElement);
 const scene3 = new THREE.Scene();
 scene3.background = new THREE.Color(0x8fa6b8);
-const camera = new THREE.PerspectiveCamera(60, 1, 0.02, 6000);
-camera.position.set(30, 30, 30);
+const perspCam = new THREE.PerspectiveCamera(60, 1, 0.02, 6000);
+perspCam.position.set(30, 30, 30);
+// Top view (T): an orthographic camera straight down, north (game +z) up; `camera` is whichever one is in use
+const topCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 30000);
+topCam.up.set(0, 0, -1);
+let camera = perspCam, topView = null, topHalf = 50;   // topHalf: half the top view's height (m) at zoom 1     // topView = {offset: the perspective view's offset to come back to}
 const orbit = new OrbitControls(camera, renderer.domElement);
 orbit.enableDamping = true;
 orbit.zoomToCursor = true;      // the wheel zooms toward what is under the cursor
@@ -94,7 +116,7 @@ document.addEventListener('visibilitychange', requestRender);
 
 new ResizeObserver(() => {
   const w = view.clientWidth, h = view.clientHeight;
-  renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  renderer.setSize(w, h); perspCam.aspect = w / h; perspCam.updateProjectionMatrix(); fitTopFrustum();
   requestRender();
 }).observe(view);
 // WASD fly: W/S along the view, A/D sideways, Q/E down/up; Shift faster. Camera and orbit centre move
@@ -115,8 +137,8 @@ const clock = new THREE.Clock();
 const fwd = new THREE.Vector3(), side = new THREE.Vector3(), move = new THREE.Vector3();
 function fly(dt) {              // true when the camera moved
   if (camView || ![...held].some((k) => flyKeys.has(k))) return false;
-  camera.getWorldDirection(fwd);
-  side.crossVectors(fwd, camera.up).normalize();
+  if (topView) { fwd.set(0, 0, -1); side.set(1, 0, 0); }       // top view: W = north (up on screen)
+  else { camera.getWorldDirection(fwd); side.crossVectors(fwd, camera.up).normalize(); }
   move.set(0, 0, 0);
   if (held.has('w')) move.add(fwd);
   if (held.has('s')) move.sub(fwd);
@@ -125,7 +147,7 @@ function fly(dt) {              // true when the camera moved
   if (held.has('e')) move.y += 1;
   if (held.has('q')) move.y -= 1;
   if (!move.lengthSq()) return false;
-  const speed = 12 * (held.has('shift') ? 5 : 1);   // metres per second
+  const speed = 12 * (held.has('shift') ? 5 : 1) * (topView ? Math.max(1, topHalf / (topCam.zoom * 30)) : 1);   // m/s
   move.normalize().multiplyScalar(speed * dt);
   camera.position.add(move); orbit.target.add(move);
   return true;
@@ -144,18 +166,31 @@ renderer.setAnimationLoop(() => {
 // ---- layers ----
 const LAYERS = [
   ['world', 'World', '#8d8a6a'], ['props', 'Props', '#b0a27a'], ['objects', 'Objects', '#e05050'],
-  ['waypoints', 'Waypoints', '#38c7d6'], ['regions', 'Regions', '#e0b030'], ['routes', 'AI routes', '#5fd16b'],
+  ['waypoints', 'Waypoints', '#38c7d6'], ['regions', 'Regions', '#e0b030'],
+  ['routes', 'AI routes', '#5fd16b', false],      // thousands of markers: off until wanted (built only while shown)
   ['cameras', 'Cameras', '#b67be8'], ['sounds', 'Sounds', '#6aa0ff'],
   ['switches', 'Switches', '#ff8c3a'], ['emitters', 'Emitters', '#c9c4b8'],
   ['vision', 'Vision cones', '#4fd16b', false], ['hazards', 'Minefields', '#ff4040'],   // tactics (editor only)
 ];
+// which layers are shown is remembered per browser (a convenience, not part of the mission)
+let shownLayers = {};
+try { shownLayers = JSON.parse(localStorage.getItem('layers') || '{}'); } catch { /* storage blocked */ }
+function rememberLayer(key, on) {
+  shownLayers[key] = on;
+  try { localStorage.setItem('layers', JSON.stringify(shownLayers)); } catch { /* ignore */ }
+}
 const groups = {};
-for (const [key, label, color, on = true] of LAYERS) {
+for (const [key, label, color, dflt = true] of LAYERS) {
+  const on = shownLayers[key] ?? dflt;
   const g = new THREE.Group(); g.name = key; g.visible = on; scene3.add(g); groups[key] = g;
   const row = document.createElement('label');
   row.innerHTML = `<input type="checkbox" ${on ? 'checked' : ''}> <span class="swatch" style="background:${color}"></span>${label}` +
                   `<span class="count" id="count-${key}"></span>`;
-  row.querySelector('input').onchange = (e) => { g.visible = e.target.checked; requestRender(); if (key === 'vision' && g.visible) buildVision().catch(() => {}); };
+  row.querySelector('input').onchange = (e) => {
+    g.visible = e.target.checked; rememberLayer(key, g.visible); requestRender();
+    if (key === 'vision' && g.visible) buildVision().catch(() => {});
+    if (key === 'routes' && g.visible && routesStale) buildRoutes();
+  };
   $('layers').appendChild(row);
 }
 const pickable = [];
@@ -236,6 +271,39 @@ function placeProp(obj, rec) {
   obj.scale.set(rec.scale[0], rec.scale[1], rec.scale[2]);
 }
 
+// Zone chunks: the scene gives every object of a zone model (ground tiles, cliff and building pieces) its own record,
+// and the game creates each object from that record - so they are drawn one by one from the records (objects without
+// a record are never in the game) and, with "Edit world" on, picked, moved, turned and deleted like props. Holders are
+// kept by record name across rebuilds (names are unique; lines shift) - a refresh only moves / adds / drops what changed.
+const chunkHolders = new Map();
+let worldEdit = false;
+try { worldEdit = localStorage.getItem('worldEdit') === '1'; } catch { /* storage blocked */ }
+function buildChunks(fresh) {
+  if (fresh) chunkHolders.clear();          // the world group was emptied by the caller
+  const seen = new Set();
+  for (const c of data.chunks || []) {
+    seen.add(c.name);
+    let h = chunkHolders.get(c.name);
+    if (!h) {
+      h = new THREE.Group(); h.userData = { cat: 'world', chunk: true };
+      chunkHolders.set(c.name, h); groups.world.add(h);
+      model(c.zone).then((m) => {
+        const node = m && h.parent && m.getObjectByName(c.model);
+        if (!node) return;
+        const o = node.clone(); o.matrix.identity(); o.position.set(0, 0, 0); o.rotation.set(0, 0, 0); o.scale.set(1, 1, 1);
+        o.traverse((x) => { if (x.isMesh) { x.userData = { line: h.userData.line, cat: 'world', chunk: true, proxy: h }; pickable.push(x); } });
+        shadowed(o); h.add(o); requestRender();
+      });
+    }
+    h.userData.line = c.line; h.userData.name = c.name;
+    placeProp(h, c); byLine.set(c.line, h);
+    h.traverse((x) => { if (x.isMesh) { x.userData.line = c.line; pickable.push(x); } });
+  }
+  for (const [name, h] of chunkHolders) if (!seen.has(name)) { chunkHolders.delete(name); groups.world.remove(h); disposeObject(h); }
+}
+// picking skips the level's own geometry unless "Edit world" is on (a click on the ground would select it otherwise)
+const pickOk = (o) => groups[o.userData.cat]?.visible && (!o.userData.chunk || worldEdit);
+
 async function buildScene(fresh) {
   data = await run('scene');
   if (fresh) { exitCamView(); logicInfo = null; if (!$('atmos').hidden) openAtmos().catch(() => {}); }
@@ -245,7 +313,8 @@ async function buildScene(fresh) {
   for (const [key] of LAYERS) if (data[key] || ['world', 'routes'].includes(key)) $('count-' + key).textContent = key === 'world' ? data.zones.length
     : key === 'routes' ? data.routes.length : (data[key] || []).length;
   // World pieces go where their scene record puts them (all at 0 in the campaign; MP_MISSION1's is offset 160 m).
-  if (fresh) for (const z of data.zones) model(z.model).then((m) => { if (m) { const w = m.clone(); placeProp(w, z); shadowed(w); groups.world.add(w); } });
+  if (fresh) for (const z of data.zones) if (!z.chunked) model(z.model).then((m) => { if (m) { const w = m.clone(); placeProp(w, z); shadowed(w); groups.world.add(w); } });
+  buildChunks(fresh);
   for (const p of data.props) {
     const holder = new THREE.Group(); placeProp(holder, p);
     holder.userData = { line: p.line, cat: 'props' }; byLine.set(p.line, holder);
@@ -287,6 +356,7 @@ async function buildScene(fresh) {
     });
   }
   for (const w of data.waypoints) groups.waypoints.add(marker(ballGeo, 0x38c7d6, w, 'waypoints'));
+  drawPathLinks();
   for (const o of data.objects) if (o.patrol) drawPatrol(o);
   camTargets.clear();
   for (const c of data.cameras) {
@@ -322,9 +392,11 @@ async function buildScene(fresh) {
   buildRoutes();
   buildOutliner();
   buildScriptLayers();
+  if (fresh) { missionFlow = null; obBaseTargets = null; buildMissionGroups().catch(() => {}); }
   if ($('walk-toggle')?.checked) buildWalkMap(fresh).catch(() => {});
   productionAfterScene(fresh);
   buildTactics().catch(() => {});
+  applyIsolate();
   requestRender();
 }
 
@@ -359,6 +431,152 @@ function drawInteractive() {
     }
     groups.emitters.add(m);
   }
+}
+
+// ---- the base mission's own logic (editor/missionlogic.py): events -> readable steps; mission groups ----
+let missionFlow = null;
+const hiddenGroupLines = new Set();
+async function loadFlow() { missionFlow ||= await api('mission_flow').catch(() => null); return missionFlow; }
+function lineOfScript(id) { return data.objects.find((o) => o.script_id === id)?.line; }
+function segHtml(seg) {
+  if (typeof seg === 'string') return escHtml(seg);
+  return `<a class="ref ${seg.ref}" data-ref="${seg.ref}" data-id="${seg.id}" title="${seg.ref}">${escHtml(seg.text)}</a>`;
+}
+function flowNode(n, open) {
+  const html = n.text.map(segHtml).join('');
+  if (!n.children.length) { const d = document.createElement('div'); d.className = `leaf k-${n.kind}`; d.innerHTML = html; return d; }
+  const det = document.createElement('details'); det.className = `k-${n.kind}`; det.open = open && n.open;
+  const sum = document.createElement('summary'); sum.innerHTML = html; det.appendChild(sum);
+  for (const c of n.children) det.appendChild(flowNode(c, open));
+  return det;
+}
+function onFlowClick(e) {
+  const a = e.target.closest('a.ref'); if (!a) return;
+  e.preventDefault();
+  const id = +a.dataset.id;
+  if (a.dataset.ref === 'object') { const l = lineOfScript(id); if (l) select({ line: l }, true); }
+  else if (a.dataset.ref === 'region') { const r = data.regions[id]; if (r) select({ line: r.line }, true); }
+  else if (a.dataset.ref === 'waypoint') { const w = data.waypoints[id]; if (w) select({ line: w.line }, true); }
+  else if (a.dataset.ref === 'objective') showObTab('obj');
+}
+async function renderFlow() {
+  const box = $('ob-flow'); box.innerHTML = '<span class="hint">reading the mission DLL…</span>';
+  const f = await loadFlow();
+  box.innerHTML = '';
+  const has = !!f?.dll;
+  $('ob-tab-flow').hidden = !has;
+  $('ob-rules-base').innerHTML = has ? `${escHtml(f.dll)} runs the original mission alongside your rules - see the <b>Mission logic</b> tab.` : '';
+  if (!has) return;
+  $('ob-flow-title').textContent = `How ${f.dll} runs this mission, read from your own copy of it: the set-up, every game ` +
+    'event it reacts to and what it checks during play. Read-only - the DLL keeps doing all of this; your Event rules run ' +
+    'as well. Click a name to select it in the scene.';
+  const q = $('ob-flow-search').value.trim().toLowerCase();
+  const plain = (n) => n.text.map((s) => typeof s === 'string' ? s : s.text).join('') + ' ' + n.children.map(plain).join(' ');
+  const count = (ns) => ns.reduce((a, n) => a + 1 + count(n.children), 0);
+  const part = (ev) => ['init', 'msg_3b', 'msg_12'].includes(ev.id) ? 0 : ev.id === 'update' ? 1 : 2;
+  const order = { init: 0, msg_3b: 1, msg_12: 2 };
+  const events = [...f.events].sort((a, b) => part(a) - part(b) || (order[a.id] ?? 0) - (order[b.id] ?? 0));
+  const heads = ['Before play: loading, briefing, start', 'During play: checked every frame', 'Reactions to game events'];
+  let shown = -1;
+  for (const ev of events) {
+    const nodes = ev.nodes.filter((n) => !q || plain(n).toLowerCase().includes(q) || ev.title.toLowerCase().includes(q));
+    if (!nodes.length) continue;
+    if (part(ev) !== shown) { shown = part(ev); box.insertAdjacentHTML('beforeend', `<h4>${heads[shown]}</h4>`); }
+    const det = document.createElement('details'); det.className = 'ev'; det.open = !!q;
+    det.innerHTML = `<summary title="${escHtml(ev.note || '')}">${escHtml(ev.title)}<span class="n">${count(ev.nodes)} steps</span></summary>`;
+    for (const n of nodes) det.appendChild(flowNode(n, !!q));
+    box.appendChild(det);
+  }
+  if (q) for (const el of box.querySelectorAll('summary, .leaf'))
+    if (el.textContent.toLowerCase().includes(q) && !el.querySelector('summary')) el.classList.add('hit');
+  if (!box.children.length) box.innerHTML = '<span class="hint">nothing matches</span>';
+}
+function openFlowFor(text) {
+  openObjectives('flow').then(() => { $('ob-flow-search').value = text; renderFlow(); }).catch(() => {});
+}
+$('ob-flow-collapse').onclick = () => { for (const d of $('ob-flow').querySelectorAll('details')) d.open = false; };
+$('ob-flow').onclick = onFlowClick;
+$('logic-list').onclick = onFlowClick;
+$('ob-flow-search').oninput = () => { clearTimeout(renderFlow.t); renderFlow.t = setTimeout(() => renderFlow().catch(() => {}), 250); };
+$('ob-flow-expand').onclick = () => { for (const d of $('ob-flow').querySelectorAll('details')) d.open = true; };
+async function showObjectLogic(o) {
+  const r = await api('object_logic', { script_id: o.script_id }).catch(() => null);
+  if (!r?.dll || selection?.line !== o.line) return;
+  const box = $('logic-list'); box.innerHTML = '';
+  const by = {};
+  for (const u of r.uses) (by[u.event] ||= []).push(u);
+  const parts = Object.keys(by).length;
+  $('logic-sum').innerHTML = r.uses.length
+    ? `${escHtml(r.dll)} uses #${o.script_id} in ${r.uses.length} step${r.uses.length > 1 ? 's' : ''} across ${parts} part${parts > 1 ? 's' : ''} of the mission. <a href="#" id="logic-open">Show in Mission logic</a>`
+    : `${escHtml(r.dll)} doesn't name this object (#${o.script_id}) directly.`;
+  $('logic-open')?.addEventListener('click', (e) => { e.preventDefault(); openFlowFor(`#${o.script_id}`); });
+  for (const [ev, uses] of Object.entries(by)) {
+    const det = document.createElement('details'); det.className = 'ev';
+    det.innerHTML = `<summary>${escHtml(ev)} <span class="hint">(${uses.length})</span></summary>`;
+    let last = null;
+    for (const u of uses.slice(0, 20)) {
+      if (u.when && u.when !== last) det.insertAdjacentHTML('beforeend', `<div class="when">${escHtml(u.when)}</div>`);
+      last = u.when;
+      det.insertAdjacentHTML('beforeend', `<div class="leaf">${escHtml(u.text)}</div>`);
+    }
+    box.appendChild(det);
+  }
+  $('logic-row').hidden = false;
+}
+// Mission groups (left panel): what the base mission brings into / takes out of play together, and when - in
+// sections, two lines per group (trigger, effect), a click shows every trigger and the objects.
+const MG_SECTIONS = [['start', 'At the start'], ['triggered', 'Triggered during play'], ['events', 'On game events'],
+                     ['reinforcements', 'Reinforcements (spawn points)'], ['waiting', 'Never activated by id']];
+async function buildMissionGroups() {
+  const box = $('mg-list'); box.innerHTML = '';
+  hiddenGroupLines.clear();
+  const f = await loadFlow();
+  $('mission-groups').hidden = !(f?.dll && f.groups.length);
+  if ($('mission-groups').hidden) return;
+  const named = new Set(f.groups.flatMap((g) => g.objects.map((o) => o.id)));
+  const rest = data.objects.filter((o) => !o.active && !o.cutscene && !named.has(o.script_id));
+  const all = [...f.groups];
+  if (rest.length) all.push({ category: 'waiting', title: 'Waiting, but not brought in by script id',
+    effect: `${rest.length} wait: spawned by a cutscene / table, or never`, action: 'none',
+    objects: rest.map((o) => ({ id: o.script_id, text: `${o.unit} #${o.script_id}` })), triggers: [], how: [] });
+  $('mg-count').textContent = f.groups.length;
+  $('mg-hint').textContent = `What ${f.dll} brings into play, and when (the game has no layers of its own).`;
+  $('mg-hint').title = `${f.dll} brings objects into play by script id when something happens - these are those moments. ` +
+    'Read-only. Untick a row to hide its objects in the view; click it for the details.';
+  for (const [cat, label] of MG_SECTIONS) {
+    const list = all.filter((g) => g.category === cat);
+    if (!list.length) continue;
+    const sec = document.createElement('details'); sec.className = 'mg-sec'; sec.open = cat !== 'reinforcements' && cat !== 'waiting';
+    sec.innerHTML = `<summary>${label}<span class="count">${list.length}</span></summary>`;
+    for (const g of list) sec.appendChild(groupRow(g));
+    box.appendChild(sec);
+  }
+}
+function groupRow(g) {
+  const lines = g.objects.map((o) => lineOfScript(o.id)).filter(Boolean);
+  const title = g.title.replace(/^When /, '');
+  const up = /appear|respawn|visible/.test(g.effect);
+  const row = document.createElement('div'); row.className = 'mg';
+  row.innerHTML = `<input type="checkbox" checked title="show these objects in the view">` +
+    `<div class="t" title="${escHtml(g.title + ' → ' + g.effect)}"><div class="title">${escHtml(title[0].toUpperCase() + title.slice(1))}</div>` +
+    `<div class="effect"><span class="${g.action === 'none' ? '' : up ? 'up' : 'down'}">${g.action === 'none' ? '…' : up ? '▲' : '▼'}</span> ${escHtml(g.effect)}</div></div>` +
+    `<button title="select these objects">⊙</button>`;
+  row.querySelector('input').onchange = (e) => {
+    for (const l of lines) { if (e.target.checked) hiddenGroupLines.delete(l); else hiddenGroupLines.add(l); }
+    applyLayerFilter();
+  };
+  row.querySelector('button').onclick = () => selectMany(lines);
+  row.querySelector('.t').onclick = () => {
+    const open = row.querySelector('.more');
+    if (open) { open.remove(); return; }
+    const more = document.createElement('div'); more.className = 'more';
+    if (g.triggers.length > 1 || (g.triggers[0] && g.triggers[0].text !== g.title))
+      more.innerHTML = g.triggers.map((t) => `<div>• ${escHtml(t.text)}</div>`).join('');
+    more.insertAdjacentHTML('beforeend', '<div>' + g.objects.map((o) => `<a data-id="${o.id}">${escHtml(o.text)}</a>`).join('') + '</div>');
+    for (const a of more.querySelectorAll('a')) a.onclick = () => { const l = lineOfScript(+a.dataset.id); if (l) select({ line: l }, true); };
+    row.appendChild(more);
+  };
+  return row;
 }
 
 // Script layers: named groups of objects the mission script shows (game.show_layer) or hides (game.hide_layer)
@@ -411,7 +629,9 @@ async function buildScriptLayers() {
   applyLayerFilter();
 }
 function applyLayerFilter() {
-  for (const h of groups.objects.children) h.visible = !hiddenLayers.has(h.userData.layer || '');
+  for (const h of groups.objects.children)
+    h.visible = !hiddenLayers.has(h.userData.layer || '') && !hiddenGroupLines.has(h.userData.line)
+      && (!isolated || isolated.has(h.userData.line));
   markSelected();
 }
 
@@ -688,8 +908,19 @@ $('t-new').onclick = async () => {
                                        texture: $('t-new-texture').value, steep_texture: $('t-new-steep').value,
                                        surface: $('t-surface').value }, 'terrain patch made');
   await refresh(); await select({ line: r.line }); updateTerrainPanel();
-  status(`${r.model}: drag on it with Sculpt on - Raise / Lower / Smooth / Flatten`);
+  framePatch(r.line, +$('t-size').value);
+  status(`terrain patch ${r.model} made (${$('t-size').value} m) - drag on it with Sculpt on: Raise / Lower / Smooth / Flatten. Ctrl+Z undoes it`);
 };
+function framePatch(line, sizeM) {     // the whole patch in view, from above at an angle
+  const h = byLine.get(line); if (!h) return;
+  const c = h.position.clone(), d = Math.max(20, sizeM * 1.1);
+  const dir = camera.position.clone().sub(orbit.target).setY(0);
+  if (dir.lengthSq() < 1e-6) dir.set(0, 0, 1);
+  dir.normalize().multiplyScalar(d * 0.7).setY(d * 0.7);
+  orbit.target.copy(c); camera.position.copy(c).add(dir);
+  if (topView) placeTopCamera(c, sizeM * 0.75);
+  requestRender();
+}
 $('t-hills').onclick = async () => {
   const h = currentTerrain(); if (!h) return;
   await run('terrain_noise', { model: h.userData.terrain.model, amplitude: +$('t-hill-height').value * 100,
@@ -729,9 +960,11 @@ $('t-fit').onclick = async () => {
 };
 
 // AI routes: one instanced mesh of markers, link lines (two-way green, one-way orange).
-let routeMesh = null;
+let routeMesh = null, routesStale = true;
 function buildRoutes() {
   clearGroup(groups.routes);
+  routesStale = !groups.routes.visible;          // hidden: built when the layer is switched on
+  if (routesStale) return;
   const ms = data.routes;
   if (!ms.length) return;
   // Hand-placed markers (flags bit 0 clear) bright; generated ones (one per walkable cell, rebuilt by the game from the
@@ -757,19 +990,58 @@ function buildRoutes() {
 }
 
 // ---- outliner ----
+// Objects (soldiers, vehicles, items) always; while searching also the rest of the scene. Each object row carries a tag
+// telling same-named ones apart: in play at the start, waiting for the script, a cutscene actor, or its script layer.
+function objectTag(o) {
+  if (o.layer) return ['t-layer', o.layer, `In script layer "${o.layer}"`];
+  if (o.cutscene) return ['t-cut', 'cutscene', `A cutscene actor (flag 0x20000) - the films use it, not play; ${o.active ? 'in play from the start' : 'waits for the script'}`];
+  if (!o.active) return ['t-wait', 'waits for script', 'Not in play at the start: the mission script activates it'];
+  return ['t-start', 'at start', 'In play from the mission start'];
+}
+const SEARCHABLE = [            // [data list, label, text to search, row text]
+  ['props', 'prop', (p) => p.model, (p) => p.model],
+  ['waypoints', 'waypoint', (w) => `${w.name} ${w.id}`, (w) => `${w.name} <small>id ${w.id}</small>`],
+  ['regions', 'region', (r) => r.name, (r) => r.name],
+  ['cameras', 'camera', (c) => `${c.name} ${c.kind}`, (c) => `${c.name} <small>${c.kind}</small>`],
+  ['sounds', 'sound', (s) => `${s.name || ''} ${s.sound || ''}`, (s) => `${s.name || s.sound} <small>${s.sound || ''}</small>`],
+  ['emitters', 'emitter', (e) => e.name || '', (e) => e.name || 'emitter'],
+  ['switches', 'switch', (w) => w.name || '', (w) => w.name || 'switch'],
+];
+let outlinerAnchor = null;      // the last plainly / Ctrl-clicked object row: Shift+click selects from there
 function buildOutliner() {
   const q = $('search').value.trim().toLowerCase();
   const ul = $('outliner'); ul.innerHTML = '';
   for (const o of data.objects) {
-    const text = `${o.unit} ${o.model} ${o.stat} ${o.script_id}`.toLowerCase();
+    const [cls, tag, tip] = objectTag(o);
+    const text = `${o.unit} ${o.model} ${o.stat} ${o.script_id} ${tag}`.toLowerCase();
     if (q && !text.includes(q)) continue;
     const li = document.createElement('li');
-    li.dataset.line = o.line;
-    li.innerHTML = `${o.is_base_target ? `<span class="shield" title="DLL Critical: ${escHtml(o.base_dll || 'the base mission')} uses script id ${o.script_id}">🛡</span>` : ''}${o.unit} <small>${o.model} · id ${o.script_id}</small>`;
-    li.onclick = (e) => (e.shiftKey ? toggleMany(o.line) : select({ line: o.line }, true));
+    li.dataset.line = o.line; li.dataset.obj = '1';
+    li.innerHTML = `${o.lineage === 'modified' || o.lineage === 'custom' ? `<span class="lin ${o.lineage}" title="${o.lineage === 'modified' ? 'Modified from the shipped level' : 'Added in the editor'}">●</span>` : ''}${o.is_base_target ? `<span class="shield" title="DLL Critical: ${escHtml(o.base_dll || 'the base mission')} uses script id ${o.script_id} - hide it in a layer rather than delete it">🛡</span>` : ''}${escHtml(o.unit)}<span class="tag ${cls}" title="${escHtml(tip)}">${escHtml(tag)}</span> <small>${escHtml(o.model)} · id ${o.script_id}</small>`;
+    li.onclick = (e) => outlinerClick(e, o.line);
     ul.appendChild(li);
   }
+  if (q) for (const [key, label, hay, row] of SEARCHABLE) {
+    for (const r of data[key] || []) {
+      if (!String(hay(r)).toLowerCase().includes(q)) continue;
+      const li = document.createElement('li'); li.className = 'kind-row';
+      li.dataset.line = r.line;
+      li.innerHTML = `<span class="k">${label}</span>${row(r)}`;
+      li.onclick = () => select({ line: r.line }, true);
+      ul.appendChild(li);
+    }
+  }
+  if (!ul.children.length && q) ul.innerHTML = '<li class="hint">nothing in the scene matches</li>';
   markOutliner();
+}
+function outlinerClick(e, line) {
+  if (e.shiftKey && outlinerAnchor !== null) {          // a range of the listed object rows
+    const rows = [...$('outliner').querySelectorAll('li[data-obj]')].map((li) => +li.dataset.line);
+    const a = rows.indexOf(outlinerAnchor), b = rows.indexOf(line);
+    if (a >= 0 && b >= 0) { selectMany(rows.slice(Math.min(a, b), Math.max(a, b) + 1)); return; }
+  }
+  outlinerAnchor = line;
+  if (e.ctrlKey || e.metaKey) toggleMany(line); else select({ line }, true);
 }
 $('search').oninput = () => data && buildOutliner();
 function markOutliner() {
@@ -1047,7 +1319,8 @@ function showMany() {
   selection = null;
   const allObjects = [...many].every((l) => data.objects.some((o) => o.line === l));
   $('sel-title').textContent = `${many.size} ${allObjects ? 'objects' : 'records'} selected`;
-  $('fields').innerHTML = '';
+  $('fields').innerHTML = ''; $('fields-adv').innerHTML = ''; $('adv-box').hidden = true;
+  showSharedFields([...many]).catch((e) => console.warn('shared fields:', e));
   $('layer-row').hidden = !allObjects;
   stopSound();
   const layers = new Set([...many].map((l) => data.objects.find((o) => o.line === l)?.layer || ''));
@@ -1064,6 +1337,43 @@ function showMany() {
     }).catch(() => {});
   }
   markOutliner(); markSelected();
+}
+// Several records of one kind selected: the fields they all have, a value where they agree; a change goes to all of
+// them as one undo step (batch). Script ids, lines and counted lists stay per record.
+const SHARED_SKIP = /^(line|kind|script_id|id|name)$|_count$|^(kit|link|group|lod|ai_list)\d/;
+async function showSharedFields(lines) {
+  const recs = await Promise.all(lines.slice(0, 80).map((line) => api('get_record', { line })));
+  if (selection || many.size !== lines.length || lines.some((l) => !many.has(l))) return;    // the selection moved on
+  const kinds = new Set(recs.map((r) => r.kind));
+  if (kinds.size !== 1 || lines.length > 80) {
+    $('fields').innerHTML = `<tr><td colspan="2" class="ro">${kinds.size !== 1 ? 'Different kinds of record: select records of one kind to edit a field on all of them.' : 'More than 80 selected - shared fields are edited for up to 80.'}</td></tr>`;
+    return;
+  }
+  const keys = Object.keys(recs[0].fields).filter((k) => !SHARED_SKIP.test(k) && recs.every((r) => k in r.fields));
+  const t = $('fields'); t.innerHTML = `<tr><td colspan="2" class="ro">Fields all ${recs.length} have - a change applies to every one (one undo step).</td></tr>`;
+  for (const k of keys) {
+    const vals = recs.map((r) => r.fields[k]), first = vals[0];
+    const same = vals.every((v) => JSON.stringify(v) === JSON.stringify(first));
+    const tr = document.createElement('tr'); tr.innerHTML = `<td>${escHtml(k)}</td><td></td>`;
+    const inp = document.createElement('input');
+    inp.value = same ? (Array.isArray(first) ? first.join(', ') : String(first)) : '';
+    inp.placeholder = same ? '' : '(different)';
+    inp.oninput = () => inp.classList.add('changed');
+    inp.onkeydown = (e) => { if (e.key === 'Enter') inp.blur(); };
+    inp.onchange = async () => {
+      if (!inp.value.trim()) return;
+      let value = inp.value;
+      if (Array.isArray(first)) value = value.split(',').map(Number);
+      else if (typeof first === 'number') value = Number(value);
+      const keep = [...lines];
+      try {
+        await run('batch', { steps: lines.map((line) => ({ command: 'set_field', args: { line, field: k, value } })) },
+                  `${k} set on ${lines.length} records`);
+        await refresh(); selectMany(keep);
+      } catch { inp.classList.remove('changed'); }
+    };
+    tr.children[1].appendChild(inp); t.appendChild(tr);
+  }
 }
 async function toggleMany(line) {
   if (!multiOk(line)) return select({ line });
@@ -1085,10 +1395,15 @@ gizmo.addEventListener('objectChange', () => {     // the selected visual follow
   const obj = selection?.line !== undefined ? byLine.get(selection.line) : null;
   if (!obj) return;
   obj.position.copy(proxy.position);
-  if (kitOffset) obj.position.sub(kitOffset);      // kit piece: the gizmo sits on its centre, the record elsewhere
+  if (kitOffset) {     // kit piece / zone chunk: the gizmo sits on its centre, the record at the level origin
+    const off = kitOffset.clone();
+    if (gizmo.mode === 'rotate' && kitQuat0) off.applyQuaternion(proxy.quaternion.clone().multiply(kitQuat0.clone().invert()));
+    obj.position.sub(off);
+  }
   if (gizmo.mode === 'rotate') obj.rotation.copy(proxy.rotation);
+  chunkBox?.update();
 });
-let kitOffset = null;
+let kitOffset = null, kitQuat0 = null;
 // Alt held: the gizmo turns the selection; Alt+X / Alt+Y / Alt+Z pick the axis - Y = facing (yaw, the default),
 // X = tilt forward / back (pitch), Z = lean sideways (roll), in the object's own frame. Released: back to moving.
 // The game's rot = (pitch, yaw, roll) in degrees = three.js Euler (-x, -y, z) in 'YXZ' order. A mode change waits
@@ -1114,13 +1429,21 @@ window.addEventListener('keydown', (e) => {
 window.addEventListener('keyup', (e) => { if (e.key === 'Alt') { e.preventDefault(); wantRotate = false; gizmoMode(); } });
 window.addEventListener('blur', () => { wantRotate = false; gizmoMode(); });
 
+let chunkBox = null;            // outline of a selected zone chunk (it sits flush with the ground round it)
+function outlineChunk(h) {
+  if (chunkBox) { scene3.remove(chunkBox); chunkBox.geometry.dispose(); chunkBox = null; }
+  if (h) { chunkBox = new THREE.BoxHelper(h, 0xffd040); chunkBox.renderOrder = 12; chunkBox.material.depthTest = false; scene3.add(chunkBox); }
+}
 async function select(sel, focus = false) {
   selection = sel; requestRender();
+  outlineChunk(null);
   many.clear(); markSelected();
   $('layer-input').placeholder = '(in play from the start)';
   gizmo.detach();
   for (const id of INSPECTOR_BOXES) $(id).hidden = true;
   stopSound();
+  clearVanillaGhost();
+  $('fields-adv').innerHTML = ''; $('adv-box').hidden = true;
   if (!sel) { $('sel-title').textContent = 'Nothing selected'; $('fields').innerHTML = ''; $('layer-row').hidden = true; markOutliner(); return; }
   $('layer-row').hidden = true;
   if (sel.route !== undefined) {
@@ -1128,7 +1451,7 @@ async function select(sel, focus = false) {
     const m = data.routes[sel.route];
     proxy.position.copy(toThree(m.pos)); gizmo.attach(proxy);
     $('sel-title').textContent = `Route marker ${sel.route}`;
-    showFields({ index: sel.route, pos: m.pos, links: m.links, flags: m.flags }, true);
+    showFields({ index: sel.route, pos: m.pos, links: m.links, flags: m.flags }, true, 'route');
   } else if (sel.target) {             // a target camera's look-at point (CAMTARGPOS)
     selRot = null; kitOffset = null;
     const cam = data.cameras.find((c) => c.line === sel.line);
@@ -1141,14 +1464,21 @@ async function select(sel, focus = false) {
     const rec = await run('get_record', { line: sel.line });
     selRot = Array.isArray(rec.fields.rot) ? rec.fields.rot : null;
     if (obj) {
-      const piv = data.props.find((p) => p.line === sel.line)?.pivot;
+      const piv = (data.props.find((p) => p.line === sel.line) || data.chunks?.find((p) => p.line === sel.line))?.pivot;
       proxy.position.copy(piv ? toThree(piv) : obj.position);
       kitOffset = piv ? toThree(piv).sub(obj.position) : null;
       if (selRot) proxy.rotation.set(-deg(selRot[0]), -deg(selRot[1]), deg(selRot[2]), 'YXZ');
       else proxy.rotation.set(0, 0, 0, 'YXZ');
+      kitQuat0 = proxy.quaternion.clone();
       gizmo.attach(proxy);
     }
     $('sel-title').textContent = `${rec.kind} · line ${rec.line}`;
+    const chunk = data.chunks?.find((c) => c.line === rec.line);
+    if (chunk) {
+      $('sel-title').textContent = `World piece ${chunk.model} · ${chunk.zone} #${chunk.index}${chunk.root ? ' (zone root)' : ''} · line ${rec.line}`;
+      outlineChunk(obj);
+      if (chunk.root) { gizmo.detach(); status(`${chunk.zone}: the zone's root record - its other chunks hang from it, so it stays put`); }
+    }
     const crit = rec.kind === 'HLOI' ? data.objects.find((o) => o.line === rec.line) : null;
     if (crit?.is_base_target) {
       const b = document.createElement('span'); b.className = 'badge critical';
@@ -1156,14 +1486,23 @@ async function select(sel, focus = false) {
       b.title = `${crit.base_dll || 'The base mission'} uses script id ${crit.script_id} - hide it in a layer instead of deleting it`;
       $('sel-title').append(' ', b);
     }
+    const item = sceneItem(rec.line);
+    if (item?.lineage) {
+      const b = document.createElement('span'); b.className = 'badge lin-' + item.lineage;
+      b.textContent = { vanilla: 'Vanilla', modified: 'Vanilla · Modified', custom: 'Custom' }[item.lineage];
+      b.title = { vanilla: 'As the game ships it', modified: 'A shipped record you changed - see Vanilla lineage below',
+                  custom: 'Added in the editor (or renamed / renumbered): not in the shipped level' }[item.lineage];
+      $('sel-title').append(' ', b);
+    }
     const isObject = rec.kind === 'HLOI';
     $('layer-row').hidden = !isObject;
     if (isObject) $('layer-input').value = data.objects.find((o) => o.line === rec.line)?.layer || '';
-    showFields(rec.fields, false);
+    showFields(rec.fields, false, rec.kind);
     showInspector(rec);
+    showVanilla(rec, item).catch((e) => console.warn('vanilla lineage:', e));
   }
   applyMoveSnap();
-  if (focus) focusOn(proxy.position);
+  if (focus) frameSelection(sel);
   markOutliner();
   if (!$('terrain').hidden) updateTerrainPanel();
   if (!$('road').hidden) updateRoadPanel();
@@ -1180,14 +1519,36 @@ $('layer-input').onchange = async () => {
 };
 $('layer-input').onkeydown = (e) => { if (e.key === 'Enter') $('layer-input').blur(); };
 
-function showFields(fields, readOnly) {
-  const t = $('fields'); t.innerHTML = '';
+// The field list: the record's named values first; flags, unnamed (u_*), AI tuning, vectors and links in the collapsed
+// "Advanced (raw)" section, flags with a checkbox per known bit. A soldier's kit has its own editor (Kit section).
+const RAW_FIELD = /^(flags$|u_[a-z]+$|u\d+$|ai_|v\d$|link|group|lod|shard_|number$|p\d+$)/;
+const KIT_FIELD = /^kit(_count$|\d+\.)/;
+// known bits per record kind: [bit, label, editable] - layout bits (they decide which values follow) are read-only
+const FLAG_BITS = {
+  HLOI: [[0x20000, 'cutscene actor', true]],
+  ENVI: [[0x400000, 'breakable (shatters)', false]],
+  EMITTER: [[0x1, 'on at the start', true], [0x2, 'limited duration', true], [0x8, 'tint', true], [0x10, 'grows', true],
+            [0x20, 'growth from life', true], [0x40, 'tint varies', true], [0x200, 'world-space velocity', true]],
+  NEWENVMARKER: [[0x80, 'named', false]],
+  route: [[0x1, 'generated from the walk map', false]],
+};
+function showFields(fields, readOnly, kind = '') {
+  const t = $('fields'), adv = $('fields-adv'); t.innerHTML = ''; adv.innerHTML = '';
+  const o = kind === 'HLOI' ? data.objects.find((x) => x.line === fields.line) : null;
+  const kitEditor = !readOnly && o && !/_VEH_/i.test(o.unit) && 'kit_count' in fields;
+  let nAdv = 0;
   for (const [k, v] of Object.entries(fields)) {
+    if (kitEditor && KIT_FIELD.test(k)) continue;
+    const raw = RAW_FIELD.test(k) || KIT_FIELD.test(k);
     const tr = document.createElement('tr');
     const editable = !readOnly && !['line', 'kind'].includes(k);
-    tr.innerHTML = `<td>${k}</td><td></td>`;
+    tr.innerHTML = `<td>${escHtml(k)}</td><td></td>`;
     const cell = tr.children[1];
     const shown = Array.isArray(v) ? v.join(', ') : String(v);
+    const commit = async (value) => {
+      try { await run('set_field', { line: fields.line, field: k, value }, `${k} set`); await refresh(); return true; }
+      catch { return false; }
+    };
     if (editable) {
       const inp = document.createElement('input'); inp.value = shown;
       inp.oninput = () => inp.classList.add('changed');
@@ -1196,19 +1557,136 @@ function showFields(fields, readOnly) {
         let value = inp.value;
         if (Array.isArray(v)) value = value.split(',').map(Number);
         else if (typeof v === 'number') value = Number(value);
-        try { await run('set_field', { line: fields.line, field: k, value }, `${k} set`); await refresh(); }
-        catch { inp.value = shown; inp.classList.remove('changed'); }
+        if (!await commit(value)) { inp.value = shown; inp.classList.remove('changed'); }
       };
       cell.appendChild(inp);
     } else { cell.className = 'ro'; cell.textContent = shown; }
-    t.appendChild(tr);
+    if (k === 'flags' && typeof v === 'number' && FLAG_BITS[kind]) {
+      const bits = document.createElement('div'); bits.className = 'flag-bits';
+      for (const [bit, label, canEdit] of FLAG_BITS[kind]) {
+        const l = document.createElement('label');
+        l.title = `bit 0x${bit.toString(16).toUpperCase()}${canEdit ? '' : ' - fixed: it decides which values follow in the record'}`;
+        const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!(v & bit);
+        cb.disabled = readOnly || !canEdit;
+        cb.onchange = () => commit(cb.checked ? v | bit : v & ~bit).then((ok) => { if (!ok) cb.checked = !cb.checked; });
+        l.append(cb, ` ${label}`); bits.appendChild(l);
+      }
+      cell.appendChild(bits);
+    }
+    (raw ? adv : t).appendChild(tr);
+    if (raw) nAdv++;
   }
+  $('adv-box').hidden = !nAdv;
+  $('adv-box').querySelector('summary').textContent = `Advanced (raw) · ${nAdv} values`;
+  if (kitEditor) showKit(fields).catch((e) => console.warn('kit:', e));
 }
 
-function focusOn(p) {
-  const off = camera.position.clone().sub(orbit.target).normalize().multiplyScalar(6);
-  orbit.target.copy(p); camera.position.copy(p).add(off);
+// ---- the Kit section: one row per item (weapon / inventory item, amount, remove) and "+ Add item" ----
+let kitOpts = null;
+async function showKit(fields) {
+  kitOpts ||= await api('kit_options');
+  if (selection?.line !== fields.line) return;
+  const known = new Map([...kitOpts.weapons, ...kitOpts.items].map((x) => [x.id, x.category]));
+  if (!$('kit-items').children.length) {
+    $('kit-items').innerHTML = [...kitOpts.weapons.map((w) => `<option value="${escHtml(w.id)}">weapon</option>`),
+      ...kitOpts.items.map((i) => `<option value="${escHtml(i.id)}">item</option>`)].join('');
+  }
+  const items = [];
+  for (let k = 0; k < fields.kit_count; k++)
+    items.push({ item: fields[`kit${k}.item`], category: fields[`kit${k}.category`], amount: fields[`kit${k}.amount`] });
+  const box = $('kit-list'); box.innerHTML = '';
+  const save = async (list, what) => {
+    try {
+      await run('set_kit', { line: fields.line, items: list }, what);
+      const line = fields.line; await refresh(); if (selection?.line !== line) await select({ line });
+    } catch { /* the status line says why; the rows show the kit as it is */ }
+  };
+  const catOf = (id, fallback) => (known.get(id) ?? fallback ?? null);
+  const row = (it, i) => {
+    const div = document.createElement('div');
+    const needCat = catOf(it.item, it.category) === null;
+    div.className = 'kit' + (needCat ? ' cat' : '');
+    const name = document.createElement('input'); name.setAttribute('list', 'kit-items'); name.value = it.item;
+    name.placeholder = 'weapon or item'; name.title = `${it.item} - a Weaps.txt weapon or an Inven.txt item (type or pick)`;
+    const amt = document.createElement('input'); amt.type = 'number'; amt.min = 0; amt.value = it.amount;
+    amt.title = 'Amount: rounds for a gun, count for grenades and items';
+    const cat = document.createElement('input'); cat.type = 'number'; cat.min = 0; cat.value = it.category ?? '';
+    cat.title = 'Kit category: this item is in no shipped kit, so give its number (weapons 5, keys 20, goggles 17)';
+    const del = document.createElement('button'); del.type = 'button'; del.textContent = '×'; del.title = 'Remove from the kit';
+    const send = () => {
+      const id = name.value.trim(); if (!id) return;
+      save(items.map((x, j) => (j !== i ? x
+        : { item: id, amount: +amt.value, category: needCat ? (cat.value === '' ? null : +cat.value) : catOf(id, id === x.item ? x.category : null) })),
+        `kit: ${id} × ${amt.value}`);
+    };
+    name.onchange = send; amt.onchange = send; cat.onchange = send;
+    del.onclick = () => save(items.filter((_, j) => j !== i), `kit: ${it.item} removed`);
+    div.append(name, ...(needCat ? [cat] : []), amt, del);
+    return div;
+  };
+  items.forEach((it, i) => box.appendChild(row(it, i)));
+  if (!items.length) box.innerHTML = '<p class="hint">Empty kit.</p>';
+  $('kit-add').onclick = () => {                 // a new row; it is saved once an item is typed or picked
+    if (box.querySelector('.kit.new')) return box.querySelector('.kit.new input').focus();
+    if (!items.length) box.innerHTML = '';
+    const div = document.createElement('div'); div.className = 'kit new';
+    const name = document.createElement('input'); name.setAttribute('list', 'kit-items'); name.placeholder = 'weapon or item';
+    const amt = document.createElement('input'); amt.type = 'number'; amt.min = 0; amt.value = 1;
+    const del = document.createElement('button'); del.type = 'button'; del.textContent = '×'; del.title = 'Cancel';
+    name.onchange = () => {
+      const id = name.value.trim(); if (!id) return;
+      if (kitOpts.weapons.some((w) => w.id === id) && +amt.value === 1) amt.value = 30;
+      save([...items, { item: id, amount: +amt.value, category: catOf(id) }], `kit: ${id} added`);
+    };
+    del.onclick = () => { div.remove(); if (!items.length) box.innerHTML = '<p class="hint">Empty kit.</p>'; };
+    div.append(name, amt, del); box.appendChild(div); name.focus();
+  };
+  $('kit-row').hidden = false;
 }
+
+function focusOn(p, dist = 6) {
+  const off = camera.position.clone().sub(orbit.target).normalize().multiplyScalar(dist);
+  orbit.target.copy(p); camera.position.copy(p).add(off);
+  if (topView) placeTopCamera(p);
+  requestRender();
+}
+// Frame a selection: far enough back to see all of it, from the current direction if nothing is in the way - else
+// the first clear direction around it (turning, then from higher up); with none clear, in front of what blocks it.
+const blockRay = new THREE.Raycaster();
+function frameSelection(sel) {
+  const obj = sel?.line !== undefined && !sel.target ? byLine.get(sel.line) : null;
+  if (!obj) return focusOn(proxy.position);
+  const box = new THREE.Box3().setFromObject(obj);
+  const centre = box.isEmpty() ? obj.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+  const size = box.isEmpty() ? 1 : box.getSize(new THREE.Vector3()).length();
+  const dist = THREE.MathUtils.clamp(size * 1.3, 4, 600);
+  if (topView) return focusOn(centre);
+  const self = new Set(); obj.traverse((c) => self.add(c));
+  const solids = [groups.world, groups.props, groups.objects].filter((g) => g.visible);
+  const clearFor = (dir) => {                    // how far the camera can go back along dir before a surface
+    blockRay.set(centre, dir); blockRay.far = dist;
+    const hit = blockRay.intersectObjects(solids, true).find((h) => h.object.isMesh && !self.has(h.object)
+      && !h.object.userData.ghost && shownInView(h.object));
+    return hit ? hit.distance : Infinity;
+  };
+  const cur = camera.position.clone().sub(orbit.target).normalize();
+  const yaw0 = Math.hypot(cur.x, cur.z) > 1e-3 ? Math.atan2(cur.x, cur.z) : 0;
+  let best = cur, bestFree = -1;
+  search: for (const pitch of [Math.asin(THREE.MathUtils.clamp(cur.y, 0.15, 0.9)), 0.6, 1.0, 1.4]) {
+    for (let k = 0; k < 12; k++) {
+      const yaw = yaw0 + (k % 2 ? -1 : 1) * Math.ceil(k / 2) * (Math.PI / 6);
+      const dir = new THREE.Vector3(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), Math.cos(yaw) * Math.cos(pitch));
+      const free = clearFor(dir);
+      if (free > bestFree) { best = dir; bestFree = free; }
+      if (free === Infinity) break search;
+    }
+  }
+  orbit.target.copy(centre);
+  camera.position.copy(centre).addScaledVector(best, bestFree === Infinity ? dist : Math.max(0.6, bestFree - 0.4));
+  requestRender();
+}
+// drawn in the view: the object and all its parents visible (layer filters, isolation)
+function shownInView(o) { for (let x = o; x; x = x.parent) if (!x.visible) return false; return true; }
 
 // Snapping: turns through the gizmo (live), moves when the drag ends - the record's x / z on the grid, a kit piece's
 // corner (centre - half its size, turned 90-degree sizes swapped) so 8 m tiles meet edge to edge.
@@ -1267,8 +1745,9 @@ async function commitMove() {
 // After a change: rebuild the overlays (line numbers may shift) and keep the selection when it still exists.
 async function refresh() {
   const keep = selection;
+  const hist = updateHistory();              // Undo / the unsaved mark at once - the scene rebuild can take a while
   await buildScene(false);
-  await updateHistory();
+  await hist;
   if (keep && (keep.route !== undefined ? keep.route < data.routes.length : byLine.has(keep.line))) await select(keep);
   else await select(null);
 }
@@ -1294,6 +1773,85 @@ setInterval(async () => {
   } catch { /* the server is restarting */ } finally { polling = false; }
 }, 1500);
 
+// The MCP link to this window (workflow.py): screenshot / focus requests from an assistant, polled here and answered
+// with ui_reply. Runs while the tab is hidden too (browsers slow the timer to once a second there).
+let uiPolling = false;
+setInterval(async () => {
+  if (uiPolling) return;
+  uiPolling = true;
+  try {
+    for (const q of await api('ui_poll')) {
+      try {
+        const result = q.type === 'screenshot' ? await uiScreenshot(q.args) : q.type === 'focus' ? await uiFocus(q.args) : null;
+        if (q.type === 'screenshot') await api('ui_reply', { id: q.id, result });
+      } catch (e) {
+        if (q.type === 'screenshot') await api('ui_reply', { id: q.id, error: String(e.message || e) }).catch(() => {});
+      }
+    }
+  } catch { /* the server is restarting */ } finally { uiPolling = false; }
+}, 500);
+
+async function uiFocus(a) {
+  if (a.route !== null && a.route !== undefined) await select({ route: a.route }, true);
+  else await select({ line: a.line }, true);
+  status(a.route != null ? `route marker ${a.route} shown by the assistant` : `line ${a.line} shown by the assistant`);
+  requestRender();
+  return { ok: true };
+}
+
+// One picture of the 3D view, aimed as asked (game units, yaw = compass direction looked along: 0 = +z), drawn and
+// read back in the same task (no preserveDrawingBuffer needed), scaled to the asked width; the view goes back after.
+async function uiScreenshot(a) {
+  const saved = { pos: camera.position.clone(), target: orbit.target.clone() };
+  let target = null, dist = a.distance ? a.distance / 100 : null;
+  if (a.line !== null && a.line !== undefined) {
+    const o = byLine.get(a.line);
+    if (!o) throw new Error(`line ${a.line} isn't drawn in the view (no position, or its layer is hidden)`);
+    const box = new THREE.Box3().setFromObject(o);
+    target = box.isEmpty() ? o.getWorldPosition(new THREE.Vector3()) : box.getCenter(new THREE.Vector3());
+    if (!dist) dist = Math.max(4, box.isEmpty() ? 6 : box.getSize(new THREE.Vector3()).length() * 1.4);
+  } else if (a.route !== null && a.route !== undefined) {
+    const m = data.routes[a.route];
+    if (!m) throw new Error(`no route marker ${a.route}`);
+    target = toThree(m.pos);
+  } else if (a.target) target = toThree(a.target);
+  if (a.position) {
+    camera.position.copy(toThree(a.position));
+    orbit.target.copy(target || toThree(a.position).add(new THREE.Vector3(0, 0, -1)));
+  } else if (target || a.top || a.yaw != null || a.pitch != null) {
+    target = target || orbit.target.clone();
+    dist = dist || (a.top ? 60 : 30);
+    if (a.top) camera.position.copy(target).add(new THREE.Vector3(0, dist, 0.001));
+    else {
+      const yaw = deg(a.yaw ?? 45), pitch = deg(a.pitch ?? 35);
+      // game forward (sin yaw, cos yaw) in x / z; three's z = -game z; the camera sits behind and above the target
+      camera.position.copy(target).add(new THREE.Vector3(-Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch),
+                                                          Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(dist));
+    }
+    orbit.target.copy(target);
+  }
+  orbit.update(); camera.updateMatrixWorld();
+  const gizmoShown = gizmo.visible;
+  gizmo.visible = false;
+  let url, w, h;
+  try {
+    renderFrame();
+    const src = renderer.domElement;
+    w = Math.min(a.width || 1024, src.width); h = Math.round(src.height * w / src.width);
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    c.getContext('2d').drawImage(src, 0, 0, w, h);
+    url = c.toDataURL(a.format === 'png' ? 'image/png' : 'image/jpeg', 0.85);
+  } finally {
+    gizmo.visible = gizmoShown;
+    const cam = { position: toGame(camera.position), target: toGame(orbit.target) };
+    if (!a.keep_camera) { camera.position.copy(saved.pos); orbit.target.copy(saved.target); orbit.update(); }
+    requestRender();
+    uiScreenshot.last = cam;
+  }
+  return { image: url.split(',')[1], mime: a.format === 'png' ? 'image/png' : 'image/jpeg', size: [w, h],
+           camera: uiScreenshot.last };
+}
+
 // Unsaved changes: the session's 'dirty' (updateHistory, the poll). Opening another level / mission or leaving the page
 // asks first.
 let dirty = false;
@@ -1312,15 +1870,22 @@ async function updateHistory() {
   $('redo').title = h.redo.length ? `Redo: ${h.redo.at(-1)} (Ctrl+Y)` : 'Redo (Ctrl+Y)';
   renderHistory(h);
   const doc = $('doc');
+  currentMission = h.mission;
   if (h.mission) {
     doc.className = 'mission';
-    doc.innerHTML = `Mission <b>${h.mission[1]}</b> · Mods\\${h.mission[0]} · base ${h.level}${h.dirty ? ' · unsaved' : ''}`;
+    doc.innerHTML = `${h.dirty ? '● ' : ''}Mission <b>${escHtml(h.mission[1])}</b> · Mods\\${escHtml(h.mission[0])} · base ${h.level}`;
+    doc.title = `Editing mission ${h.mission[1]} in Mods\\${h.mission[0]} (base level ${h.level})${h.dirty ? ' - unsaved changes' : ' - saved'}`;
   } else {
     doc.className = '';
-    doc.textContent = h.level ? `${h.level} (game level)${h.dirty ? ' · unsaved' : ''}` : '';
+    doc.textContent = h.level ? `${h.dirty ? '● ' : ''}${h.level} (game level)` : '';
+    doc.title = h.level ? `Editing the game level ${h.level}${h.dirty ? ' - unsaved changes' : ''}` : '';
   }
+  // Play needs a mission: on a game level it opens Save as mission first, then plays
+  $('play').title = h.mission ? `Save mission ${h.mission[1]} and start the game straight into it`
+    : 'A game level can\'t be played directly: Play opens Save as mission… first, then starts the game in the new mission';
   document.title = (h.dirty ? '● ' : '') + `Desert Storm Editor - ${h.mission ? h.mission[1] : level || ''}`;
 }
+let currentMission = null;          // [mod, NAME] once saved / opened as a mission (updateHistory)
 
 // ---- picking ----
 const ray = new THREE.Raycaster();
@@ -1341,12 +1906,12 @@ renderer.domElement.addEventListener('pointerup', (e) => {
     return;
   }
   if (pickMode) {               // picking for a form (objective target, patrol waypoints): nothing gets selected
-    const h = ray.intersectObjects(pickable.filter((o) => groups[o.userData.cat]?.visible), false)
-      .find((x) => pickMode.accept(x.object.userData));
+    const h = ray.intersectObjects(pickable.filter(pickOk), false)
+      .find((x) => shownInView(x.object) && pickMode.accept(x.object.userData));
     if (h) pickMode.pick(h.object.userData); else status(pickMode.hint, true);
     return;
   }
-  const hits = ray.intersectObjects(pickable.filter((o) => groups[o.userData.cat]?.visible), false);
+  const hits = ray.intersectObjects(pickable.filter(pickOk), false).filter((x) => shownInView(x.object));
   if (!hits.length) return select(null);
   const h = hits[0];
   if (h.object.userData.cat === 'routes') return select({ route: h.instanceId });
@@ -1361,8 +1926,9 @@ renderer.domElement.addEventListener('dblclick', (e) => {
   const r = renderer.domElement.getBoundingClientRect();
   ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
   const targets = Object.values(groups).filter((g) => g.visible);
-  const hit = ray.intersectObjects(targets, true).find((h) => h.object.isMesh);
+  const hit = ray.intersectObjects(targets, true).find((h) => h.object.isMesh && shownInView(h.object));
   if (!hit) return;
+  if (topView) { placeTopCamera(hit.point); return; }
   const dir = camera.position.clone().sub(hit.point).normalize();
   orbit.target.copy(hit.point);
   camera.position.copy(hit.point).addScaledVector(dir, 3);
@@ -1373,7 +1939,7 @@ async function openLevel(name, ask = true) {
   if (ask && !await confirmDiscard(`Open ${name}`)) return status('kept the unsaved changes');
   status(`opening ${name}…`);
   await run('open_level', { level: name });
-  level = name; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
+  level = name; shownLevel = name; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear(); endIsolate();
   await buildScene(true);
   await updateHistory();
   const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
@@ -1381,12 +1947,32 @@ async function openLevel(name, ask = true) {
   status(`${name}: ${data.objects.length} objects, ${data.props.length} props, ${data.routes.length} route markers`);
 }
 $('open').onclick = () => openLevel($('level').value);
+let shownLevel = null;              // the picker's value while that level is open (put back when opening is cancelled)
+$('level').onchange = async () => {
+  const want = $('level').value;
+  if (!await confirmDiscard(`Open ${want}`)) { if (shownLevel) $('level').value = shownLevel; return status('kept the unsaved changes'); }
+  openLevel(want, false).catch(() => {});
+};
 $('undo').onclick = async () => { const r = await run('undo', {}); status(`undone: ${r.undone}`); await refresh(); };
 $('redo').onclick = async () => { const r = await run('redo', {}); status(`redone: ${r.redone}`); await refresh(); };
+function needModName() {           // Save as mod without a name: point at the box
+  const box = $('mod');
+  box.classList.add('invalid'); box.focus();
+  status('type a mod name in the Mod name box first (the folder under Mods\\ it is saved to)', true);
+}
+$('mod').addEventListener('input', () => $('mod').classList.remove('invalid'));
 $('save').onclick = async () => {
   const mod = $('mod').value.trim();
-  if (!mod) return status('enter a mod name first', true);
-  const r = await run('save_mod', { mod });
+  if (!mod) return needModName();
+  let r;
+  try { r = await api('save_mod', { mod }); }
+  catch (e) {
+    if (!/^no changes/.test(e.message)) return status(e.message, true, 'command save_mod');
+    if (!confirm(`Nothing differs from the shipped ${level}: saving would only copy the game's own ${level}.ENV / .RMD `
+      + `into Mods\\${mod} (the game reads them either way, and Export refuses copies of game files).\n\nSave the copies anyway?`))
+      return status('not saved - nothing changed yet');
+    try { r = await api('save_mod', { mod, allow_unchanged: true }); } catch (e2) { return status(e2.message, true, 'command save_mod'); }
+  }
   status(`saved ${r.files.join(', ')} to ${r.folder}`); await updateHistory();
 };
 // New level: new_level builds an empty scene with a ground zone and saves it as a mission, then it opens here.
@@ -1409,7 +1995,7 @@ $('nl-make').onclick = async (e) => {
     level = $('nl-env').value; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
     await buildScene(true); await updateHistory();
     focusOn(toThree(r.start)); await select(null);
-    status(`new level ${r.mission[1]} (Mods\${r.mission[0]}): Terrain… to shape the ground, Library to add props`);
+    status(`new level ${r.mission[1]} (Mods\\${r.mission[0]}): Terrain… to shape the ground, Library to add props`);
   } catch (err) { $('nl-result').textContent = err.message; }
 };
 
@@ -1493,15 +2079,20 @@ async function saveScript() {
 $('script-btn').onclick = openScript;
 async function play() {
   const r = await run('play', {}, 'starting the game…');
-  cOffset = 0; $('c-log').innerHTML = ''; showCrash(null); cWasRunning = true;
+  cOffset = 0; $('c-log').innerHTML = ''; showCrash(null); cWasRunning = true; cMods = r.mods || null;
   $('console').hidden = false; startConsole();
-  status(`game starting in ${r.level} (Mods\\${r.mod}) - it quits after the mission's end screen`);
+  status(`game starting in ${r.level} (Mods\\${r.mod}) - it goes straight into the mission; if it stops at PLEASE PRESS `
+    + 'ANY KEY TO BEGIN, click the game window and press a key. It quits after the mission\'s end screen');
   await updateHistory();
 }
-$('play').onclick = () => play().catch(() => showProblems());
+let playAfterSave = false;          // Play on a game level: Save as mission first, then play
+$('play').onclick = () => {
+  if (!currentMission) { playAfterSave = true; openSaveMission(); return; }
+  play().catch(() => showProblems());
+};
 
 // ---- game console: the plugin's log while the game runs, and a crash report when it stops with an error ----
-let cOffset = 0, cTimer = null, cWasRunning = false;
+let cOffset = 0, cTimer = null, cWasRunning = false, cMods = null;
 const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
 function logClass(l) {
   if (/\[fail\]|error|crash|couldn't|can't|not found/i.test(l)) return 'fail';
@@ -1538,6 +2129,7 @@ function wireProblems(box) {
     if (kinds.has('zones')) n += (await run('fix_zones', {}, 'zones fixed')).fixed.length;
     if (kinds.has('crews')) n += (await run('fix_crews', {}, 'crews fixed')).fixed.length;
     if (kinds.has('hidden')) n += (await run('fix_hidden', {}, 'objects put in play')).fixed.length;
+    if (kinds.has('rinfo')) n += (await run('fix_rinfo', {}, 'prop flags fixed')).fixed.length;
     await refresh(); status(`${n} record(s) fixed`); showProblems();
   };
 }
@@ -1563,8 +2155,14 @@ async function pollConsole() {
   }
   let state = r.running ? `running${r.level ? ' - ' + r.level : ''}` : 'not running';
   if (r.exit_code !== null && r.exit_code !== undefined) state = r.crash ? 'crashed' : `exited (${r.exit_code})`;
+  if (r.waiting_for_key) state += ' · waiting at PLEASE PRESS ANY KEY TO BEGIN - click the game window and press a key';
   if (!r.log) state += ' · no DesertStormFix.log (only the dev / Steam build of the plugin writes one)';
+  // the game loads every enabled mod (name order, a later one wins a file both have) - not only the one being played
+  const mods = r.mods || cMods || [];
+  if (mods.length) state += ` · mods loaded: ${mods.join(', ')}`;
   $('c-state').textContent = state;
+  $('c-state').title = mods.length ? `The game loads every enabled mod in Mods\\, in name order (a later one wins a file `
+    + `both have): ${mods.join(', ')}. Rename a folder with a leading _ (or MODS in the game's main menu) to switch one off.` : '';
   showCrash(r.crash);
   $('console-btn').classList.toggle('alert', !!r.crash);
   if (r.crash && cWasRunning) { $('console').hidden = false; status('the game crashed - see the console', true); }
@@ -1692,14 +2290,16 @@ $('a-create').onclick = async (e) => {
 };
 
 // Save as mission: a dialog for mod / mission / campaign names -> save_mission (stays open with the result).
-$('save-mission').onclick = () => {
+$('save-mission').onclick = () => { playAfterSave = false; openSaveMission(); };
+function openSaveMission() {
   if (!level) return;
   if (data?.mission) { $('m-mod').value = data.mission[0]; $('m-name').value = data.mission[1].toLowerCase(); }
   $('m-mod').value ||= $('mod').value; $('m-result').textContent = '';
-  $('m-close').textContent = 'Cancel'; $('m-save').textContent = 'Save mission';
+  $('m-close').textContent = 'Cancel'; $('m-save').textContent = playAfterSave ? 'Save mission and play' : 'Save mission';
+  $('m-play-note').hidden = !playAfterSave;
   $('mission-dialog').showModal();
-};
-$('m-close').onclick = () => $('mission-dialog').close();
+}
+$('m-close').onclick = () => { playAfterSave = false; $('mission-dialog').close(); };
 $('m-save').onclick = async (e) => {
   e.preventDefault();
   const form = $('mission-dialog').querySelector('form');
@@ -1717,6 +2317,7 @@ packed models: ${r.packed_models.join(', ')}` : '') +
 Play: SINGLE PLAYER › CUSTOM CAMPAIGNS${$('m-campaign').value.trim() ? '' : ' (add a campaign name to list it there)'}`;
     status(`mission ${r.level} saved - you are now editing it`); await updateHistory();
     $('m-close').textContent = 'Close'; $('m-save').textContent = 'Save again'; $('m-close').focus();
+    if (playAfterSave) { playAfterSave = false; $('mission-dialog').close(); play().catch(() => showProblems()); }
   } catch (err) { $('m-result').textContent = err.message; }
 };
 
@@ -1770,7 +2371,8 @@ window.addEventListener('keydown', async (e) => {
       const o = data.objects.find((x) => x.line === selection.line);
       if (o?.is_base_target && !confirm(`Object #${o.script_id} is required by ${o.base_dll || 'the base mission'}. Deleting it will break the `
         + 'original campaign logic. Hide it in a layer instead of deleting.\n\nDelete it anyway?')) return;
-      await run('delete', { line: selection.line }, `line ${selection.line} deleted`);
+      try { await run('delete', { line: selection.line, force: !!o?.is_base_target }, `line ${selection.line} deleted`); }
+      catch { return; }          // refused (a zone's root record ...): run() shows why in the status line
     }
     selection = null; await refresh();
   } else if (k === 'f' && !e.ctrlKey && !e.altKey) { e.preventDefault(); dropToGround().catch(() => {}); }
@@ -1785,7 +2387,7 @@ function gameForward(pitch, yaw) {
   const p = deg(pitch), y = deg(yaw);
   return new THREE.Vector3(Math.sin(y) * Math.cos(p), -Math.sin(p), -Math.cos(y) * Math.cos(p));
 }
-const SCENE_LISTS = ['props', 'objects', 'waypoints', 'regions', 'cameras', 'sounds'];
+const SCENE_LISTS = ['props', 'objects', 'waypoints', 'regions', 'cameras', 'sounds', 'chunks'];
 const findRec = (line) => SCENE_LISTS.map((k) => data?.[k]?.find((r) => r.line === line)).find(Boolean);
 const lift = (v, m = 0.15) => v.add(new THREE.Vector3(0, m, 0));
 
@@ -1801,7 +2403,7 @@ async function dropToGround() {
     if (!obj || !rec || rec.ground || rec.road) continue;   // a level's ground / a road follows the ground already
     const self = new Set(); obj.traverse((c) => self.add(c));
     const box = new THREE.Box3().setFromObject(obj);
-    const solid = ['props', 'objects'].includes(obj.userData.cat) && !box.isEmpty();
+    const solid = ['props', 'objects', 'world'].includes(obj.userData.cat) && !box.isEmpty();
     const bottom = solid ? box.min.y : obj.position.y;
     const centre = solid ? box.getCenter(new THREE.Vector3()) : obj.position.clone();
     // from just above its feet first (a roof or bridge over it isn't the ground), from its top when it is sunk deeper
@@ -1821,6 +2423,127 @@ async function dropToGround() {
   status(`dropped ${moves.length} to the ground (Ctrl+Z undoes each)`);
 }
 $('drop-btn').onclick = () => dropToGround().catch(() => {});
+$('world-edit').checked = worldEdit;
+$('world-edit').onchange = (e) => {
+  worldEdit = e.target.checked;
+  try { localStorage.setItem('worldEdit', worldEdit ? '1' : '0'); } catch { /* ignore */ }
+  if (!worldEdit && selection?.line !== undefined && data.chunks?.some((c) => c.line === selection.line)) select(null);
+  status(worldEdit ? 'Edit world: click the ground, cliffs or buildings to pick that chunk (Del deletes, Alt turns, Ctrl+D copies)'
+                   : "Edit world off: the level's own geometry can't be picked");
+};
+
+// ---- Paths & Regions panel (paths.py): draw a path (click points, Enter), place a region or a waypoint ----
+let ppMode = 'path', ppClicks = [];
+const ppPreview = new THREE.Group(); scene3.add(ppPreview);
+const ppDotGeo = keep(new THREE.SphereGeometry(0.35, 10, 8));
+const ppMat = keep(new THREE.MeshBasicMaterial({ color: 0x38c7d6, depthTest: false }));
+const ppLineMat = keep(new THREE.LineBasicMaterial({ color: 0x38c7d6, depthTest: false }));
+function ppDraw() {
+  clearGroup(ppPreview);
+  for (const p of ppClicks) { const s = new THREE.Mesh(ppDotGeo, ppMat); s.position.copy(p); s.renderOrder = 11; ppPreview.add(s); }
+  if (ppClicks.length > 1) {
+    const pts = [...ppClicks]; if ($('pp-loop').checked) pts.push(ppClicks[0]);
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), ppLineMat); l.renderOrder = 11; ppPreview.add(l);
+  }
+  requestRender();
+}
+function ppTab(mode) {
+  ppMode = mode;
+  for (const [m, id] of [['path', 'pp-path'], ['region', 'pp-region'], ['wp', 'pp-wp'], ['cam', 'pp-cam']]) {
+    $(`pp-tab-${m}`).classList.toggle('on', m === mode); $(id).hidden = m !== mode;
+  }
+  if (mode !== 'path') { ppClicks = []; ppDraw(); }
+}
+for (const m of ['path', 'region', 'wp', 'cam']) $(`pp-tab-${m}`).onclick = () => ppTab(m);
+$('pp-cam-add').onclick = async () => {        // the editor view -> a CAMFREE (pitch down +, yaw: forward = sin / cos)
+  const f = new THREE.Vector3(); camera.getWorldDirection(f);
+  const pitch = THREE.MathUtils.radToDeg(Math.asin(Math.max(-1, Math.min(1, -f.y))));
+  const yaw = THREE.MathUtils.radToDeg(Math.atan2(f.x, -f.z));
+  const r = await run('camera_add', { pos: toGame(camera.position), rot: [+pitch.toFixed(3), +yaw.toFixed(3), 0],
+                                      name: $('pp-cname').value, fov: +$('pp-fov').value }, 'camera saved');
+  await refresh(); showLayer('cameras');
+  status(`camera ${r.name} saved (camera ${r.index}) - use it in a rule's "Camera shot"`);
+};
+$('pp-shape').onchange = () => { $('pp-boxsize').hidden = $('pp-shape').value !== 'box'; $('pp-radius').hidden = $('pp-shape').value === 'box'; };
+async function fillPathSelect(keep) {
+  await loadPaths();
+  const sel = $('pp-path-sel'), cur = keep ?? sel.value; sel.innerHTML = '';
+  for (const c of pathList) sel.add(new Option(`${c.name} - ${c.ids.length} points${c.loop ? ', loop' : ''}`, c.start));
+  if (cur !== undefined && cur !== '') sel.value = String(cur);
+  const n = selectedScriptIds().length;
+  $('pp-info').textContent = `${pathList.length} path(s) in this level. ${n ? n + ' object(s) selected.' : 'Select soldiers (Shift-click for several) to give them the path.'}`;
+}
+async function openPathsPanel(mode = 'path') {
+  if (!level) return;
+  $('paths-panel').hidden = false; ppTab(mode); showLayer('waypoints');
+  await fillPathSelect();
+}
+function ppActive() { return !$('paths-panel').hidden; }
+renderer.domElement.addEventListener('pointerdown', async (e) => {
+  if (e.button !== 0 || !ppActive() || pickMode) return;
+  const r = renderer.domElement.getBoundingClientRect();
+  ray.setFromCamera(new THREE.Vector2(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1), camera);
+  const hit = ray.intersectObjects([groups.world, groups.props], true).find((h) => h.object.isMesh && !h.object.userData.ghost);
+  if (!hit || e.shiftKey || ppMode === 'cam') return;   // Shift-click still selects (soldiers to give a path to)
+  e.stopImmediatePropagation(); e.preventDefault();
+  downAt = null;                         // the click-up must not select what is under the cursor
+  if (ppMode === 'path') {
+    ppClicks.push(hit.point.clone()); ppDraw();
+    status(`${ppClicks.length} point(s) - click more, Enter makes the path, Esc clears (Shift-click selects soldiers)`);
+  } else if (ppMode === 'region') {
+    const box = $('pp-shape').value === 'box';
+    const res = await run('region_add', { pos: toGame(hit.point), name: $('pp-rname').value, shape: $('pp-shape').value,
+                                          size: [+$('pp-sx').value, +$('pp-sy').value, +$('pp-sz').value], radius: +$('pp-r').value },
+                          `region placed (${box ? 'box' : 'sphere'})`);
+    await refresh(); await select({ line: res.line });
+  } else {
+    const res = await run('waypoint_add', { pos: toGame(hit.point), name: $('pp-wname').value, wait: +$('pp-wwait').value,
+                                            snap: $('pp-snap').checked }, 'waypoint placed');
+    if (res.warning) status(res.warning, true);
+    await refresh(); await select({ line: res.line });
+  }
+}, { capture: true });
+async function ppFinish() {
+  if (ppClicks.length < 2) return status('click at least two points on the ground', true);
+  const res = await run('path_create', { points: ppClicks.map(toGame), name: $('pp-name').value, loop: $('pp-loop').checked,
+                                         wait: +$('pp-wait').value, snap: $('pp-snap').checked }, 'path made');
+  if (res.warning) status(res.warning, true);
+  ppClicks = []; ppDraw();
+  await refresh(); await fillPathSelect(res.start);
+  status(`path ${res.name}: ${res.ids.length} points - select soldiers and "Assign" to have them walk it`);
+}
+window.addEventListener('keydown', (e) => {
+  if (!ppActive() || ppMode !== 'path' || ['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName)) return;
+  if (e.key === 'Enter' && ppClicks.length) { e.preventDefault(); e.stopImmediatePropagation(); ppFinish().catch(() => {}); }
+  if (e.key === 'Escape' && ppClicks.length) { e.stopImmediatePropagation(); ppClicks = []; ppDraw(); status('path points cleared'); }
+}, { capture: true });
+$('pp-finish').onclick = () => ppFinish().catch(() => {});
+$('pp-clear').onclick = () => { ppClicks = []; ppDraw(); };
+$('pp-loop').onchange = ppDraw;
+$('pp-close').onclick = () => { $('paths-panel').hidden = true; ppClicks = []; ppDraw(); };
+$('paths-btn').onclick = () => { if ($('paths-panel').hidden) openPathsPanel().catch(() => {}); else $('pp-close').click(); };
+$('pp-assign').onclick = async () => {
+  const start = +$('pp-path-sel').value;
+  const c = pathList.find((x) => x.start === start);
+  const lines = many.size ? [...many] : selection?.line !== undefined ? [selection.line] : [];
+  const soldiers = lines.filter((l) => data.objects.some((o) => o.line === l));
+  if (!c) return status('make or pick a path first', true);
+  if (!soldiers.length) return status('select the soldiers first (click, Shift-click for several)', true);
+  await run('set_patrol', { lines: soldiers, waypoints: c.ids, loop: c.loop, movement: $('pp-move').value, start: $('pp-start').value,
+                            unseen: $('pp-unseen').checked },
+            `${soldiers.length} soldier(s) walk ${c.name}`);
+  // a soldier standing on a blocked walk-map cell may never get onto his route
+  const stand = soldiers.map((l) => data.objects.find((o) => o.line === l)).filter(Boolean).map((o) => o.pos);
+  const chk = await api('walk_check', { points: stand }).catch(() => []);
+  const bad = chk.filter((p) => p.walkable === false).length;
+  if (bad) status(`${bad} of the soldiers stand on blocked ground (AI walk map) - move them onto open ground or they may not reach the path`, true);
+  await refresh(); await fillPathSelect(start);
+};
+$('pp-del').onclick = async () => {
+  const start = +$('pp-path-sel').value; const c = pathList.find((x) => x.start === start);
+  if (!c || !confirm(`Delete path ${c.name} (${c.ids.length} waypoints)?`)) return;
+  await run('path_delete', { start }, `path ${c.name} deleted`); await refresh(); await fillPathSelect();
+};
 
 // ---- picking for a form: the next click(s) in the 3D view pick a record instead of selecting it ----
 let pickMode = null;            // {hint, accept(userData), pick(userData), finish?(), done?(cancelled)}
@@ -1832,9 +2555,10 @@ function endPick(cancelled) {
   m?.done?.(cancelled);
 }
 function showLayer(key) {        // make sure a pickable kind is drawn
-  groups[key].visible = true;
+  if (groups[key].visible) return;
   const row = $('layers').children[LAYERS.findIndex(([k]) => k === key)];
-  if (row) row.querySelector('input').checked = true;
+  if (row) { row.querySelector('input').checked = true; row.querySelector('input').onchange({ target: { checked: true } }); }
+  else groups[key].visible = true;
 }
 const objectByName = (name) => data.objects.find((o) => (o.model + o.script_id).toUpperCase() === String(name).toUpperCase());
 
@@ -1868,6 +2592,7 @@ let camView = null;             // {pos, target, fov, line} of the editor view w
 function enterCamView(c) {
   const look = camLook(c);
   if (!look) return status('the editor can\'t tell where this camera looks', true);
+  if (topView) setTopView(false);
   if (!camView) camView = { pos: camera.position.clone(), target: orbit.target.clone(), fov: camera.fov };
   camView.line = c.line;
   camera.position.copy(toThree(c.pos)); orbit.target.copy(look); camera.lookAt(look);
@@ -1906,9 +2631,10 @@ async function showInspector(rec) {
     aiProfiles ||= await api('ai_profiles');
     fillProfiles(o.ai_profile);
     $('patrol-info').textContent = o.patrol
-      ? `Patrol: ${o.patrol.waypoints.join(' → ')}${o.patrol.loop ? ' → back to the start' : ''} (stored with the mission as editor.patrols)`
-      : 'No patrol route.';
+      ? `Walks ${o.patrol.waypoints[0].replace(/_\d+$/, '')}: ${o.patrol.waypoints.length} points${o.patrol.loop ? ', loop' : ''}, ${o.patrol.movement || 'walk'}, ${o.patrol.start === 'rule' ? 'when a rule starts it' : 'from the mission start'}`
+      : 'No path - "Give a path…" draws or picks one.';
     $('patrol-btn').disabled = false; $('patrol-clear').disabled = !o.patrol;
+    $('unit-info').textContent = '';
     $('ai-row').hidden = false;
   }
   const cam = rec.kind?.startsWith('CAM') ? data.cameras.find((c) => c.line === line) : null;
@@ -1922,9 +2648,10 @@ async function showInspector(rec) {
   if (o && /_VEH_/i.test(o.unit)) showCrew(line).catch(() => {});
   if (rec.kind === 'ENVSND') showSound(rec).catch(() => {});
   if (o && HERO_BANK[String(o.model).slice(0, 6).toUpperCase()]) showVoices(o).catch(() => {});
+  if (o) showObjectLogic(o).catch(() => {});
   if (rec.kind === 'SWITCH') await showSwitch(rec);
   if (rec.kind === 'EMITTER') await showEmitter(rec);
-  if (rec.kind === 'REGN' || rec.kind === 'SWITCH' || o) await showEvents(rec, o);
+  if (['REGN', 'SWITCH', 'NEWENVWAYPT'].includes(rec.kind) || o) await showEvents(rec, o);
 }
 function interRow(label, el) {
   const row = document.createElement('div'); row.className = 'row';
@@ -2013,6 +2740,22 @@ $('ai-profile').onchange = async () => {
   await refresh();
   if (keep.size > 1) selectMany([...keep]);
 };
+// Paths: each waypoint's link to its next one (the game's patrol routes) as a cyan line with an arrowhead.
+const pathArrowGeo = keep(new THREE.ConeGeometry(0.22, 0.6, 8).rotateX(Math.PI / 2));
+const pathLineMat = keep(new THREE.LineBasicMaterial({ color: 0x38c7d6, transparent: true, opacity: 0.8 }));
+const pathArrowMat = keep(new THREE.MeshBasicMaterial({ color: 0x38c7d6 }));
+function drawPathLinks() {
+  const byId = new Map(data.waypoints.map((w) => [w.id, w]));
+  for (const w of data.waypoints) {
+    const n = byId.get(w.next);
+    if (!n) continue;
+    const a = lift(toThree(w.pos), 0.3), b = lift(toThree(n.pos), 0.3);
+    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([a, b]), pathLineMat); l.raycast = () => {};
+    const tip = new THREE.Mesh(pathArrowGeo, pathArrowMat); tip.raycast = () => {};
+    tip.position.copy(a.clone().lerp(b, 0.62)); tip.lookAt(b);
+    groups.waypoints.add(l, tip);
+  }
+}
 // Patrol linker: click waypoints in order, Enter stores the route (set_patrol); drawn as a dashed orange loop.
 function drawPatrol(o) {
   const pts = o.patrol.waypoints.map((n) => data.waypoints.find((w) => w.name === n)).filter(Boolean).map((w) => lift(toThree(w.pos)));
@@ -2023,163 +2766,266 @@ function drawPatrol(o) {
   l.computeLineDistances(); l.raycast = () => {};
   groups.waypoints.add(l);
 }
-$('patrol-btn').onclick = () => {
-  const o = data.objects.find((x) => x.line === selection?.line);
-  if (!o) return;
-  if (!data.waypoints.length) return status('this scene has no waypoints - copy one (Ctrl+C / Ctrl+V) to make some', true);
-  showLayer('waypoints');
-  const picked = [];
-  const redraw = () => {
-    clearGroup(patrolPreview);
-    const pts = [o.pos, ...picked.map((w) => w.pos)].map((p) => lift(toThree(p), 0.25));
-    if (pts.length < 2) return;
-    const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
-                             new THREE.LineDashedMaterial({ color: 0xffd23f, dashSize: 0.5, gapSize: 0.3, depthTest: false }));
-    l.computeLineDistances(); l.renderOrder = 12; patrolPreview.add(l);
-  };
-  startPick({
-    hint: `patrol for ${o.unit} (id ${o.script_id}): click waypoints (cyan balls) in order - Enter finishes, Esc cancels`,
-    accept: (u) => u.cat === 'waypoints',
-    pick: (u) => {
-      const w = data.waypoints.find((x) => x.line === u.line);
-      if (!w) return;
-      picked.push(w); redraw();
-      status(`${picked.map((x) => x.name).join(' → ')} - click more, Enter finishes`);
-    },
-    finish: async () => {
-      endPick(false);
-      if (picked.length < 2) return status('a patrol needs at least two waypoints', true);
-      await run('set_patrol', { line: o.line, waypoints: picked.map((w) => w.name), loop: true },
-                `patrol of ${o.script_id}: ${picked.length} waypoints`);
-      await refresh();
-    },
-  });
-};
+$('patrol-btn').onclick = () => openPathsPanel('path').catch(() => {});
 $('patrol-clear').onclick = async () => {
   const line = selection?.line; if (line === undefined) return;
   await run('set_patrol', { line, waypoints: [] }, 'patrol removed'); await refresh();
 };
 
-// ---- rules: "when <trigger> -> <actions>" (set_rules / add_rule / delete_rule in logic.py) ----
-const TRIGGER_TEXT = { region_enter: 'When a player enters', region_leave: 'When a player leaves',
-                       killed: 'When it is killed / destroyed', timer: 'Seconds after the mission starts',
-                       switch: 'When a player uses switch' };
-const ACTION_TEXT = { show_layer: 'Show layer', hide_layer: 'Hide layer', show_objective: 'Show objective',
-                      complete_objective: 'Complete objective', end_mission: 'End the mission' };
+// ---- rules (missionrules.py): "when <trigger>, if <conditions>, do <actions>" - cards + an editor ----
 const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
 function objTitle(id) { const o = logicInfo?.objectives.find((x) => x.id === id); return o ? `${id} "${o.title}"` : String(id); }
-function ruleHtml(r) {
-  const t = r.trigger;
-  const when = t.type === 'region_enter' ? `a player enters <b>${escHtml(t.target)}</b>`
-    : t.type === 'region_leave' ? `a player leaves <b>${escHtml(t.target)}</b>`
-      : t.type === 'killed' ? `object <b>${t.target}</b> is killed / destroyed`
-        : t.type === 'switch' ? `a player uses switch <b>${escHtml(t.target)}</b>` : `<b>${t.target} s</b> into the mission`;
-  const acts = r.actions.map((a) => a.type === 'end_mission' ? `mission <b>${a.target === 'win' ? 'success' : 'failed'}</b>`
-    : a.type.endsWith('objective') ? `${ACTION_TEXT[a.type].toLowerCase()} <b>${escHtml(objTitle(a.target))}</b>`
-      : `${ACTION_TEXT[a.type].toLowerCase()} <b>${escHtml(a.target)}</b>`);
-  return `When ${when} → ${acts.join(', ')}${r.once && t.type !== 'timer' ? ' <span class="hint">(first time only)</span>' : ''}`;
+let ruleDraft = null;           // {index: n | null, rule}
+let pathList = [];
+let apiFns = null;
+async function loadPaths() { pathList = (await api('path_list').catch(() => ({ paths: [] }))).paths; return pathList; }
+function objLabel(id) { const o = data.objects.find((x) => x.script_id === id); return o ? `${o.unit} #${id}` : `#${id}`; }
+function fillDatalists() {
+  $('dl-objects').innerHTML = data.objects.map((o) => `<option value="${escHtml(`${o.unit} #${o.script_id}`)}">`).join('');
+  const names = new Set();
+  for (const r of logicInfo?.rules || []) for (const it of [r.trigger, ...r.conditions, ...r.actions])
+    if (it && typeof it.name === 'string') names.add(it.name);
+  $('dl-names').innerHTML = [...names].map((n) => `<option value="${escHtml(n)}">`).join('');
 }
-function ruleList(box, entries) {        // entries: [{r, i}] with the rule's index in the mission's list
-  box.innerHTML = entries.length ? '' : '<p class="hint">No rules yet.</p>';
-  for (const { r, i } of entries) {
-    const div = document.createElement('div'); div.className = 'rule';
-    div.innerHTML = `<span class="text">${ruleHtml(r)}</span><button title="delete this rule">×</button>`;
-    div.querySelector('button').onclick = async () => {
-      await run('delete_rule', { index: i }, 'rule deleted');
-      await loadLogic(); refreshLogicViews();
-    };
-    box.appendChild(div);
-  }
+const idOf = (txt) => { const m = String(txt).match(/#(-?\d+)\s*$/) || String(txt).match(/^\s*(-?\d+)\s*$/); return m ? +m[1] : null; };
+function pickObjects(multi, done) {       // close the dialog, click objects in the 3D view, come back
+  const dlg = $('objectives-dialog'); dlg.close(); showLayer('objects');
+  const picked = [];
+  startPick({
+    hint: multi ? 'click objects - Enter finishes, Esc cancels' : 'click an object - Esc cancels',
+    accept: (u) => u.cat === 'objects',
+    pick: (u) => {
+      const sid = data.objects.find((x) => x.line === u.line)?.script_id;
+      if (sid === undefined) return;
+      if (!picked.includes(sid)) picked.push(sid);
+      if (!multi) endPick(false); else status(`${picked.map(objLabel).join(', ')} - click more, Enter finishes`);
+    },
+    finish: multi ? () => endPick(false) : undefined,
+    done: (cancelled) => { if (!cancelled) done(picked); openObjectives('rules').then(() => renderRuleEditor()); },
+  });
 }
-// A rule form. fixed = {types: [trigger types], target} for a record's own events; null = any trigger (the dialog).
-function ruleForm(box, fixed) {
-  const info = logicInfo;
-  box.innerHTML = ''; box.className = 'rule-form';
-  const trig = document.createElement('select');
-  for (const k of fixed ? fixed.types : Object.keys(TRIGGER_TEXT)) trig.add(new Option(TRIGGER_TEXT[k], k));
-  const tWrap = document.createElement('span'); tWrap.className = 'row';
-  const head = document.createElement('div'); head.className = 'row'; head.append(trig, tWrap);
-  const onceLbl = document.createElement('label'); onceLbl.className = 'inline';
-  onceLbl.innerHTML = '<input type="checkbox" checked> first time only';
-  const once = onceLbl.querySelector('input');
-  let tInput = null;
-  const drawTarget = () => {
-    tWrap.innerHTML = ''; tInput = null;
-    onceLbl.hidden = trig.value === 'timer';
-    if (fixed) return;
-    const k = trig.value;
-    if (k.startsWith('region')) {
-      tInput = document.createElement('select');
-      for (const n of info.regions) tInput.add(new Option(n, n));
-      if (!info.regions.length) tInput.add(new Option('(no regions in this scene)', ''));
-      tWrap.append(tInput);
-    } else if (k === 'switch') {
-      tInput = document.createElement('select');
-      for (const n of info.switches || []) tInput.add(new Option(n, n));
-      if (!(info.switches || []).length) tInput.add(new Option('(no switches in this scene)', ''));
-      tWrap.append(tInput);
-    } else if (k === 'killed') {
-      tInput = document.createElement('input'); tInput.type = 'number'; tInput.placeholder = 'script id'; tInput.style.width = '7em';
-      const ids = selectedScriptIds(); if (ids.length === 1) tInput.value = ids[0];
-      tWrap.append(tInput);
-    } else {
-      tInput = document.createElement('input'); tInput.type = 'number'; tInput.min = 1; tInput.value = 30; tInput.style.width = '6em';
-      tWrap.append(tInput, Object.assign(document.createElement('span'), { className: 'hint', textContent: 's' }));
+function paramEl(p, value, set) {
+  const wrap = document.createElement('span'); wrap.className = 'param';
+  wrap.append(document.createTextNode(p.label + ' '));
+  const t = p.type;
+  const sel = (opts, cur) => { const s = document.createElement('select');
+    for (const [v, l] of opts) s.add(new Option(l, v)); s.value = cur ?? ''; s.onchange = () => set(s.value); return s; };
+  if (t === 'object') {
+    const inp = document.createElement('input'); inp.className = 'obj'; inp.setAttribute('list', 'dl-objects');
+    inp.placeholder = p.default === -1 ? 'any (leave empty)' : 'type or ◎ pick';
+    inp.value = value !== undefined && value !== null && value !== -1 ? objLabel(value) : '';
+    inp.onchange = () => { const v = idOf(inp.value); set(v === null ? -1 : v); };
+    const pick = document.createElement('button'); pick.type = 'button'; pick.textContent = '◎'; pick.title = 'pick in the 3D view';
+    pick.onclick = () => pickObjects(false, (ids) => { if (ids.length) set(ids[0]); });
+    wrap.append(inp, pick);
+  } else if (t === 'objects') {
+    const ids = Array.isArray(value) ? value : [];
+    const chips = document.createElement('span'); chips.className = 'chips';
+    for (const id of ids) {
+      const c = document.createElement('span'); c.className = 'chip'; c.innerHTML = `${escHtml(objLabel(id))}<b title="remove">×</b>`;
+      c.querySelector('b').onclick = () => set(ids.filter((x) => x !== id)); chips.append(c);
     }
-  };
-  trig.onchange = drawTarget;
-  const acts = document.createElement('div');
-  const addAct = () => {
-    const row = document.createElement('div'); row.className = 'act';
-    const type = document.createElement('select'), target = document.createElement('select');
-    for (const [k, v] of Object.entries(ACTION_TEXT)) type.add(new Option(v, k));
-    const fill = () => {
-      target.innerHTML = '';
-      const t = type.value;
-      const opts = t.endsWith('layer') ? info.layers.map((n) => [n, n])
-        : t.endsWith('objective') ? info.objectives.map((o) => [o.id, `${o.id} ${o.title}`])
-          : [['win', 'success'], ['loss', 'failed']];
-      for (const [v, label] of opts) target.add(new Option(label, v));
-      if (!opts.length) target.add(new Option(t.endsWith('layer') ? '(no layers yet - put objects in one)' : '(no objectives yet)', ''));
-    };
-    type.onchange = fill; fill();
-    const del = document.createElement('button'); del.textContent = '×'; del.title = 'remove this action';
-    del.onclick = (ev) => { ev.preventDefault(); row.remove(); };
-    row.append(type, target, del); acts.appendChild(row);
-  };
-  const more = document.createElement('button'); more.textContent = '+ action';
-  more.onclick = (ev) => { ev.preventDefault(); addAct(); };
-  const add = document.createElement('button'); add.textContent = 'Add rule';
-  add.onclick = async (ev) => {
-    ev.preventDefault();
-    const actions = [...acts.children].map((row) => {
-      const [type, target] = row.querySelectorAll('select');
-      return { type: type.value, target: type.value.endsWith('objective') && target.value !== '' ? +target.value : target.value };
-    }).filter((a) => a.target !== '');
-    if (!actions.length) return status('add an action that has a target', true);
-    const target = fixed ? fixed.target : trig.value === 'killed' || trig.value === 'timer' ? +tInput.value : tInput.value;
+    const inp = document.createElement('input'); inp.className = 'obj'; inp.setAttribute('list', 'dl-objects'); inp.placeholder = 'add: type or ◎ pick';
+    inp.onchange = () => { const v = idOf(inp.value); if (v !== null && !ids.includes(v)) set([...ids, v]); };
+    const pick = document.createElement('button'); pick.type = 'button'; pick.textContent = '◎'; pick.title = 'pick several in the 3D view';
+    pick.onclick = () => pickObjects(true, (got) => set([...new Set([...ids, ...got])]));
+    const fromSel = document.createElement('button'); fromSel.type = 'button'; fromSel.textContent = '+ selected';
+    fromSel.title = 'add the objects selected in the 3D view'; fromSel.onclick = () => set([...new Set([...ids, ...selectedScriptIds()])]);
+    wrap.append(chips, inp, pick, fromSel);
+  } else if (t === 'region') wrap.append(sel([['', '(pick a region)'], ...data.regions.map((r) => [r.name, r.name])], value));
+  else if (t === 'switch') wrap.append(sel([['', '(pick a switch)'], ...(data.switches || []).map((w) => [w.name, w.name])], value));
+  else if (t === 'waypoint') wrap.append(sel([['', '(pick a waypoint)'], ...data.waypoints.map((w) => [w.id, `${w.name} (${w.id})`])], value));
+  else if (t === 'path') wrap.append(sel([['', '(pick a path)'], ...pathList.map((c) => [c.start, `${c.name} - ${c.ids.length} points${c.loop ? ', loop' : ''}`])], value));
+  else if (t === 'objective') wrap.append(sel([['', '(pick an objective)'], ...(logicInfo?.objectives || []).map((o) => [o.id, `${o.id}: ${o.title}`])], value));
+  else if (t === 'layer') wrap.append(sel([['', '(pick a layer)'], ...(logicInfo?.layers || []).map((l) => [l, l])], value));
+  else if (t === 'team') wrap.append(sel(Object.entries(logicInfo.catalog.teams), value));
+  else if (t === 'camera') wrap.append(sel([['', '(pick a camera)'], ...data.cameras.map((c) => [c.name, `${c.name} (${c.kind.replace('CAM', '').toLowerCase()})`])], value));
+  else if (t === 'wav') { const inp = document.createElement('input'); inp.value = value ?? ''; inp.placeholder = 'radio1.wav (in the mod folder)';
+    inp.onchange = () => set(inp.value.trim()); wrap.append(inp); }
+  else if (t === 'choice') wrap.append(sel(Object.entries(p.choices), value));
+  else if (t === 'rule') wrap.append(sel((logicInfo?.rules || []).map((r, i) => [i + 1, `${i + 1}: ${r.name || logicInfo.rule_texts[i]}`.slice(0, 70)]), value));
+  else if (t === 'bool') { const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!value; cb.onchange = () => set(cb.checked); wrap.append(cb); }
+  else if (['seconds', 'metres', 'percent', 'number'].includes(t)) {
+    const n = document.createElement('input'); n.type = 'number'; n.step = 'any'; n.value = value ?? p.default ?? 0;
+    n.onchange = () => set(+n.value); wrap.append(n,
+      document.createTextNode({ seconds: ' s', metres: ' m', percent: ' %', number: '' }[t]));
+  } else if (t === 'flag' || t === 'counter') {
+    const inp = document.createElement('input'); inp.setAttribute('list', 'dl-names'); inp.value = value ?? ''; inp.placeholder = `${t} name`;
+    inp.onchange = () => set(inp.value.trim()); wrap.append(inp);
+  } else if (t === 'text') { const inp = document.createElement('input'); inp.value = value ?? ''; inp.style.width = '24em'; inp.onchange = () => set(inp.value); wrap.append(inp); }
+  else if (t === 'slot') {
+    const inp = document.createElement('input'); inp.setAttribute('list', 'dl-slots'); inp.style.width = '22em';
+    const f = apiFns?.find((x) => x.slot === value); inp.value = f ? `${f.name} (0x${f.slot.toString(16).toUpperCase()})` : '';
+    inp.onchange = () => { const m = inp.value.match(/0x([0-9a-f]+)\)?\s*$/i); if (m) set(parseInt(m[1], 16)); };
+    wrap.append(inp);
+    if (f) wrap.append(Object.assign(document.createElement('span'), { className: 'hint', textContent: ` ${f.args.map((a) => a.name + ':' + a.type).join(', ')} - ${f.desc.slice(0, 120)}` }));
+  } else if (t === 'args') {
+    const inp = document.createElement('input'); inp.style.width = '22em'; inp.placeholder = 'e.g. 164, 2.5, "text"';
+    inp.value = (value || []).map((v) => typeof v === 'string' ? JSON.stringify(v) : v).join(', ');
+    inp.onchange = () => { try { set(JSON.parse(`[${inp.value}]`)); } catch { status('arguments: numbers and "texts", separated by commas', true); } };
+    wrap.append(inp);
+  } else if (t === 'lua') { const ta = document.createElement('textarea'); ta.value = value ?? ''; ta.onchange = () => set(ta.value); wrap.append(ta); }
+  else { const inp = document.createElement('input'); inp.value = value ?? ''; inp.onchange = () => set(inp.value); wrap.append(inp); }
+  return wrap;
+}
+function defaultsFor(spec, type) {
+  const out = { type };
+  for (const p of spec.params) out[p.name] = p.default === null || p.default === undefined ? (p.type === 'objects' ? [] : undefined) : JSON.parse(JSON.stringify(p.default));
+  return out;
+}
+function itemRow(table, item, onChange, onRemove, extra) {
+  const row = document.createElement('div'); row.className = 'item';
+  const typeSel = document.createElement('select');
+  const groups = {};
+  for (const [k, spec] of Object.entries(table)) (groups[spec.group || ''] ||= []).push([k, spec.label]);
+  for (const [g, list] of Object.entries(groups)) {
+    const parent = g ? Object.assign(document.createElement('optgroup'), { label: g }) : typeSel;
+    for (const [k, l] of list) parent.appendChild(new Option(l, k));
+    if (g) typeSel.appendChild(parent);
+  }
+  typeSel.value = item.type;
+  typeSel.onchange = () => onChange(defaultsFor(table[typeSel.value], typeSel.value));
+  row.append(typeSel);
+  if (extra) row.append(extra);
+  for (const p of table[item.type].params) {
+    if (p.show_if && Object.entries(p.show_if).some(([k, v]) => item[k] !== v)) continue;   // e.g. object only for "this object"
+    row.append(paramEl(p, item[p.name], (v) => { item[p.name] = v; onChange(item, true); }));
+  }
+  if (table[item.type].help) row.append(Object.assign(document.createElement('span'), { className: 'hint', textContent: table[item.type].help }));
+  if (onRemove) { const x = document.createElement('button'); x.type = 'button'; x.className = 'x'; x.textContent = '×'; x.title = 'remove'; x.onclick = onRemove; row.append(x); }
+  return row;
+}
+function renderRuleEditor() {
+  const box = $('ob-rule-form');
+  if (!ruleDraft) { box.hidden = true; box.innerHTML = ''; return; }
+  const cat = logicInfo.catalog, r = ruleDraft.rule;
+  fillDatalists();
+  box.hidden = false; box.innerHTML = '';
+  const head = document.createElement('div'); head.className = 'row';
+  const name = Object.assign(document.createElement('input'), { value: r.name || '', placeholder: 'Rule name (optional)' });
+  name.style.width = '20em'; name.onchange = () => { r.name = name.value; };
+  const once = document.createElement('label'); once.className = 'check';
+  once.innerHTML = `<input type="checkbox" ${r.once ? 'checked' : ''}> only the first time`;
+  once.querySelector('input').onchange = (e) => { r.once = e.target.checked; };
+  head.append(Object.assign(document.createElement('strong'), { textContent: ruleDraft.index === null ? 'New rule ' : `Rule ${ruleDraft.index + 1} ` }), name, once);
+  box.append(head);
+  const redraw = () => renderRuleEditor();
+  box.append(Object.assign(document.createElement('h3'), { textContent: 'When' }));
+  box.append(itemRow(cat.triggers, r.trigger, (it, inPlace) => { if (!inPlace) r.trigger = it; redraw(); }, null));
+  box.append(Object.assign(document.createElement('h3'), { textContent: 'Only if (all of these)' }));
+  r.conditions.forEach((c, k) => {
+    const neg = document.createElement('label'); neg.className = 'check'; neg.innerHTML = `<input type="checkbox" ${c.not ? 'checked' : ''}> not`;
+    neg.querySelector('input').onchange = (e) => { c.not = e.target.checked; };
+    box.append(itemRow(cat.conditions, c, (it, inPlace) => { if (!inPlace) r.conditions[k] = it; redraw(); },
+                       () => { r.conditions.splice(k, 1); redraw(); }, neg));
+  });
+  const addC = Object.assign(document.createElement('button'), { type: 'button', textContent: '+ condition' });
+  addC.onclick = () => { r.conditions.push(defaultsFor(cat.conditions.alive, 'alive')); redraw(); };
+  box.append(addC);
+  box.append(Object.assign(document.createElement('h3'), { textContent: 'Do (in order)' }));
+  r.actions.forEach((a, k) => {
+    const mv = document.createElement('span');
+    for (const [txt, d] of [['↑', -1], ['↓', 1]]) {
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: txt });
+      b.onclick = () => { const n = k + d; if (n < 0 || n >= r.actions.length) return; r.actions.splice(n, 0, r.actions.splice(k, 1)[0]); redraw(); };
+      mv.append(b);
+    }
+    box.append(itemRow(cat.actions, a, (it, inPlace) => { if (!inPlace) r.actions[k] = it; redraw(); },
+                       () => { r.actions.splice(k, 1); redraw(); }, mv));
+  });
+  const addA = Object.assign(document.createElement('button'), { type: 'button', textContent: '+ action' });
+  addA.onclick = () => { r.actions.push(defaultsFor(cat.actions.message, 'message')); redraw(); };
+  const addW = Object.assign(document.createElement('button'), { type: 'button', textContent: '+ wait' });
+  addW.onclick = () => { r.actions.push({ type: 'wait', seconds: 2 }); redraw(); };
+  box.append(addA, addW);
+  const foot = document.createElement('div'); foot.className = 'foot';
+  const ok = Object.assign(document.createElement('button'), { type: 'button', textContent: ruleDraft.index === null ? 'Add rule' : 'Save rule' });
+  const cancel = Object.assign(document.createElement('button'), { type: 'button', textContent: 'Cancel' });
+  const err = Object.assign(document.createElement('span'), { className: 'err' });
+  ok.onclick = async () => {
     try {
-      await run('add_rule', { trigger: { type: trig.value, target }, actions, once: once.checked }, 'rule added');
-      await loadLogic(); refreshLogicViews();
-    } catch { /* status shows it */ }
+      if (ruleDraft.index === null) await api('add_rule', { rule: r });
+      else await api('update_rule', { index: ruleDraft.index, rule: r });
+      status(ruleDraft.index === null ? 'rule added' : 'rule saved');
+      ruleDraft = null; await loadLogic(); refreshLogicViews();
+    } catch (e) { err.textContent = e.message; }
   };
-  const foot = document.createElement('div'); foot.className = 'row'; foot.append(more, onceLbl, add);
-  box.append(head, acts, foot);
-  drawTarget(); addAct();
+  cancel.onclick = () => { ruleDraft = null; renderRuleEditor(); renderRuleCards(); };
+  foot.append(ok, cancel, err);
+  box.append(foot);
+  box.scrollIntoView({ block: 'nearest' });
+}
+function newRule(trigger) {
+  const cat = logicInfo.catalog;
+  return { name: '', enabled: true, once: true, trigger: trigger || defaultsFor(cat.triggers.region_enter, 'region_enter'),
+           conditions: [], actions: [defaultsFor(cat.actions.message, 'message')] };
+}
+function ruleRefs(r, rec) {             // does the rule name this record?
+  const items = [r.trigger, ...r.conditions, ...r.actions];
+  if (rec.kind === 'REGN') return items.some((it) => it.region === rec.fields.name);
+  if (rec.kind === 'SWITCH') return items.some((it) => it.switch === rec.fields.name);
+  if (rec.kind === 'NEWENVWAYPT') return items.some((it) => it.waypoint === rec.fields.id || it.path === rec.fields.id);
+  const sid = rec.fields.script_id;
+  return items.some((it) => Object.values(it).some((v) => v === sid || (Array.isArray(v) && v.includes(sid))));
+}
+function ruleCard(r, i, compact) {
+  const card = document.createElement('div'); card.className = 'rule-card' + (r.enabled === false ? ' off' : '') +
+    (ruleDraft?.index === i ? ' sel' : '');
+  const text = logicInfo.rule_texts?.[i] || '';
+  if (!compact) {
+    const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = r.enabled !== false; cb.title = 'rule on / off';
+    cb.onchange = async () => { await run('update_rule', { index: i, rule: { ...r, enabled: cb.checked } }, cb.checked ? 'rule on' : 'rule off'); await loadLogic(); refreshLogicViews(); };
+    card.append(cb);
+  }
+  const body = document.createElement('div');
+  body.innerHTML = `<div class="rn">${escHtml(r.name || `Rule ${i + 1}`)}${r.once ? '' : ' <span class="hint">(every time)</span>'}</div><div class="rt">${escHtml(text)}</div>`;
+  card.append(body);
+  const btns = document.createElement('div'); btns.className = 'rb';
+  const b = (txt, title, fn) => { const x = Object.assign(document.createElement('button'), { type: 'button', textContent: txt, title }); x.onclick = fn; btns.append(x); };
+  b('Edit', 'edit this rule', () => { openObjectives('rules').then(() => { ruleDraft = { index: i, rule: JSON.parse(JSON.stringify(r)) }; renderRuleCards(); renderRuleEditor(); }); });
+  if (!compact) {
+    b('⧉', 'duplicate', async () => { await run('add_rule', { rule: { ...r, name: (r.name || `Rule ${i + 1}`) + ' copy' } }, 'rule copied'); await loadLogic(); refreshLogicViews(); });
+    b('↑', 'move up', async () => { if (i > 0) { await run('move_rule', { index: i, to: i - 1 }); await loadLogic(); refreshLogicViews(); } });
+    b('↓', 'move down', async () => { if (i < logicInfo.rules.length - 1) { await run('move_rule', { index: i, to: i + 1 }); await loadLogic(); refreshLogicViews(); } });
+  }
+  b('×', 'delete', async () => { if (!confirm(`Delete "${r.name || `rule ${i + 1}`}"?`)) return; await run('delete_rule', { index: i }, 'rule deleted'); ruleDraft = null; await loadLogic(); refreshLogicViews(); });
+  card.append(btns);
+  return card;
+}
+function renderRuleCards() {
+  const box = $('ob-rules'); box.innerHTML = '';
+  const q = $('rule-filter').value.trim().toLowerCase();
+  (logicInfo?.rules || []).forEach((r, i) => {
+    if (q && !`${r.name} ${logicInfo.rule_texts[i]}`.toLowerCase().includes(q)) return;
+    box.append(ruleCard(r, i, false));
+  });
+  if (!box.children.length) box.innerHTML = '<p class="hint">No rules yet - "+ New rule" makes one: pick when it fires, optional conditions, and what it does.</p>';
+}
+$('rule-filter').oninput = () => renderRuleCards();
+$('rule-new').onclick = () => { ruleDraft = { index: null, rule: newRule() }; renderRuleCards(); renderRuleEditor(); };
+async function prepareRules() {
+  await loadPaths();
+  if (!apiFns) { apiFns = (await api('api_functions').catch(() => ({ functions: [] }))).functions;
+    $('dl-slots').innerHTML = apiFns.map((f) => `<option value="${escHtml(`${f.name} (0x${f.slot.toString(16).toUpperCase()})`)}">`).join(''); }
 }
 async function showEvents(rec, o) {
   const info = await loadLogic();         // fresh: layers / objectives / regions may have changed since
   if (!info) return;
-  const isRegion = rec.kind === 'REGN', isSwitch = rec.kind === 'SWITCH';
-  const target = isRegion || isSwitch ? rec.fields.name : rec.fields.script_id;
-  const mine = info.rules.map((r, i) => ({ r, i })).filter(({ r }) => r.trigger.target === target
-    && (isRegion ? r.trigger.type.startsWith('region') : isSwitch ? r.trigger.type === 'switch' : r.trigger.type === 'killed'));
-  ruleList($('ev-list'), mine);
-  const goals = info.objectives.filter((g) => isRegion ? g.type === 'region' && g.target === target
-    : g.type === 'kill' && [].concat(g.target).includes(target));
-  if (goals.length) $('ev-list').insertAdjacentHTML('afterbegin', goals.map((g) =>
-    `<p class="hint">Objective ${g.id} "${escHtml(g.title)}" completes ${isRegion ? 'when a player gets here' : 'when this is killed / destroyed'}.</p>`).join(''));
-  ruleForm($('ev-form'), { types: isRegion ? ['region_enter', 'region_leave'] : isSwitch ? ['switch'] : ['killed'], target });
+  const box = $('ev-list'); box.innerHTML = '';
+  info.rules.forEach((r, i) => { if (ruleRefs(r, rec)) box.append(ruleCard(r, i, true)); });
+  const goals = info.objectives.filter((g) => rec.kind === 'REGN' ? g.type === 'region' && g.target === rec.fields.name
+    : rec.kind === 'HLOI' && g.type === 'kill' && [].concat(g.target).includes(rec.fields.script_id));
+  if (goals.length) box.insertAdjacentHTML('afterbegin', goals.map((g) =>
+    `<p class="hint">Objective ${g.id} "${escHtml(g.title)}" completes ${rec.kind === 'REGN' ? 'when a player gets here' : 'when this is killed / destroyed'}.</p>`).join(''));
+  if (!box.children.length) box.innerHTML = '<p class="hint">No rule uses this yet.</p>';
+  $('ev-new').onclick = () => {
+    const cat = info.catalog;
+    const trig = rec.kind === 'REGN' ? { ...defaultsFor(cat.triggers.region_enter, 'region_enter'), region: rec.fields.name }
+      : rec.kind === 'SWITCH' ? { type: 'switch', switch: rec.fields.name }
+        : rec.kind === 'NEWENVWAYPT' ? { ...defaultsFor(cat.triggers.waypoint, 'waypoint'), waypoint: rec.fields.id }
+          : { type: 'killed', objects: [rec.fields.script_id], mode: 'any' };
+    openObjectives('rules').then(() => { ruleDraft = { index: null, rule: newRule(trig) }; renderRuleCards(); renderRuleEditor(); });
+  };
   $('events-row').hidden = false;
 }
 function refreshLogicViews() {            // after a rule / objective change: the inspector and the dialog
@@ -2193,11 +3039,11 @@ function refreshLogicViews() {            // after a rule / objective change: th
 const OB_TYPES = { kill: 'Kill / destroy', region: 'Reach a region', timer: 'Survive (seconds)', manual: 'A rule or script says so' };
 let obState = null;
 function showObTab(tab) {
-  for (const t of ['obj', 'rules', 'lua']) {
+  for (const t of ['obj', 'flow', 'rules', 'lua']) {
     $(`ob-tab-${t}`).classList.toggle('on', t === tab); $(`ob-pane-${t}`).hidden = t !== tab;
   }
 }
-for (const t of ['obj', 'rules', 'lua']) $(`ob-tab-${t}`).onclick = () => showObTab(t);
+for (const t of ['obj', 'flow', 'rules', 'lua']) $(`ob-tab-${t}`).onclick = () => showObTab(t);
 async function openObjectives(tab = 'obj') {
   if (!level) return;
   const info = await loadLogic();
@@ -2206,6 +3052,7 @@ async function openObjectives(tab = 'obj') {
               base: (info.base_objectives || []).map((o) => ({ ...o })) };
   $('ob-win').checked = obState.win;
   renderObjectives(); renderRules(); renderLuaTab(); showObTab(tab);
+  renderFlow().catch(() => {});
   if (!$('objectives-dialog').open) $('objectives-dialog').showModal();
 }
 $('objectives-btn').onclick = () => openObjectives().catch(() => {});
@@ -2216,13 +3063,20 @@ function selectedScriptIds() {
 }
 function pickForObjective(o, kind) {      // close the dialog, pick in the 3D view, come back
   $('objectives-dialog').close();
-  showLayer(kind === 'kill' ? 'objects' : 'regions');
+  if (kind !== 'region') showLayer('objects');
+  if (kind !== 'kill') showLayer('regions');
   const picked = kind === 'kill' ? [].concat(o.target ?? []).filter((x) => x !== '' && x !== null) : [];
   startPick({
-    hint: kind === 'kill' ? 'click the objects to kill / destroy - Enter finishes, Esc cancels' : 'click a region (yellow) - Esc cancels',
-    accept: (u) => u.cat === (kind === 'kill' ? 'objects' : 'regions'),
+    hint: kind === 'kill' ? 'click the objects to kill / destroy - Enter finishes, Esc cancels'
+      : kind === 'region' ? 'click a region (yellow) - Esc cancels'
+        : 'click an object (done when it is killed / destroyed) or a region (done when a player gets there) - Esc cancels',
+    accept: (u) => (kind === 'kill' ? u.cat === 'objects' : kind === 'region' ? u.cat === 'regions' : ['objects', 'regions'].includes(u.cat)),
     pick: (u) => {
-      if (kind === 'kill') {
+      if (kind === 'any') {                      // the pick decides the objective's type
+        if (u.cat === 'regions') { o.type = 'region'; o.target = data.regions.find((x) => x.line === u.line)?.name; }
+        else { o.type = 'kill'; o.target = data.objects.find((x) => x.line === u.line)?.script_id; }
+        endPick(false);
+      } else if (kind === 'kill') {
         const sid = data.objects.find((x) => x.line === u.line)?.script_id;
         if (sid !== undefined && !picked.includes(sid)) picked.push(sid);
         status(`targets: ${picked.join(', ')} - click more, Enter finishes`);
@@ -2232,16 +3086,59 @@ function pickForObjective(o, kind) {      // close the dialog, pick in the 3D vi
     done: () => { renderObjectives(); $('objectives-dialog').showModal(); },
   });
 }
+// The campaign objectives' targets, read from the base mission's logic (mission_flow): every "Complete objective" step
+// with the game event it runs in and the objects / regions named on the way to it. Read-only - the DLL decides.
+let obBaseTargets = null;          // {title: {events: Set, refs: Map(key -> ref)}}
+async function loadBaseTargets() {
+  const f = await loadFlow();
+  const out = {};
+  const walk = (n, anc, ev) => {
+    if (n.text[0] === 'Complete objective') {
+      const g = n.text.find((x) => typeof x === 'object');
+      const title = g?.text.match(/“(.*)”/)?.[1];
+      if (title) {
+        const t = (out[title] ||= { events: new Set(), refs: new Map() });
+        t.events.add(ev);
+        for (const a of anc) for (const x of a.text)
+          if (typeof x === 'object' && ['object', 'region', 'waypoint'].includes(x.ref)) t.refs.set(`${x.ref}:${x.id}`, x);
+      }
+    }
+    for (const c of n.children) walk(c, [...anc, n], ev);
+  };
+  for (const ev of f?.events || []) for (const n of ev.nodes) walk(n, [], ev.title);
+  obBaseTargets = out;
+  return out;
+}
+function baseTargetWhen(o) {
+  const t = obBaseTargets?.[o.original_title || o.title];
+  return t ? `<span class="when-done" title="where the base mission completes it">Completed: ${escHtml([...t.events].join('; ').toLowerCase())}</span>` : '';
+}
+function baseTargetHtml(o) {
+  if (!obBaseTargets) return '<span class="hint">reading the mission logic…</span>';
+  const t = obBaseTargets[o.original_title || o.title];
+  const refs = t ? [...t.refs.values()] : [];
+  if (!refs.length) return '<span class="hint" title="Set and completed by the base mission\'s own script - not editable here">— (campaign script)</span>';
+  return refs.slice(0, 6).map((r) => `<a class="ref ${r.ref}" data-ref="${r.ref}" data-id="${r.id}" title="select it in the view">${escHtml(r.text)}</a>`).join('')
+    + (refs.length > 6 ? `<span class="hint">+${refs.length - 6} more</span>` : '')
+    + '<br><span class="hint">(campaign script, read-only)</span>';
+}
 function renderObjectives() {
+  if (!obBaseTargets && obState.base.length) loadBaseTargets().then(() => { if ($('objectives-dialog').open) renderObjectives(); }).catch(() => { obBaseTargets = {}; });
   const tb = $('ob-table').querySelector('tbody'); tb.innerHTML = '';
   for (const o of obState.base) {         // the base mission's own: its DLL adds, shows and completes them
     const tr = document.createElement('tr'); tr.className = 'base-ob' + (o.hidden ? ' off' : '');
     tr.innerHTML = `<td>${o.id}</td>
       <td class="title-cell"><span class="badge campaign" title="Added and completed by the base mission (${escHtml(o.key || 'its DLL')})">Campaign Objective</span>
         <input value="${escHtml(o.title)}" maxlength="120"${o.title_editable ? '' : ' disabled title="not one of the level&#39;s own texts - it can&#39;t be renamed"'}></td>
-      <td colspan="2"><span class="desc">${escHtml(o.description || '')}</span></td>
+      <td><span class="desc">${escHtml(o.description || '')}</span>${baseTargetWhen(o)}</td>
+      <td class="tgt">${baseTargetHtml(o)}</td>
       <td><label class="inline" title="off = the script hides it whenever the base mission shows it"><input type="checkbox"${o.hidden ? '' : ' checked'}> on</label></td>
       <td><button title="back to the game's title, on">↺</button></td>`;
+    for (const a of tr.querySelectorAll('.tgt a.ref')) a.onclick = () => {
+      const id = +a.dataset.id;
+      const line = a.dataset.ref === 'region' ? data.regions[id]?.line : a.dataset.ref === 'waypoint' ? data.waypoints[id]?.line : lineOfScript(id);
+      if (line !== undefined) { $('objectives-dialog').close(); select({ line }, true); }
+    };
     const [titleIn, onIn] = tr.querySelectorAll('input');
     titleIn.oninput = () => { o.title = titleIn.value; };
     onIn.onchange = () => { o.hidden = !onIn.checked; tr.classList.toggle('off', o.hidden); };
@@ -2276,20 +3173,27 @@ function renderObjectives() {
       const inp = document.createElement('input'); inp.placeholder = 'script ids, e.g. 120, 121';
       inp.value = [].concat(o.target ?? []).join(', ');
       inp.onchange = () => { const ids = inp.value.split(/[\s,]+/).filter(Boolean).map(Number); o.target = ids.length === 1 ? ids[0] : ids; };
-      const pick = document.createElement('button'); pick.textContent = '◎ Pick'; pick.title = 'click the targets in the 3D view';
+      const pick = document.createElement('button'); pick.textContent = '◎ Pick'; pick.title = 'Pick in the 3D view: click the targets';
       pick.onclick = () => pickForObjective(o, 'kill');
       cell.append(inp, pick);
     } else if (o.type === 'region') {
       const sel = document.createElement('select');
       for (const n of logicInfo.regions) sel.add(new Option(n, n));
       sel.value = o.target ?? ''; sel.onchange = () => { o.target = sel.value; };
-      const pick = document.createElement('button'); pick.textContent = '◎ Pick'; pick.onclick = () => pickForObjective(o, 'region');
+      const pick = document.createElement('button'); pick.textContent = '◎ Pick'; pick.title = 'Pick in the 3D view: click a region';
+      pick.onclick = () => pickForObjective(o, 'region');
       cell.append(sel, pick);
     } else if (o.type === 'timer') {
       const inp = document.createElement('input'); inp.type = 'number'; inp.min = 1; inp.value = o.target ?? 60;
       inp.onchange = () => { o.target = +inp.value; };
       cell.append(inp, Object.assign(document.createElement('span'), { className: 'hint', textContent: 's' }));
-    } else cell.innerHTML = '<span class="hint">a rule completes it</span>';
+    } else {
+      cell.innerHTML = '<span class="hint">a rule completes it</span>';
+      const pick = document.createElement('button'); pick.textContent = '◎ Pick';
+      pick.title = 'Pick its target in the 3D view: an object (kill / destroy) or a region (reach it)';
+      pick.onclick = () => pickForObjective(o, 'any');
+      cell.append(' ', pick);
+    }
     tb.appendChild(tr);
   });
   $('ob-warn').textContent = (logicInfo?.warnings || []).join('\n');
@@ -2318,8 +3222,7 @@ $('ob-save').onclick = async () => {
   } catch (e) { $('ob-warn').textContent = e.message; }
 };
 function renderRules() {
-  ruleList($('ob-rules'), logicInfo.rules.map((r, i) => ({ r, i })));
-  ruleForm($('ob-rule-form'), null);
+  prepareRules().then(() => { renderRuleCards(); renderRuleEditor(); }).catch(() => {});
 }
 function renderLuaTab() {
   $('ob-lua').textContent = logicInfo?.lua || '';
@@ -2345,7 +3248,7 @@ async function openAtmos() {
   for (const id of ['at-sun-colour', 'at-sun-tilt', 'at-sun-heading']) $(id).disabled = !s;
   $('at-sun-name').textContent = s ? `Sun record "${s.name}" (line ${s.line})` : 'No sun record in this scene';
   if (s) { $('at-sun-colour').value = toHex(s.colour); $('at-sun-tilt').value = s.tilt; $('at-sun-heading').value = s.heading; }
-  fillAtmosColours(); atmosLabels();
+  fillAtmosColours(); atmosLabels(); fillSky();
   $('atmos').hidden = false; previewAtmos();
   loadMusic().catch(() => {});
 }
@@ -2411,7 +3314,7 @@ for (const id of ['at-sun-tilt', 'at-sun-heading']) {
 
 // ==== Level dressing and checking (editor/studio.py): shadows, the AI walk map, the tactical map picture, prefabs,
 // vehicle crews, sound audition. ====
-const INSPECTOR_BOXES = ['ai-row', 'cam-row', 'events-row', 'crew-row', 'sound-row', 'inter-row'];
+const INSPECTOR_BOXES = ['vanilla-row', 'kit-row', 'ai-row', 'cam-row', 'events-row', 'crew-row', 'sound-row', 'inter-row', 'logic-row'];
 
 // ---- shadows: every solid model casts and receives; the sun's shadow box is centred on the orbit target ----
 function shadowed(obj) {
@@ -3102,14 +4005,17 @@ $('export-btn').onclick = async () => {
     const opts = await run('asset_options');
     const sel = $('ex-mod'); sel.innerHTML = '';
     for (const m of opts.mods) sel.add(new Option(m, m));
-    if (data?.mission && opts.mods.includes(data.mission[0])) sel.value = data.mission[0];
-    $('ex-result').textContent = ''; $('ex-download').hidden = true;
+    // the mod being worked on: the open mission's, else the Mod name box
+    const want = [currentMission?.[0], $('mod').value.trim()].find((m) => m && opts.mods.includes(m));
+    if (want) sel.value = want;
+    $('ex-result').textContent = ''; $('ex-download').hidden = true; $('ex-fix').hidden = true;
     $('export-dialog').showModal();
   } catch { /* status */ }
 };
 $('ex-close').onclick = () => $('export-dialog').close();
 $('ex-go').onclick = async () => {
   $('ex-result').textContent = 'Checking the missions and packing…'; $('ex-download').hidden = true; $('ex-go').disabled = true;
+  $('ex-fix').hidden = true;
   try {
     const r = await run('export_mod_zip', { mod: $('ex-mod').value, version: $('ex-version').value.trim(),
                                             creator: $('ex-creator').value.trim(), include_sources: $('ex-sources').checked }, 'mod package written');
@@ -3118,8 +4024,30 @@ $('ex-go').onclick = async () => {
     if (r.left_out.length) out.push('', 'Left out:', ...r.left_out.map((x) => `  ${x.file} - ${x.why}`));
     $('ex-result').textContent = out.join('\n');
     const a = $('ex-download'); a.href = r.url; a.download = r.url.split('/').pop(); a.hidden = false;
+  } catch (e) {
+    $('ex-result').textContent = e.message;
+    if (/copies of game files/.test(e.message)) {         // offer the fixes the message names
+      $('ex-fix').hidden = false;
+      $('ex-resave').hidden = !(currentMission && currentMission[0] === $('ex-mod').value);
+    }
+  } finally { $('ex-go').disabled = false; }
+};
+$('ex-remove-copies').onclick = async () => {
+  const mod = $('ex-mod').value;
+  if (!confirm(`Move the files in Mods\\${mod} that are exact copies of game files out of the mod? They go into the editor's `
+    + 'backups (nothing is lost) - the game keeps reading its own copies.')) return;
+  try {
+    const r = await run('remove_game_copies', { mod }, null);
+    status(`${r.removed.length} game cop${r.removed.length === 1 ? 'y' : 'ies'} moved out of Mods\\${mod}${r.backup ? ` (backup: ${r.backup})` : ''}`);
+    $('ex-go').click();
   } catch (e) { $('ex-result').textContent = e.message; }
-  finally { $('ex-go').disabled = false; }
+};
+$('ex-resave').onclick = async () => {
+  if (!currentMission) return;
+  try {
+    await run('save_mission', { mod: currentMission[0], name: currentMission[1] }, `mission ${currentMission[1]} saved`);
+    await updateHistory(); $('ex-go').click();
+  } catch (e) { $('ex-result').textContent = e.message; }
 };
 
 // ==== Tactics (editor/tactics.py): vision cones, minefields, emplacements, air support; viewport environment modes;
@@ -3487,6 +4415,75 @@ window.addEventListener('keydown', (e) => {
 });
 $('tab-library').addEventListener('click', () => loadEmplacements());
 
+// ---- tool panels (Terrain, Road, Paths & Regions, Atmosphere, Mission Settings, Spawns, History) live at the top of
+// the right column, above the inspector, instead of floating over it ----
+for (const id of ['terrain', 'road', 'paths-panel', 'atmos', 'mission-settings', 'spawns', 'history-panel']) $('tool-dock').appendChild($(id));
+
+// ---- top view (T): orthographic, straight down, north up; left / right drag pans, the wheel zooms ----
+function fitTopFrustum() {
+  const aspect = view.clientWidth / Math.max(1, view.clientHeight);
+  topCam.top = topHalf; topCam.bottom = -topHalf; topCam.left = -topHalf * aspect; topCam.right = topHalf * aspect;
+  topCam.updateProjectionMatrix();
+}
+function placeTopCamera(target, half = null) {
+  if (half) { topHalf = Math.max(5, half); topCam.zoom = 1; fitTopFrustum(); }
+  orbit.target.copy(target);
+  topCam.position.set(target.x, target.y + 3000, target.z);
+  topCam.lookAt(target); orbit.update(); requestRender();
+}
+const ORBIT_BUTTONS = { ...orbit.mouseButtons };
+function setTopView(on) {
+  if (!!topView === on) return;
+  if (on) {
+    exitCamView();
+    topView = { offset: perspCam.position.clone().sub(orbit.target) };
+    camera = topCam; orbit.object = topCam; gizmo.camera = topCam;
+    orbit.enableRotate = false; orbit.mouseButtons = { LEFT: THREE.MOUSE.PAN, MIDDLE: THREE.MOUSE.DOLLY, RIGHT: THREE.MOUSE.PAN };
+    placeTopCamera(orbit.target.clone(), Math.max(10, topView.offset.length() * Math.tan(deg(perspCam.fov / 2))));
+    status('top view: drag pans, the wheel zooms, WASD moves - T goes back');
+  } else {
+    const back = topView.offset; topView = null;
+    perspCam.position.copy(orbit.target).add(back);
+    camera = perspCam; orbit.object = perspCam; gizmo.camera = perspCam;
+    orbit.enableRotate = true; orbit.mouseButtons = { ...ORBIT_BUTTONS };
+    orbit.update();
+    status('perspective view');
+  }
+  $('top-btn').classList.toggle('on', on);
+  requestRender();
+}
+$('top-btn').onclick = () => setTopView(!topView);
+
+// ---- isolate (I): only the selection is drawn; everything else (world, props, markers) hidden until I again ----
+let isolated = null;               // Set of record lines, or null
+function applyIsolate() {
+  if (!isolated) return;
+  for (const g of Object.values(groups)) for (const c of g.children) c.visible = isolated.has(c.userData.line);
+  requestRender();
+}
+function isolateSelection() {
+  const lines = many.size ? [...many] : selection?.line !== undefined ? [selection.line] : [];
+  if (!lines.length) return status('select something to isolate (I)', true);
+  isolated = new Set(lines); applyIsolate();
+  $('isolate-note').textContent = `Isolated: ${lines.length} record${lines.length > 1 ? 's' : ''} - everything else hidden (I shows it again)`;
+  $('isolate-note').hidden = false; $('isolate-btn').classList.add('on');
+}
+function endIsolate() {
+  if (!isolated) return;
+  isolated = null;
+  for (const g of Object.values(groups)) for (const c of g.children) c.visible = true;
+  applyLayerFilter();
+  $('isolate-note').hidden = true; $('isolate-btn').classList.remove('on');
+}
+$('isolate-btn').onclick = () => (isolated ? endIsolate() : isolateSelection());
+window.addEventListener('keydown', (e) => {
+  if (['INPUT', 'SELECT', 'TEXTAREA'].includes(e.target.tagName) || document.querySelector('dialog[open]')) return;
+  if (e.ctrlKey || e.altKey || e.metaKey) return;
+  const k = e.key.toLowerCase();
+  if (k === 'i') { e.preventDefault(); if (isolated) endIsolate(); else isolateSelection(); }
+  else if (k === 't') { e.preventDefault(); setTopView(!topView); }
+});
+
 // ---- a handle for scripted UI tests (the browser console, test drivers): select records, stand in for 3D clicks ----
 window.dse = {
   select: (sel, focus = false) => select(sel, focus),
@@ -3498,10 +4495,37 @@ window.dse = {
                   shadows: renderer.shadowMap.enabled, shadowCasters: (() => { let n = 0; scene3.traverse((o) => { if (o.isMesh && o.castShadow) n++; }); return n; })(),
                   walkMap: walkGroup.visible ? walkGroup.children.length + walkFoot.children.length : 0 }),
   data: () => data,
+  // zone chunks drawn (holders with their mesh loaded) and where a record's centre is on screen (page pixels)
+  chunks: () => ({ holders: chunkHolders.size, drawn: [...chunkHolders.values()].filter((h) => h.children.length).length,
+                   worldEdit, outlined: !!chunkBox }),
+  screenOf: (line) => {
+    const obj = byLine.get(line); if (!obj) return null;
+    const box = new THREE.Box3().setFromObject(obj), c = box.isEmpty() ? obj.position.clone() : box.getCenter(new THREE.Vector3());
+    const ndc = c.project(camera), r = renderer.domElement.getBoundingClientRect();
+    return { x: r.left + (ndc.x + 1) / 2 * r.width, y: r.top + (1 - ndc.y) / 2 * r.height, visible: Math.abs(ndc.x) < 1 && Math.abs(ndc.y) < 1 && ndc.z < 1 };
+  },
   vision: () => visionCones.map((c) => ({ line: c.userData.line, yaw: +THREE.MathUtils.radToDeg(c.rotation.y).toFixed(2),
                                           pos: c.position.toArray().map((v) => +v.toFixed(2)) })),
   envMode: () => envMode,
   setEnvMode: (m) => setEnvMode(m),
+  // the view as seen: where the camera is, whether a line's object is on screen and what (if anything) is between
+  view: (line) => {
+    const out = { camera: toGame(camera.position), target: toGame(orbit.target), top: !!topView, isolated: isolated ? [...isolated] : null };
+    const obj = line !== undefined ? byLine.get(line) : null;
+    if (obj) {
+      const box = new THREE.Box3().setFromObject(obj), c = box.isEmpty() ? obj.position.clone() : box.getCenter(new THREE.Vector3());
+      const ndc = c.clone().project(camera);
+      out.on_screen = Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1 && ndc.z < 1;
+      const self = new Set(); obj.traverse((x) => self.add(x));
+      const dir = camera.position.clone().sub(c), dist = dir.length();
+      const rc = new THREE.Raycaster(c, dir.normalize(), 0, dist);
+      const hit = rc.intersectObjects([groups.world, groups.props, groups.objects], true)
+        .find((h) => h.object.isMesh && !self.has(h.object) && shownInView(h.object) && h.distance > 0.05);
+      out.distance = +dist.toFixed(2);
+      out.blocked_by = hit ? { distance: +hit.distance.toFixed(2), line: hit.object.userData.line ?? null } : null;
+    }
+    return out;
+  },
 };
 
 // ---- start ----
@@ -3521,3 +4545,251 @@ if (startH?.level && startH.dirty && !confirm(`The editor still has unsaved chan
   if (hero) focusOn(toThree(hero.pos));
   status(`${startName}: unsaved changes kept`);
 } else openLevel($('level').value, false);
+
+
+// ==== Vanilla lineage: every record related back to the shipped level (vanilla.py) - status badge, the changed fields
+// with their shipped values and a ↺ per field, revert / restore, a see-through ghost where a moved record stood ====
+const LISTS = ['props', 'objects', 'waypoints', 'regions', 'cameras', 'sounds', 'switches', 'emitters', 'chunks', 'zones', 'lights'];
+function sceneItem(line) {
+  for (const k of LISTS) { const it = data?.[k]?.find?.((x) => x.line === line); if (it) return it; }
+  return null;
+}
+const fmtVal = (v) => (Array.isArray(v) ? v.map((x) => (typeof x === 'number' ? +x.toFixed(2) : x)).join(', ') : String(v));
+const vanGhostMat = keep(new THREE.MeshBasicMaterial({ color: 0xff4fd8, wireframe: true, transparent: true, opacity: 0.55, depthWrite: false }));
+const vanLineMat = keep(new THREE.LineDashedMaterial({ color: 0xff4fd8, dashSize: 0.4, gapSize: 0.25, transparent: true, opacity: 0.9 }));
+let vanGhost = null;
+function clearVanillaGhost() {
+  if (!vanGhost) return;
+  scene3.remove(vanGhost);
+  vanGhost.traverse((c) => { if (c.userData.vanLine) c.geometry.dispose(); });   // the model clone shares its geometry
+  vanGhost = null; requestRender();
+}
+function showVanillaGhost(item) {
+  clearVanillaGhost();
+  const holder = byLine.get(item.line);
+  if (!holder || !item.vanilla_pos) return;
+  const g = new THREE.Group();
+  // the holder's meshes in its own space, sharing their geometry (a clone would copy userData, which points back at
+  // the holder; skinned meshes show their bind pose)
+  const shape = new THREE.Group();
+  holder.updateMatrixWorld(true);
+  const inv = holder.matrixWorld.clone().invert();
+  holder.traverse((c) => {
+    if (!(c.isMesh || c.isLine) || !c.geometry) return;
+    const m = c.isMesh ? new THREE.Mesh(c.geometry, vanGhostMat) : new THREE.Line(c.geometry, vanLineMat);
+    m.matrixAutoUpdate = false; m.matrix.multiplyMatrices(inv, c.matrixWorld);
+    m.userData = { ghost: true }; m.raycast = () => {};
+    shape.add(m);
+  });
+  shape.scale.copy(holder.scale);
+  shape.position.copy(toThree(item.vanilla_pos));
+  const r = item.vanilla_rot;
+  if (r) shape.rotation.set(-deg(r[0]), -deg(r[1]), deg(r[2]), 'YXZ');
+  g.add(shape);
+  const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints([toThree(item.vanilla_pos), holder.position.clone()]), vanLineMat);
+  line.computeLineDistances(); line.userData = { ghost: true, vanLine: true }; line.raycast = () => {};
+  g.add(line);
+  vanGhost = g; scene3.add(g); requestRender();
+}
+async function showVanilla(rec, item) {
+  const info = await api('vanilla_info', { line: rec.line });
+  if (selection?.line !== rec.line) return;
+  if (info.unit) {
+    const u = info.unit;
+    $('unit-info').innerHTML = `Soldier type <a href="#records/UNITS/${encodeURIComponent(u.key)}">${escHtml(u.key)}</a>: `
+      + `experience ${escHtml(u.experience || '-')}, role ${escHtml(u.role || '-')}, stats ${escHtml(u.stats || '-')}. `
+      + 'Shared by every soldier of this type - change it in Records (it goes into the mod as UNITS.replace.txt).';
+  }
+  if (!info.has_vanilla_scene || !info.status) return;
+  $('vanilla-row').hidden = false;
+  let html = '';
+  if (info.dll_critical) {
+    html += `<p class="crit"><span class="badge critical">🛡 DLL Critical: script id ${info.dll_critical.script_id}</span><br>`
+      + `<span class="hint">API slots ${info.dll_critical.slots.join(', ')} - the id can't be changed and deleting needs a confirmation `
+      + '(hide it in a layer instead).</span></p>';
+  }
+  if (info.status === 'custom') {
+    html += '<p class="hint">Not in the shipped level: added in the editor, or a shipped record renamed / renumbered '
+      + '(its original then shows under Changes… › Deleted).</p>';
+  } else {
+    const v = info.vanilla;
+    html += `<p class="hint">Shipped as line ${info.vanilla_line}${v.name !== undefined ? ` "${escHtml(v.name)}"` : ''}`
+      + `${v.script_id !== undefined ? `, script id ${v.script_id}` : ''}${v.model !== undefined ? `, model ${escHtml(v.model)}` : ''}.</p>`;
+    if (v.pos) html += `<p class="hint">Vanilla pos: (${fmtVal(v.pos)})${info.status === 'modified' && item?.vanilla_pos ? ' - the magenta ghost in the view' : ''}</p>`;
+    if (info.changed?.length) {
+      html += '<table>' + info.changed.map((c) => `<tr><td class="k">${escHtml(c.field)}</td><td>${escHtml(fmtVal(c.vanilla ?? '(none)'))}</td></tr>`).join('')
+        + '</table><p class="hint">Vanilla values of the changed fields (↺ in the field list puts one back).</p>';
+    } else html += '<p class="hint">Unchanged.</p>';
+  }
+  $('van-body').innerHTML = html;
+  $('van-revert').hidden = info.status !== 'modified';
+  $('van-revert').onclick = async () => {
+    try { await run('revert_record', { line: rec.line }, 'reverted to vanilla'); } catch { return; }
+    await refresh(); await select({ line: rec.line }); updateHistory();
+  };
+  // the field list: changed fields in orange with their own ↺
+  const changed = new Map((info.changed || []).map((c) => [c.field, c]));
+  for (const tr of [...$('fields').children, ...$('fields-adv').children]) {
+    const c = changed.get(tr.children[0]?.textContent);
+    if (!c) continue;
+    tr.classList.add('van-changed'); tr.title = `vanilla: ${fmtVal(c.vanilla ?? '(none)')}`;
+    const b = document.createElement('button'); b.textContent = '↺'; b.title = `back to the vanilla value (${fmtVal(c.vanilla ?? '(none)')})`;
+    b.onclick = async () => {
+      try { await run('revert_field', { line: rec.line, field: c.field }, `${c.field} reverted`); } catch { return; }
+      await refresh(); await select({ line: rec.line }); updateHistory();
+    };
+    tr.children[1].appendChild(b);
+  }
+  if (info.status === 'modified' && item?.vanilla_pos) showVanillaGhost(item);
+}
+
+// Changes… dialog: modified / added / deleted against the shipped level
+function vanRow(text, title, onClick, btn) {
+  const li = document.createElement('li');
+  li.innerHTML = `<span title="${escHtml(title)}">${escHtml(text)}</span>`;
+  li.onclick = onClick;
+  if (btn) {
+    const b = document.createElement('button'); b.textContent = btn.text; b.title = btn.title;
+    b.onclick = (e) => { e.stopPropagation(); btn.run(); };
+    li.appendChild(b);
+  }
+  return li;
+}
+async function openVanilla() {
+  if (!data) return;
+  if (!data.vanilla) { status('this level has no shipped original (a new level)', true); return; }
+  let deleted = [];
+  try { deleted = (await run('vanilla_deleted')).deleted; } catch { return; }
+  const mod = $('van-modified'), cus = $('van-custom'), del = $('van-deleted');
+  mod.innerHTML = cus.innerHTML = del.innerHTML = '';
+  const go = (line) => async () => { $('vanilla-dialog').close(); await select({ line }, true); };
+  for (const k of LISTS) for (const it of data[k] || []) {
+    const label = `${it.unit || it.name || it.model || k} · line ${it.line}${it.script_id !== undefined ? ` · id ${it.script_id}` : ''}`;
+    if (it.lineage === 'modified') {
+      mod.appendChild(vanRow(label, k, go(it.line), { text: '↺', title: 'revert to vanilla', run: async () => {
+        try { await run('revert_record', { line: it.line }, 'reverted to vanilla'); } catch { return; }
+        await refresh(); updateHistory(); openVanilla();
+      } }));
+    } else if (it.lineage === 'custom') cus.appendChild(vanRow(label, k, go(it.line)));
+  }
+  for (const d of deleted) {
+    const label = `${d.kind} ${d.unit || d.name || d.id}${d.script_id !== undefined ? ` · id ${d.script_id}` : ''}`;
+    del.appendChild(vanRow(label, `shipped line ${d.vanilla_line}${d.pos ? ` at (${fmtVal(d.pos)})` : ''}`,
+      () => { if (d.pos) { $('vanilla-dialog').close(); focusOn(toThree(d.pos)); requestRender(); } },
+      { text: 'Restore', title: 'put it back as shipped', run: async () => {
+        try { await run('restore_record', { vanilla_line: d.vanilla_line }, 'restored from vanilla'); } catch { return; }
+        await refresh(); updateHistory(); openVanilla();
+      } }));
+  }
+  for (const [ul, empty] of [[mod, 'Nothing changed.'], [cus, 'Nothing added.'], [del, 'Nothing deleted.']])
+    if (!ul.children.length) ul.innerHTML = `<li class="hint">${empty}</li>`;
+  const v = data.vanilla;
+  $('van-sum').textContent = `${v.vanilla} unchanged · ${v.modified} modified · ${v.custom} added · ${deleted.length} deleted`;
+  if (!$('vanilla-dialog').open) $('vanilla-dialog').showModal();
+}
+$('vanilla-btn').onclick = () => openVanilla().catch(() => {});
+$('van-close').onclick = () => $('vanilla-dialog').close();
+
+// Atmosphere: back to the shipped values
+$('at-reset').onclick = async () => {
+  if (!confirm('Put time of day, fog, sky layers, colour keys and the sun back as the game ships them? (Undo brings yours back.)')) return;
+  try { await run('reset_atmosphere', {}, 'atmosphere reset to vanilla'); } catch { return; }
+  updateHistory(); await openAtmos();
+};
+
+// Briefing: refill from the base mission's own texts
+$('bf-reset').onclick = async () => {
+  const base = (await run('briefing_get')).base;
+  if (!base?.base) { $('bf-result').textContent = 'This level has no base-mission briefing.'; return; }
+  if (base.texts_missing) { $('bf-result').textContent = 'The base mission\'s texts are unknown - start the editor with --game.'; return; }
+  $('bf-title').value = base.title; $('bf-date').value = base.intro_date || base.date;
+  $('bf-location').value = base.intro_location || base.location; $('bf-text').value = base.briefing_text;
+  $('bf-result').textContent = 'Filled from the base mission\'s own briefing - Save dossier keeps it.';
+  drawBriefing();
+};
+
+// Script: compare with the editor's template (line diff), reset to it
+function lineDiff(a, b) {           // a = template lines, b = script lines -> [{t: 'same' | 'del' | 'add', s, ai, bi}]
+  const n = a.length, m = b.length;
+  if (n * m > 25e6) return b.map((s, bi) => ({ t: 'add', s, bi }));
+  const w = m + 1, L = new Uint32Array((n + 1) * w);
+  for (let i = n - 1; i >= 0; i--) for (let j = m - 1; j >= 0; j--)
+    L[i * w + j] = a[i] === b[j] ? L[(i + 1) * w + j + 1] + 1 : Math.max(L[(i + 1) * w + j], L[i * w + j + 1]);
+  const out = []; let i = 0, j = 0;
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { out.push({ t: 'same', s: b[j], ai: i, bi: j }); i++; j++; }
+    else if (L[(i + 1) * w + j] >= L[i * w + j + 1]) out.push({ t: 'del', s: a[i], ai: i++ });
+    else out.push({ t: 'add', s: b[j], bi: j++ });
+  }
+  while (i < n) out.push({ t: 'del', s: a[i], ai: i++ });
+  while (j < m) out.push({ t: 'add', s: b[j], bi: j++ });
+  return out;
+}
+function editorRanges(text) {       // 0-based [first, last] lines of the "-- @editor begin ... -- @editor end" blocks
+  const out = []; let start = null;
+  text.split('\n').forEach((l, i) => {
+    const s = l.trim();
+    if (s.startsWith('-- @editor begin')) start = i;
+    else if (start !== null && s.startsWith('-- @editor end')) { out.push([start, i]); start = null; }
+  });
+  return out;
+}
+const inRanges = (k, ranges) => k !== undefined && ranges.some(([f, l]) => k >= f && k <= l);
+async function showScriptDiff(on) {
+  $('script-diff').hidden = !on; $('code').hidden = on;
+  $('script-compare').textContent = on ? 'Back to editing' : 'Compare with template';
+  if (!on) { setTimeout(() => cm.refresh(), 0); return; }
+  const r = await run('get_vanilla_script');
+  const text = cm.getValue();                       // what is in the editor now (saved or not)
+  const ranges = editorRanges(text);
+  const d = lineDiff(r.template.split('\n'), text.split('\n'));
+  const pre = $('diff-lines'); pre.innerHTML = '';
+  let adds = 0, dels = 0;
+  for (const x of d) {
+    const div = document.createElement('div');
+    const editor = x.t === 'del' ? inRanges(x.ai, r.template_editor_ranges) : inRanges(x.bi, ranges);
+    div.className = editor && x.t !== 'del' ? 'd-editor' : 'd-' + x.t;
+    if (x.t === 'add' && !editor) adds++;
+    if (x.t === 'del' && !editor) dels++;
+    div.textContent = `${x.t === 'add' ? '+' : x.t === 'del' ? '-' : ' '} ${x.bi !== undefined ? String(x.bi + 1).padStart(4) : '    '}  ${x.s}`;
+    pre.appendChild(div);
+  }
+  $('diff-legend').innerHTML = `<span class="d-add">+ your code (${adds} lines)</span><span class="d-editor">editor blocks (rewritten on save)</span>`
+    + `<span class="d-same">from the template</span><span class="d-del">- template lines you removed (${dels})</span>`
+    + `<br>Template = what Save as mission writes for a new mission from ${escHtml(r.base_dll || 'this level')}.`;
+}
+$('script-compare').onclick = () => showScriptDiff($('script-diff').hidden).catch(() => showScriptDiff(false));
+$('script-reset').onclick = async () => {
+  if (!confirm('Replace the script with the editor\'s template? Your own code in it is lost (Undo can\'t bring it back).')) return;
+  let r;
+  try { r = await run('reset_script', {}, 'script reset to the template'); } catch { return; }
+  cm.setValue(r.text); $('script-state').textContent = 'saved';
+  if (!$('script-diff').hidden) showScriptDiff(true);
+};
+
+// Atmosphere: far fog band and the cloud layers
+function fillSky() {
+  $('at-xfog-start').value = atmos.far_fog_start != null ? Math.round(atmos.far_fog_start / 100) : '';
+  $('at-xfog-stop').value = atmos.far_fog_stop != null ? Math.round(atmos.far_fog_stop / 100) : '';
+  const box = $('at-sky'); box.innerHTML = '';
+  for (const l of atmos.sky_layers || []) {
+    const row = document.createElement('div'); row.className = 'row sky-layer';
+    row.innerHTML = `<strong title="SKYTEXTURE">${escHtml(l.texture ?? 'layer ' + l.index)}</strong>
+      <label class="inline" title="SKYTILEFACTOR">tile <input type="number" step="0.5" min="0.1" value="${l.tile ?? ''}"></label>
+      <label class="inline" title="SKYSPEED x / z">speed <input type="number" step="0.005" value="${l.speed?.[0] ?? ''}"> <input type="number" step="0.005" value="${l.speed?.[1] ?? ''}"></label>
+      <label class="inline" title="SKYCURVATURE">curve <input type="number" step="0.1" min="0" value="${l.curvature ?? ''}"></label>
+      <label class="inline" title="SKYHEIGHT (m)">height <input type="number" step="10" min="1" value="${l.height != null ? l.height / 100 : ''}"> m</label>`;
+    const [tile, sx, sz, curve, height] = row.querySelectorAll('input');
+    const send = () => commitAtmos({ sky: [{ index: l.index, tile: +tile.value, curvature: +curve.value, height: +height.value * 100,
+      speed: [+sx.value, +sz.value, ...(l.speed || []).slice(2)] }] }, `cloud layer ${l.index + 1} changed`);
+    for (const i of [tile, sx, sz, curve, height]) i.onchange = send;
+    box.appendChild(row);
+  }
+}
+for (const id of ['at-xfog-start', 'at-xfog-stop']) {
+  $(id).onchange = () => {
+    const a = +$('at-xfog-start').value, b = +$('at-xfog-stop').value;
+    if (b <= a) { status('far fog: the end must be beyond the start', true); return; }
+    commitAtmos({ far_fog_start: a * 100, far_fog_stop: b * 100 }, `far fog ${a}-${b} m`);
+  };
+}

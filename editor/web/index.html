@@ -17,34 +17,54 @@
 </script>
 </head>
 <body>
+<!-- One row that never wraps: the buttons keep their places; the changing texts (what is open, the status) sit at the
+     right end, cut off with … (full text in their tooltips). -->
 <header>
   <strong>Desert Storm Editor</strong>
-  <select id="level" title="Level"></select>
-  <button id="open">Open</button>
-  <button id="open-mission" title="Reopen a mission saved with Save as mission">Open mission…</button>
-  <button id="new-level" title="A brand-new level: empty, with a sculptable ground and another level's sky and sounds">New level…</button>
-  <span id="doc" title="What you are editing"></span>
+  <select id="level" title="Game level - picking one opens it (asks first when there are unsaved changes)"></select>
+  <nav id="menus">
+    <div class="menu"><button class="menu-btn" type="button">File ▾</button>
+      <div class="menu-list" hidden>
+        <button id="open" title="Open the level picked on the left again (as the game ships it)">Open level</button>
+        <button id="open-mission" title="Reopen a mission saved with Save as mission">Open mission…</button>
+        <button id="new-level" title="A brand-new level: empty, with a sculptable ground and another level's sky and sounds">New level…</button>
+        <hr>
+        <button id="save" title="Write the edited scene and routes to the game's Mods folder (replaces this level) - the mod is named in the Mod name box">Save as mod</button>
+        <button id="save-mission" title="A new playable mission: scene, routes, nav files, Lua script, campaign entry">Save as mission…</button>
+        <button id="export-btn" title="Check the mod and package it as a clean .zip with a README, ready to share">Export Mod Package…</button>
+      </div></div>
+    <div class="menu"><button class="menu-btn" type="button">Mission ▾</button>
+      <div class="menu-list" hidden>
+        <button id="objectives-btn" title="Mission objectives and event rules - no Lua needed">Objectives…</button>
+        <button id="briefing-btn" title="Operation title, date, location, briefing text and tactical map pins">Briefing…</button>
+        <button id="script-btn" title="The mission's Lua script (open or save a mission first)">Script…</button>
+        <button id="settings-btn" title="Mission settings: air support (laser-designated strikes)">Mission Settings…</button>
+        <button id="campaign-btn" title="Multi-mission campaigns for SINGLE PLAYER › CUSTOM CAMPAIGNS">Campaigns…</button>
+        <button id="minimap-btn" title="A top-down picture of the level as the mission's in-game map (MISSION tab, pause screen)">Generate Minimap…</button>
+      </div></div>
+    <div class="menu"><button class="menu-btn" type="button">World ▾</button>
+      <div class="menu-list" hidden>
+        <button id="terrain-btn" title="Terrain patches: make, sculpt, texture">Terrain…</button>
+        <button id="road-btn" title="Roads: click points on the ground, the road follows it">Road…</button>
+        <button id="paths-btn" title="AI paths (patrol routes), single waypoints and trigger regions: click on the ground">Paths &amp; Regions…</button>
+        <button id="atmos-btn" title="Sun, ambient light, fog and time of day">Atmosphere…</button>
+      </div></div>
+    <div class="menu"><button class="menu-btn" type="button">Data ▾</button>
+      <div class="menu-list" hidden>
+        <button id="assets-btn" title="New weapons and uniforms for a mod">Assets…</button>
+        <button id="vanilla-btn" title="What differs from the shipped level: modified, added and deleted records - revert or restore them">Changes from the shipped level…</button>
+      </div></div>
+  </nav>
   <span class="sep"></span>
   <button id="undo" title="Undo (Ctrl+Z)">Undo</button>
   <button id="redo" title="Redo (Ctrl+Y)">Redo</button>
   <button id="history-btn" title="Every change in order - click one to jump back to it (Ctrl+H)">History</button>
   <span class="sep"></span>
-  <input id="mod" placeholder="Mod name" size="16">
-  <button id="save" title="Write the edited scene and routes to the game's Mods folder (replaces this level)">Save as mod</button>
-  <button id="save-mission" title="A new playable mission: scene, routes, nav files, Lua script, campaign entry">Save as mission…</button>
-  <button id="script-btn" title="The mission's Lua script (open or save a mission first)">Script…</button>
+  <input id="mod" placeholder="Mod name" size="14" title="The mod folder Save as mod writes to (Mods\&lt;name&gt;)">
   <button id="play" title="Save the mission and start the game straight into it">▶ Play</button>
-  <button id="assets-btn" title="New weapons and uniforms for a mod">Assets…</button>
-  <button id="terrain-btn" title="Terrain patches: make, sculpt, texture">Terrain…</button>
-  <button id="road-btn" title="Roads: click points on the ground, the road follows it">Road…</button>
   <button id="console-btn" title="The game's log while it runs, and why it crashed">Console</button>
-  <button id="objectives-btn" title="Mission objectives and event rules - no Lua needed">Objectives…</button>
-  <button id="atmos-btn" title="Sun, ambient light, fog and time of day">Atmosphere…</button>
-  <button id="settings-btn" title="Mission settings: air support (laser-designated strikes)">Mission Settings…</button>
-  <button id="minimap-btn" title="A top-down picture of the level as the mission's in-game map (MISSION tab, pause screen)">Generate Minimap</button>
-  <button id="briefing-btn" title="Operation title, date, location, briefing text and tactical map pins">Briefing…</button>
-  <button id="campaign-btn" title="Multi-mission campaigns for SINGLE PLAYER › CUSTOM CAMPAIGNS">Campaigns…</button>
-  <button id="export-btn" title="Check the mod and package it as a clean .zip with a README, ready to share">Export Mod Package</button>
+  <span class="sep"></span>
+  <span id="doc" title="What you are editing"></span>
   <span id="status"></span>
 </header>
 <main>
@@ -53,10 +73,19 @@
     <div id="layers"></div>
     <h2 title="Objects that wait for the mission script: game.show_layer(name)">Script layers</h2>
     <div id="script-layers"><span class="hint">none - put objects into a layer in their properties</span></div>
+    <details id="mission-groups" hidden>
+      <summary><h2>Mission groups</h2><span class="count" id="mg-count"></span></summary>
+      <p class="hint" id="mg-hint"></p>
+      <div id="mg-list"></div>
+    </details>
     <div class="tabs"><button id="tab-objects" class="on">Objects</button><button id="tab-library">Library</button><button id="tab-kits">Kits</button><button id="tab-prefabs">Prefabs</button></div>
     <div id="pane-objects" class="pane">
-      <input id="search" placeholder="Filter: unit, model, script id">
+      <input id="search" placeholder="Search the scene: unit, model, name, script id" title="Objects, and while searching also props, waypoints, regions, cameras, sounds, emitters and switches - click a result to select and frame it">
       <ul id="outliner"></ul>
+      <p class="hint legend" id="outliner-legend"><span class="shield">🛡</span> the base mission's script uses it (hide it in a layer
+        rather than delete it) · tags: <span class="tag t-start">at start</span> <span class="tag t-wait">waits for script</span>
+        <span class="tag t-cut">cutscene</span> <span class="tag t-layer">layer</span> · Ctrl+click adds to the selection,
+        Shift+click selects a range</p>
     </div>
     <div id="pane-library" class="pane" hidden>
       <div class="row"><input id="lib-search" placeholder="Search props and objects">
@@ -108,6 +137,10 @@
       <label title="Props placed from the Library get a random facing and ±10 % size (objects: facing only)">
         <input type="checkbox" id="jitter"> Random turn &amp; size</label>
       <button id="drop-btn" title="Drop the selection onto the ground or surface below it (F)">⤓ Drop to ground</button>
+      <label title="Click the level's own ground, cliffs and buildings to select them chunk by chunk: move, turn (Alt), duplicate (Ctrl+D) or delete (Del) them like props">
+        <input type="checkbox" id="world-edit"> Edit world</label>
+      <button id="top-btn" title="Top-down orthographic view: pan with the mouse, wheel zooms (T)">⬒ Top view</button>
+      <button id="isolate-btn" title="Show only the selection - everything else hidden (I)">◎ Isolate</button>
       <label title="Sun shadows in the view (off: faster on slow graphics)"><input type="checkbox" id="shadows" checked> Shadows</label>
       <button id="spawns-btn" title="Where players 1-4 start in split-screen co-op; versus spawn areas">Multiplayer Spawns</button>
       <span id="env-modes" class="seg" title="How the scene reads in other conditions (editor preview only - the scene isn't changed)">
@@ -119,10 +152,12 @@
       <div class="meter" id="bud-objects"><span class="bar"></span><em>Objects</em><b></b></div>
       <div class="meter" id="bud-texture_mb"><span class="bar"></span><em>VRAM</em><b></b></div>
     </div>
+    <div id="isolate-note" hidden></div>
     <div id="camview" hidden><span id="camview-name"></span><button id="camview-exit">Exit camera view (Esc)</button></div>
-    <div id="hint">WASD fly · Q/E down/up · Shift fast · double-click dive in · Alt rotate (Alt+X / Y / Z picks the axis) · Ctrl+C / Ctrl+V copy, paste under the mouse · F drop to ground · C focus · Ctrl+D duplicate · Del delete · Ctrl+Z/Y undo/redo</div>
+    <div id="hint">WASD fly · Q/E down/up · Shift fast · double-click dive in · Alt rotate (Alt+X / Y / Z picks the axis) · Ctrl+C / Ctrl+V copy, paste under the mouse · F drop to ground · C focus · I isolate · T top view · Ctrl+D duplicate · Del delete · Ctrl+Z/Y undo/redo</div>
   </section>
   <aside id="right">
+    <div id="tool-dock"></div>
     <h2 id="sel-title">Nothing selected</h2>
     <div id="layer-row" hidden>
       <label class="field">Layer <input id="layer-input" list="layer-names" placeholder="(in play from the start)"></label>
@@ -130,19 +165,37 @@
       <p class="hint">A layer's objects start hidden (until <code>game.show_layer("name")</code>) or shown (until
         <code>game.hide_layer("name")</code>) - set it in Script layers. Shift+click selects several objects.</p>
     </div>
+    <div id="vanilla-row" class="inspector-box" hidden>
+      <h2>Vanilla lineage</h2>
+      <div id="van-body"></div>
+      <div class="row"><button id="van-revert" title="Put every field back as the game ships it">↺ Revert Record to Vanilla</button></div>
+    </div>
     <div id="ai-row" class="inspector-box" hidden>
       <h2>Behaviour</h2>
       <label class="field">AI profile <select id="ai-profile"></select></label>
       <p class="hint" id="ai-source"></p>
-      <div class="row"><button id="patrol-btn" title="Click waypoints in order, Enter to finish">Assign patrol…</button>
+      <div class="row"><button id="patrol-btn" title="Draw or pick a path for the selected soldiers">Give a path…</button>
         <button id="patrol-clear">Clear patrol</button></div>
       <p class="hint" id="patrol-info"></p>
+      <p class="hint" id="unit-info"></p>
+    </div>
+    <div id="kit-row" class="inspector-box" hidden>
+      <h2>Kit</h2>
+      <div id="kit-list"></div>
+      <div class="row"><button id="kit-add" type="button">+ Add item</button></div>
+      <p class="hint" id="kit-info">What the soldier starts with. Amount = rounds for guns, count for grenades and items.</p>
+      <datalist id="kit-items"></datalist>
     </div>
     <div id="cam-row" class="inspector-box" hidden>
       <h2>Camera</h2>
       <div class="row"><button id="cam-look" title="Look through this camera in the 3D view">👁 View through camera</button>
         <label class="inline">FOV <input id="cam-fov" type="number" min="5" max="150" step="1"></label></div>
       <p class="hint" id="cam-info"></p>
+    </div>
+    <div id="logic-row" class="inspector-box" hidden>
+      <h2>Base mission logic</h2>
+      <p class="hint" id="logic-sum"></p>
+      <div id="logic-list" class="flow compact"></div>
     </div>
     <div id="inter-row" class="inspector-box" hidden>
       <h2 id="inter-title">Switch</h2>
@@ -161,11 +214,14 @@
       <p class="hint" id="snd-info"></p>
     </div>
     <div id="events-row" class="inspector-box" hidden>
-      <h2>Events &amp; Actions</h2>
-      <div id="ev-list"></div>
-      <div id="ev-form"></div>
+      <h2>Rules</h2>
+      <div id="ev-list" class="rule-list compact"></div>
+      <div class="row"><button id="ev-new" type="button">+ New rule with this…</button></div>
     </div>
     <table id="fields"></table>
+    <details id="adv-box" hidden><summary>Advanced (raw)</summary>
+      <p class="hint">The record's other values as the scene file stores them: flags, unnamed fields, AI tuning, links.</p>
+      <table id="fields-adv"></table></details>
   </aside>
 </main>
 <div id="terrain" class="float-panel" hidden>
@@ -180,7 +236,7 @@
       <button id="t-new">Make patch</button>
     </fieldset>
     <fieldset><legend id="t-current">select a terrain patch</legend>
-      <label class="row"><input type="checkbox" id="t-sculpt" checked> Sculpt (drag on the patch)</label>
+      <label class="row check"><input type="checkbox" id="t-sculpt" checked> Sculpt (drag on the patch)</label>
       <div class="row t-ops">
         <label><input type="radio" name="t-op" value="raise" checked> Raise</label>
         <label><input type="radio" name="t-op" value="lower"> Lower</label>
@@ -203,6 +259,52 @@
       them). Orbit / pan as usual off the patch; Ctrl+Z undoes a stroke.</p>
   </div>
 </div>
+<div id="paths-panel" class="float-panel" hidden>
+  <div class="console-head"><strong>Paths &amp; Regions</strong><span class="grow"></span><button id="pp-close">Close</button></div>
+  <div class="t-body">
+    <div class="tabs"><button id="pp-tab-path" class="on">Path</button><button id="pp-tab-region">Region</button><button id="pp-tab-wp">Waypoint</button><button id="pp-tab-cam">Camera</button></div>
+    <div id="pp-path">
+      <p class="hint">Click points on the ground in walking order. Enter makes the path, Esc clears.</p>
+      <label>Name <input id="pp-name" value="PATROL"></label>
+      <div class="row"><label class="check"><input type="checkbox" id="pp-loop" checked> Loop back to the start</label>
+        <label class="check">Wait <input id="pp-wait" type="number" value="2" min="0" max="600" step="1" style="width:4em"> s at each point</label></div>
+      <div class="row"><label class="check" title="points on blocked cells of the AI walk map (soldiers can't plan a route there) move to the nearest open ground">
+        <input type="checkbox" id="pp-snap" checked> Snap points to walkable ground</label></div>
+      <div class="row"><button id="pp-finish">Make path (Enter)</button><button id="pp-clear">Clear (Esc)</button></div>
+      <fieldset><legend>Give a path to soldiers</legend>
+        <label>Path <select id="pp-path-sel"></select></label>
+        <div class="row"><label class="check">Pace <select id="pp-move"><option value="walk">walk</option><option value="run">run</option>
+          <option value="crouch">crouched</option><option value="prone">crawl</option></select></label>
+          <label class="check">Starts <select id="pp-start"><option value="mission">at mission start</option>
+          <option value="rule">when a rule says so</option></select></label></div>
+        <div class="row"><label class="check" title="the game puts enemy soldiers the player hasn't seen to sleep - off = their route waits until the player comes near (the original game's behaviour)">
+          <input type="checkbox" id="pp-unseen" checked> Keep walking while the player can't see them</label></div>
+        <div class="row"><button id="pp-assign">Assign to the selected soldiers</button><button id="pp-del" title="delete the path's waypoints">Delete path</button></div>
+        <p class="hint" id="pp-info"></p>
+      </fieldset>
+    </div>
+    <div id="pp-region" hidden>
+      <p class="hint">Click on the ground to place a trigger region; select it to move or resize it.</p>
+      <label>Name <input id="pp-rname" value="TRIGGER"></label>
+      <div class="row"><label class="check">Shape <select id="pp-shape"><option value="box">box</option><option value="sphere">sphere</option></select></label></div>
+      <div class="row" id="pp-boxsize"><label class="check">Size (m) <input id="pp-sx" type="number" value="10" min="1" style="width:4em">
+        × <input id="pp-sy" type="number" value="4" min="1" style="width:3.5em"> × <input id="pp-sz" type="number" value="10" min="1" style="width:4em"></label></div>
+      <div class="row" id="pp-radius" hidden><label class="check">Radius (m) <input id="pp-r" type="number" value="5" min="0.5" style="width:4em"></label></div>
+    </div>
+    <div id="pp-cam" hidden>
+      <p class="hint">Frame the shot in the 3D view (fly with WASD, look around), then save it as a camera. Rules play it
+        with the <b>Camera shot</b> action between <b>Start a cutscene</b> and <b>End the cutscene</b>.</p>
+      <label>Name <input id="pp-cname" value="SHOT"></label>
+      <label class="check">Field of view <input id="pp-fov" type="number" value="60" min="10" max="120" style="width:4em">°</label>
+      <div class="row"><button id="pp-cam-add">📷 Save this view as a camera</button></div>
+    </div>
+    <div id="pp-wp" hidden>
+      <p class="hint">Click on the ground to place a waypoint (a spot units can be sent to or teleported to).</p>
+      <label>Name <input id="pp-wname" value="WAYPOINT"></label>
+      <label class="check">Wait <input id="pp-wwait" type="number" value="0" min="0" style="width:4em"> s</label>
+    </div>
+  </div>
+</div>
 <div id="road" class="float-panel" hidden>
   <div class="console-head"><strong>Road</strong><span class="grow"></span><button id="r-close">Close</button></div>
   <div class="t-body">
@@ -220,7 +322,7 @@
   </div>
 </div>
 <div id="atmos" class="float-panel" hidden>
-  <div class="console-head"><strong>Atmosphere</strong><span class="grow"></span><button id="at-close">Close</button></div>
+  <div class="console-head"><strong>Atmosphere</strong><span class="grow"></span><button id="at-reset" title="Time of day, fog, sky layers, colour keys and the sun as the game ships them">↺ Reset to Vanilla</button><button id="at-close">Close</button></div>
   <div class="t-body">
     <label class="row"><input type="checkbox" id="at-preview" checked> Preview in the 3D view</label>
     <label>Time of day <input id="at-hour" type="range" min="0" max="23.75" step="0.25"><span id="at-hour-v" class="hint"></span></label>
@@ -240,6 +342,11 @@
       <label>Colour <input type="color" id="at-sun-colour"></label>
       <label>Tilt (°) <input id="at-sun-tilt" type="number" min="0" max="360" step="1"></label>
       <label>Heading (°) <input id="at-sun-heading" type="number" min="0" max="360" step="1"></label>
+    </fieldset>
+    <fieldset><legend>Far fog &amp; sky</legend>
+      <label title="XFOGSTART / XFOGSTOP: the second fog band (m)">Far fog <input id="at-xfog-start" type="number" min="0" max="2000" step="5"> – <input id="at-xfog-stop" type="number" min="0" max="2000" step="5"> m</label>
+      <div id="at-sky"></div>
+      <p class="hint">Cloud layers (SKYTEXTURE …): tiling, drift speed x / z, dome curvature, height in m.</p>
     </fieldset>
     <fieldset><legend>Soundtrack &amp; Music</legend>
       <label>Stealth / ambient <select id="mu-ambient"></select><button id="mu-ambient-play" title="Audition">▶</button></label>
@@ -298,7 +405,7 @@
 <dialog id="objectives-dialog">
   <div class="script-head">
     <h2>Mission objectives &amp; events</h2>
-    <div class="tabs"><button type="button" id="ob-tab-obj" class="on">Objectives</button><button type="button" id="ob-tab-rules">Event rules</button><button type="button" id="ob-tab-lua">Lua</button></div>
+    <div class="tabs"><button type="button" id="ob-tab-obj" class="on">Objectives</button><button type="button" id="ob-tab-flow">Mission logic</button><button type="button" id="ob-tab-rules">Event rules</button><button type="button" id="ob-tab-lua">Lua</button></div>
     <span class="grow"></span>
     <button id="ob-close">Close</button>
   </div>
@@ -311,10 +418,21 @@
       <button id="ob-save">Save objectives</button>
     </div>
   </div>
+  <div id="ob-pane-flow" hidden>
+    <div id="ob-flow-box">
+      <p class="hint" id="ob-flow-title">How the base mission works.</p>
+      <div class="row flow-tools"><input id="ob-flow-search" placeholder="Filter: an object, region, objective or action">
+        <button id="ob-flow-expand" type="button">Expand all</button><button id="ob-flow-collapse" type="button">Collapse all</button></div>
+      <div id="ob-flow" class="flow"></div>
+    </div>
+  </div>
   <div id="ob-pane-rules" hidden>
-    <div id="ob-rules"></div>
-    <h2>New rule</h2>
-    <div id="ob-rule-form"></div>
+    <p class="hint" id="ob-rules-base"></p>
+    <h2>Your rules</h2>
+    <div class="row rule-tools"><button id="rule-new" type="button">+ New rule</button>
+      <input id="rule-filter" placeholder="Filter rules"><span class="hint">Rules run in this order when several fire at once.</span></div>
+    <div id="ob-rules" class="rule-list"></div>
+    <div id="ob-rule-form" class="rule-editor" hidden></div>
   </div>
   <div id="ob-pane-lua" hidden>
     <p class="hint">What Save as mission / the script window writes between <code>-- @editor begin: objectives</code> and
@@ -355,6 +473,8 @@
     <p class="note">Writes a playable mission into <code>Mods\&lt;mod&gt;</code>: this scene under the new name, its AI
       routes and navigation files, models placed from other levels, and a Lua script that sets the map up (generated
       once - your edits to it are kept). Play it from SINGLE PLAYER › CUSTOM CAMPAIGNS.</p>
+    <p class="note" id="m-play-note" hidden><b>Play needs a mission:</b> a game level is saved as a mission first, then the
+      game starts straight into it.</p>
     <label>Mod folder <input id="m-mod" required placeholder="MyMissions"></label>
     <label>Mission name <input id="m-name" required pattern="[A-Za-z][A-Za-z0-9_]{0,23}" placeholder="Ambush"></label>
     <label>Campaign (optional) <input id="m-campaign" placeholder="Operation Sandstorm"></label>
@@ -367,12 +487,15 @@
     <h2 id="script-title">Mission script</h2>
     <span id="script-state" class="hint"></span>
     <span class="grow"></span>
+    <button id="script-compare" title="Your script next to the editor's template for this mission: your own code, the editor's blocks, what you removed">Compare with template</button>
+    <button id="script-reset" title="Replace the script with the editor's template (your own code is lost)">↺ Reset to template</button>
     <button id="script-save" title="Ctrl+S">Save</button>
     <button id="script-play" title="Save the script and the mission, then start the game in it">▶ Play</button>
     <button id="script-close">Close</button>
   </div>
   <div class="script-body">
     <div id="code"></div>
+    <div id="script-diff" hidden><p class="hint" id="diff-legend"></p><pre id="diff-lines"></pre></div>
     <aside class="snippets">
       <h2>Insert</h2>
       <div id="snippets"></div>
@@ -450,10 +573,24 @@
     </div>
   </div>
 </dialog>
+<dialog id="vanilla-dialog">
+  <div class="script-head">
+    <h2>Changes from the shipped level</h2>
+    <span id="van-sum" class="hint"></span>
+    <span class="grow"></span>
+    <button id="van-close">Close</button>
+  </div>
+  <div class="van-lists">
+    <section><h3>Modified</h3><ul id="van-modified" class="van-list"></ul></section>
+    <section><h3>Added in the editor</h3><ul id="van-custom" class="van-list"></ul></section>
+    <section><h3>Deleted (or renamed / renumbered)</h3><ul id="van-deleted" class="van-list"></ul></section>
+  </div>
+</dialog>
 <dialog id="briefing-dialog">
   <div class="script-head">
     <h2>Briefing designer</h2>
     <span class="grow"></span>
+    <button id="bf-reset" title="Fill the fields with the base mission's own briefing again (Save keeps it)">↺ Base mission's briefing</button>
     <button id="bf-save">Save dossier</button>
     <button id="bf-burn" title="Draw the pins into the tactical map picture the game shows">Burn pins into map</button>
     <button id="bf-close">Close</button>
@@ -492,6 +629,10 @@
     <label class="check"><input type="checkbox" id="ex-sources"> Include editor sources (others can open and edit it)</label>
     <div class="actions"><button id="ex-close" type="button">Close</button><button id="ex-go" type="button">Export</button></div>
     <pre id="ex-result" class="hint"></pre>
+    <div id="ex-fix" class="actions" hidden style="justify-content:flex-start">
+      <button id="ex-remove-copies" type="button" title="Move the copies of game files out of the mod (into the editor's backups), then export again">Remove game copies and export</button>
+      <button id="ex-resave" type="button" hidden title="Save the open mission again (game files become references in its .uses), then export again">Re-save the mission and export</button>
+    </div>
     <a id="ex-download" hidden download>⤓ Download the .zip</a>
   </form>
 </dialog>
@@ -504,5 +645,6 @@
 </dialog>
 <script type="module" src="app.js"></script>
 <script src="records.js" defer></script>
+<datalist id="dl-objects"></datalist><datalist id="dl-names"></datalist><datalist id="dl-slots"></datalist>
 </body>
 </html>
