@@ -17,9 +17,11 @@ async function api(cmd, args = {}) {
   const r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args),
                                           headers: { 'Content-Type': 'application/json', 'X-Editor-Token': editorToken } });
   const j = await r.json();
+  if (!POLL_COMMANDS.has(cmd)) requestRender();   // its result usually changes what's drawn (the caller does that next)
   if (!j.ok) throw new Error(j.error);
   return j.result;
 }
+const POLL_COMMANDS = new Set(['history', 'game_console']);
 function status(text, bad = false) { const s = $('status'); s.textContent = text; s.classList.toggle('bad', bad); }
 async function run(cmd, args, what) {
   try { const r = await api(cmd, args); if (what) status(what); return r; }
@@ -30,7 +32,7 @@ async function run(cmd, args, what) {
 const view = $('view');
 // logarithmic depth: close-ups inside buildings and kilometre views without z-fighting
 const renderer = new THREE.WebGLRenderer({ antialias: true, logarithmicDepthBuffer: true });
-renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;                  // sun shadows (view toolbar: Shadows)
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 view.appendChild(renderer.domElement);
@@ -59,9 +61,24 @@ gizmo.setSize(0.8);
 scene3.add(gizmo);
 gizmo.addEventListener('dragging-changed', (e) => { orbit.enabled = !e.value && !camView; if (!e.value) commitMove().then(gizmoMode); });
 
+// Render on demand: a frame is drawn when something on screen changed (requestRender) or while something moves -
+// WASD flying, orbit damping (its 'change' events), the sandstorm, NVG grain, vision cones following their soldiers.
+let needsRender = true;
+function requestRender() { needsRender = true; }
+orbit.addEventListener('change', requestRender);
+gizmo.addEventListener('change', requestRender);          // hover highlight of an axis, drags
+// Catch-all for the many UI paths that change the view: any input (window capture runs before the canvas handlers
+// that stop propagation). Mouse moves count over the view or while a button is held.
+for (const ev of ['pointerdown', 'pointerup', 'wheel', 'keydown', 'keyup', 'click', 'input', 'change', 'dragover', 'drop'])
+  window.addEventListener(ev, requestRender, { capture: true, passive: true });
+window.addEventListener('pointermove', (e) => { if (e.buttons || e.target === renderer.domElement) requestRender(); },
+                        { capture: true, passive: true });
+document.addEventListener('visibilitychange', requestRender);
+
 new ResizeObserver(() => {
   const w = view.clientWidth, h = view.clientHeight;
   renderer.setSize(w, h); camera.aspect = w / h; camera.updateProjectionMatrix();
+  requestRender();
 }).observe(view);
 // WASD fly: W/S along the view, A/D sideways, Q/E down/up; Shift faster. Camera and orbit centre move
 // together, so mouse orbiting keeps working around the new spot.
@@ -79,8 +96,8 @@ window.addEventListener('keyup', (e) => {
 window.addEventListener('blur', () => held.clear());
 const clock = new THREE.Clock();
 const fwd = new THREE.Vector3(), side = new THREE.Vector3(), move = new THREE.Vector3();
-function fly(dt) {
-  if (camView || ![...held].some((k) => flyKeys.has(k))) return;
+function fly(dt) {              // true when the camera moved
+  if (camView || ![...held].some((k) => flyKeys.has(k))) return false;
   camera.getWorldDirection(fwd);
   side.crossVectors(fwd, camera.up).normalize();
   move.set(0, 0, 0);
@@ -90,15 +107,21 @@ function fly(dt) {
   if (held.has('a')) move.sub(side);
   if (held.has('e')) move.y += 1;
   if (held.has('q')) move.y -= 1;
-  if (!move.lengthSq()) return;
+  if (!move.lengthSq()) return false;
   const speed = 12 * (held.has('shift') ? 5 : 1);   // metres per second
   move.normalize().multiplyScalar(speed * dt);
   camera.position.add(move); orbit.target.add(move);
+  return true;
 }
 renderer.setAnimationLoop(() => {
   const dt = Math.min(clock.getDelta(), 0.1);
-  fly(dt);
-  orbit.update(); updateSunShadow(); followVision(); blowDust(dt); renderFrame();
+  if (fly(dt)) needsRender = true;
+  orbit.update();                                   // damping: 'change' (requestRender) while the view still moves
+  if (followVision()) needsRender = true;
+  if (dust.visible || envMode === 'nvg') needsRender = true;   // blowing dust, phosphor grain
+  if (!needsRender) return;
+  needsRender = false;
+  updateSunShadow(); blowDust(dt); renderFrame();
 });
 
 // ---- layers ----
@@ -115,7 +138,7 @@ for (const [key, label, color, on = true] of LAYERS) {
   const row = document.createElement('label');
   row.innerHTML = `<input type="checkbox" ${on ? 'checked' : ''}> <span class="swatch" style="background:${color}"></span>${label}` +
                   `<span class="count" id="count-${key}"></span>`;
-  row.querySelector('input').onchange = (e) => { g.visible = e.target.checked; if (key === 'vision' && g.visible) buildVision().catch(() => {}); };
+  row.querySelector('input').onchange = (e) => { g.visible = e.target.checked; requestRender(); if (key === 'vision' && g.visible) buildVision().catch(() => {}); };
   $('layers').appendChild(row);
 }
 const pickable = [];
@@ -128,7 +151,7 @@ function model(name) {
   const key = name.toUpperCase();
   if (!modelCache.has(key))
     modelCache.set(key, loader.loadAsync(`/model/${level}/${encodeURIComponent(key)}.glb`).then((g) => keepTree(g.scene))
-                                .catch(() => null));
+                                .catch(() => null).finally(requestRender));   // its clones are added in the callers' .then
   return modelCache.get(key);
 }
 // Level switch: the cached originals are freed by the next buildScene(true), once their clones have left the scene
@@ -279,6 +302,7 @@ async function buildScene(fresh) {
   if ($('walk-toggle')?.checked) buildWalkMap(fresh).catch(() => {});
   productionAfterScene(fresh);
   buildTactics().catch(() => {});
+  requestRender();
 }
 
 // Switches: an orange keypad box, a dashed line to each door it drives (red box when a door / its region is gone).
@@ -373,7 +397,7 @@ const texCache = new Map();
 function gameTexture(name) {
   if (!texCache.has(name)) {
     texCache.set(name, api('texture_png', { name }).then((url) => {
-      const t = keep(new THREE.TextureLoader().load(url));
+      const t = keep(new THREE.TextureLoader().load(url, requestRender));
       t.wrapS = t.wrapT = THREE.RepeatWrapping; t.colorSpace = THREE.SRGBColorSpace;
       return t;
     }).catch(() => null));
@@ -950,7 +974,7 @@ async function ghostModel(e) {             // the template's model from its own 
     const m = cloneSkinned(src);
     if (e.kit) m.position.copy(toThree(e.centre)).multiplyScalar(-1);   // world-space piece: centre on the cursor
     m.traverse((o) => { if (o.isMesh) { o.material = ghostMat; o.userData.ghost = true; } });
-    ghost.clear(); ghost.add(m);
+    ghost.clear(); ghost.add(m); requestRender();
   }
   return ghost;
 }
@@ -981,6 +1005,7 @@ const many = new Set();        // objects selected together (Shift+click): the L
 const selMark = keep(new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, side: THREE.DoubleSide }));
 const multiBoxes = new THREE.Group(); scene3.add(multiBoxes);
 function markSelected() {      // a white ring under every object of a multi-selection, a white box round every prop
+  requestRender();
   for (const h of groups.objects.children) {
     let ring = h.getObjectByName('multi');
     const on = many.has(h.userData.line);
@@ -1067,7 +1092,7 @@ window.addEventListener('keyup', (e) => { if (e.key === 'Alt') { e.preventDefaul
 window.addEventListener('blur', () => { wantRotate = false; gizmoMode(); });
 
 async function select(sel, focus = false) {
-  selection = sel;
+  selection = sel; requestRender();
   many.clear(); markSelected();
   $('layer-input').placeholder = '(in play from the start)';
   gizmo.detach();
@@ -2380,7 +2405,7 @@ function updateSunShadow(centre = orbit.target, extent = null) {
   }
 }
 function setShadows(on) {
-  renderer.shadowMap.enabled = on; sun.castShadow = on;
+  renderer.shadowMap.enabled = on; sun.castShadow = on; requestRender();
   scene3.traverse((o) => { if (o.material) for (const m of [].concat(o.material)) m.needsUpdate = true; });
 }
 try { $('shadows').checked = localStorage.getItem('shadows') !== '0'; } catch { /* storage blocked */ }
@@ -2454,7 +2479,7 @@ function buildFootprints(lines) {
       const size = box.getSize(new THREE.Vector3()), c = box.getCenter(new THREE.Vector3());
       const quad = new THREE.Mesh(flatPlane, overlayMat(0xff4040, 0.45));
       quad.position.set(c.x, box.min.y + 0.35, c.z); quad.scale.set(size.x, 1, size.z); quad.raycast = () => {};
-      walkFoot.add(helper, quad);
+      walkFoot.add(helper, quad); requestRender();
     }));
   }
 }
@@ -2493,6 +2518,7 @@ async function renderMinimap() {
     for (const o of hidden) o.visible = true;
     scene3.fog = fog; scene3.background = bg;
     if (envWas !== 'day') setEnvMode(envWas);
+    requestRender();
   }
   const img = await new Promise((ok, bad) => { const i = new Image(); i.onload = () => ok(i); i.onerror = bad; i.src = url; });
   let src = img;
@@ -3096,14 +3122,20 @@ async function buildVision() {
   $('count-vision').textContent = visionInfo.soldiers.length;
   followVision();
 }
-function followVision() {        // each frame: on its soldier (also while the gizmo drags or turns it)
+function followVision() {        // each frame: on its soldier (also while the gizmo drags or turns it); true if one moved
+  let moved = false;
   for (const c of visionCones) {
     const h = byLine.get(c.userData.line);
-    if (!h) { c.visible = false; continue; }
-    c.visible = true;
-    c.position.set(h.position.x, h.position.y + c.userData.eye, h.position.z);
-    c.rotation.set(0, h.rotation.y, 0);
+    if (c.visible !== !!h) { c.visible = !!h; moved = true; }
+    if (!h) continue;
+    const y = h.position.y + c.userData.eye;
+    if (c.position.x !== h.position.x || c.position.y !== y || c.position.z !== h.position.z || c.rotation.y !== h.rotation.y) {
+      c.position.set(h.position.x, y, h.position.z);
+      c.rotation.set(0, h.rotation.y, 0);
+      moved = true;
+    }
   }
+  return moved;
 }
 
 // ---- minefields: red hazard circles with a skull (editor only), the brush and the list ----
@@ -3363,7 +3395,7 @@ function setEnvMode(mode) {
     atmosDefault ||= { bg: envSaved.bg.clone(), fog: envSaved.fog, sky: envSaved.sky.clone(), ground: envSaved.ground.clone(),
                        hemiI: envSaved.hemi, sun: envSaved.sun.clone(), sunDir: sunDir.clone() };
   }
-  envMode = mode;
+  envMode = mode; requestRender();
   for (const b of document.querySelectorAll('#env-modes button')) b.classList.toggle('on', b.dataset.mode === mode);
   const e = ENV[mode];
   dust.visible = !!e?.dust;
