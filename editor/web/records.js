@@ -13,10 +13,20 @@
   };
   async function call(cmd, args = {}) {
     const token = document.querySelector('meta[name="editor-token"]')?.content || '';
-    const r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args),
-                                          headers: { 'Content-Type': 'application/json', 'X-Editor-Token': token } });
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error);
+    const abort = new AbortController(), timer = setTimeout(() => abort.abort(), 30000);
+    let r, j;
+    try {
+      r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args), signal: abort.signal,
+                                       headers: { 'Content-Type': 'application/json', 'X-Editor-Token': token } });
+      if (!(r.headers.get('Content-Type') || '').includes('application/json'))
+        throw new Error(`HTTP ${r.status} ${r.statusText} - not a JSON answer`);
+      j = await r.json();
+    } catch (e) {
+      if (e.name === 'AbortError') throw new Error('no answer after 30 s (the editor may still be working on it)');
+      if (e instanceof TypeError) throw new Error(`can't reach the editor server (${e.message})`);
+      throw e;
+    } finally { clearTimeout(timer); }
+    if (!j.ok) throw new Error(j.error || `HTTP ${r.status} ${r.statusText}`);
     return j.result;
   }
   const modName = () => (document.getElementById('mod')?.value || '').trim();

@@ -14,14 +14,31 @@ const deg = THREE.MathUtils.degToRad;
 // per-launch API token (server.py writes it into index.html; /api/* refuses calls without it)
 const editorToken = document.querySelector('meta[name="editor-token"]')?.content || '';
 async function api(cmd, args = {}) {
-  const r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args),
-                                          headers: { 'Content-Type': 'application/json', 'X-Editor-Token': editorToken } });
-  const j = await r.json();
+  // the server runs one command at a time: a quick one can wait behind a slow save, so the default isn't too tight
+  const ms = SLOW_COMMANDS.has(cmd) ? 300000 : 30000;
+  const abort = new AbortController(), timer = setTimeout(() => abort.abort(), ms);
+  let r, j;
+  try {
+    r = await fetch('/api/' + cmd, { method: 'POST', body: JSON.stringify(args), signal: abort.signal,
+                                     headers: { 'Content-Type': 'application/json', 'X-Editor-Token': editorToken } });
+    if (!(r.headers.get('Content-Type') || '').includes('application/json'))
+      throw new Error(`HTTP ${r.status} ${r.statusText} - not a JSON answer: ${(await r.text()).slice(0, 120)}`);
+    j = await r.json();
+  } catch (e) {
+    if (e.name === 'AbortError') throw new Error(`no answer after ${ms / 1000} s (the editor may still be working on it)`);
+    if (e instanceof TypeError) throw new Error(`can't reach the editor server - is server.py still running? (${e.message})`);
+    throw e;
+  } finally { clearTimeout(timer); }
   if (!POLL_COMMANDS.has(cmd)) requestRender();   // its result usually changes what's drawn (the caller does that next)
-  if (!j.ok) throw new Error(j.error);
+  if (!j.ok) throw new Error(j.error || `HTTP ${r.status} ${r.statusText}`);
   return j.result;
 }
 const POLL_COMMANDS = new Set(['history', 'game_console']);
+// commands that convert models / textures, build the walk map or write files: up to 5 minutes
+const SLOW_COMMANDS = new Set(['open_level', 'open_mission', 'new_level', 'save_mod', 'save_mission', 'play', 'export_mod_zip',
+  'save_minimap', 'briefing_burn_map', 'briefing_map_image', 'kit_preview', 'kit_pieces', 'kit_models', 'library',
+  'asset_options', 'upload_file', 'create_weapon', 'create_skin', 'walkability_grid', 'scene_budget', 'texture_png',
+  'terrain_new', 'terrain_noise', 'terrain_set', 'road_new', 'road_set', 'save_script', 'campaign_save']);
 function status(text, bad = false) { const s = $('status'); s.textContent = text; s.classList.toggle('bad', bad); }
 async function run(cmd, args, what) {
   try { const r = await api(cmd, args); if (what) status(what); return r; }
@@ -200,8 +217,14 @@ const ballGeo = keep(new THREE.SphereGeometry(0.25, 10, 8));
 function clearGroup(g, except = null) {
   for (const c of [...g.children]) { if (c === except) continue; g.remove(c); disposeObject(c); }
 }
+const markerMats = new Map();   // one material per marker colour (kept: shared by every build)
+function markerMat(color) {
+  if (!markerMats.has(color)) markerMats.set(color, keep(new THREE.MeshBasicMaterial({ color })));
+  return markerMats.get(color);
+}
+const cameraGeo = keep(new THREE.OctahedronGeometry(0.5)), soundGeo = keep(new THREE.IcosahedronGeometry(0.35));
 function marker(geo, color, rec, cat) {
-  const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color }));
+  const m = new THREE.Mesh(geo, markerMat(color));
   m.position.copy(toThree(rec.pos));
   m.userData = { line: rec.line, cat };
   pickable.push(m); byLine.set(rec.line, m);
@@ -267,11 +290,11 @@ async function buildScene(fresh) {
   for (const o of data.objects) if (o.patrol) drawPatrol(o);
   camTargets.clear();
   for (const c of data.cameras) {
-    const m = marker(new THREE.OctahedronGeometry(0.5), 0xb67be8, c, 'cameras'); groups.cameras.add(m);
+    const m = marker(cameraGeo, 0xb67be8, c, 'cameras'); groups.cameras.add(m);
     addCameraGuides(c);
   }
   for (const s of data.sounds) {
-    const m = marker(new THREE.IcosahedronGeometry(0.35), 0x6aa0ff, s, 'sounds');
+    const m = marker(soundGeo, 0x6aa0ff, s, 'sounds');
     const ring = new THREE.Mesh(new THREE.SphereGeometry(s.max_distance / 100, 16, 8),
                                 new THREE.MeshBasicMaterial({ color: 0x6aa0ff, wireframe: true, transparent: true, opacity: 0.08 }));
     ring.raycast = () => {}; m.add(ring); groups.sounds.add(m);
