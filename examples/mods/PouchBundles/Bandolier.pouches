@@ -1,0 +1,10 @@
+# Ammo everywhere: SAS ammo pouches on the belt, Russian ones on the hips, a torch on the chest.
+
+name        = Bandolier
+
+belt        = UK_AMMOPOUCH01
+belt left   = UK_AMMOPOUCH01
+belt right  = UK_AMMOPOUCH01
+hip left    = RU_AMMOPOUCH01
+hip right   = RU_AMMOPOUCH01
+chest right = US_CHESTTORCH

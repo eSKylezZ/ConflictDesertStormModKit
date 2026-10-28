@@ -1,0 +1,11 @@
+# A tan ammo pouch - a pouch piece for the pouch rows.
+#
+# Shows: a pouch. With OPTIONS > DESERTSTORMFIX > FREE POUCH CHOICE on, every pouch spot row (belt, hips, chest)
+# offers it; with it off, pouches come in sets - see TanBelt.pouches for a set that uses it.
+
+id       = TAN_AMMOPOUCH
+slot     = pouch
+name     = Tan Ammo Pouch
+
+based on = UK_AMMOPOUCH01    # the SAS ammo pouch
+texture  = TanAmmoPouch      # TanAmmoPouch.dds

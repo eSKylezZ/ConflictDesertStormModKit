@@ -18,7 +18,7 @@ wait that many seconds); waits are kept in game.state (rule, step, due time) so 
 triggers are matched in editor_on_message, the rest (mission start, after N s, every N s, conditions becoming true,
 objects reaching regions) are polled in editor_update(), which the script's update() calls.
 
-Game functions are called by their script API slot (editor/api_slots.json) through game.call / game.callf -
+Game functions are called by their script API slot (editor/games/<game>/api_slots.json) through game.call / game.callf -
 the slot table is the game's own, decoded from the exe; the ones used here were checked against the shipped
 mission DLLs' calls (see missionlogic.py). Objects are scene script ids, regions names, waypoints ids.
 """
@@ -37,6 +37,12 @@ from commands import CommandError, Session, _lua_value  # noqa: F401
 def P(name, typ, label, default=None, **kw):
     return {"name": name, "type": typ, "label": label, "default": default, **kw}
 
+
+# difficulty choices in order (easiest first); value = the game's level number (difficulty.cpp: 0-2 the game's own,
+# 3 VERY HARD, 4 VERY EASY), compared by rank
+DIFFICULTIES = {"very_easy": "VERY EASY", "easy": "EASY", "medium": "MEDIUM", "hard": "HARD", "very_hard": "VERY HARD"}
+DIFFICULTY_LEVEL = {"very_easy": 4, "easy": 0, "medium": 1, "hard": 2, "very_hard": 3}
+DIFFICULTY_RANK_LUA = "({[4]=0,[0]=1,[1]=2,[2]=3,[3]=4})[game.difficulty and game.difficulty() or 1]"
 
 TEAMS = {"0": "the squad (team 0)", "1": "team 1", "2": "enemies (team 2)", "3": "team 3", "4": "team 4"}
 
@@ -122,6 +128,10 @@ CONDITIONS = {
     "team_left": {"label": "team still has members", "params": [P("team", "team", "team", "2")]},
     "mission_time": {"label": "mission time is at least", "params": [P("seconds", "seconds", "seconds", 60)]},
     "chance": {"label": "random chance", "params": [P("percent", "percent", "chance (%)", 50)]},
+    "difficulty": {"label": "difficulty", "params": [
+        P("op", "choice", "is", "==", choices={"==": "is", ">=": "at least", "<=": "at most"}),
+        P("level", "choice", "level", "medium", choices=DIFFICULTIES)],
+        "help": "VERY EASY and VERY HARD need DesertStormFix 3.2+ (OPTIONS > DESERTSTORMFIX)"},
 }
 
 ACTIONS = {
@@ -131,7 +141,13 @@ ACTIONS = {
     "respawn": {"label": "Respawn", "params": [P("objects", "objects", "objects")], "group": "Objects"},
     "show_layer": {"label": "Show a layer", "params": [P("layer", "layer", "layer")], "group": "Objects"},
     "hide_layer": {"label": "Hide a layer", "params": [P("layer", "layer", "layer")], "group": "Objects"},
-    "kill": {"label": "Kill / destroy", "params": [P("objects", "objects", "objects")], "group": "Objects"},
+    "kill": {"label": "Kill / destroy", "params": [P("objects", "objects", "objects"),
+                                                  P("how", "choice", "how", "normal",
+                                                    choices={"normal": "normal death",
+                                                             "explosion": "blown up (gibs, large blood pool)"})],
+             "group": "Objects",
+             "help": "blown up: soldiers only (vehicles / props are destroyed normally); needs DesertStormFix 3.2+ - "
+                     "older versions kill normally"},
     "invulnerable": {"label": "Make invulnerable", "params": [P("objects", "objects", "objects")], "group": "Objects"},
     "set_health": {"label": "Set health", "params": [P("objects", "objects", "objects"),
                                                      P("percent", "percent", "health (%)", 100)], "group": "Objects"},
@@ -531,6 +547,9 @@ def describe_condition(c, ctx=None):
         s = f"{c['seconds']:g} s have passed"
     elif k == "chance":
         s = f"a {c['percent']:g}% chance"
+    elif k == "difficulty":
+        op = CONDITIONS["difficulty"]["params"][0]["choices"][c["op"]]
+        s = f"difficulty {op} {DIFFICULTIES.get(c['level'], c['level'])}"
     else:
         s = k
     return ("not: " + s) if neg else s
@@ -539,6 +558,8 @@ def describe_condition(c, ctx=None):
 def describe_action(a, ctx=None):
     k = a["type"]
     spec = ACTIONS.get(k, {"label": k})
+    if k == "kill" and a.get("how") == "explosion":
+        return f"Blow up: {_objs(ctx, a['objects'])}"
     if k in ("activate", "deactivate", "respawn", "kill", "invulnerable"):
         return f"{spec['label']}: {_objs(ctx, a['objects'])}"
     if k == "patrol":
@@ -634,7 +655,10 @@ def _cond_lua(c):
     elif k == "mission_time":
         e = f"editor.mission_time() >= {c['seconds']}"
     elif k == "chance":
-        e = f"math.random() * 100 < {c['percent']}"
+        e = f"math.random() * 100 < {c['percent']}"   # online: every PC's math.random is seeded alike (the patch)
+    elif k == "difficulty":
+        order = list(DIFFICULTIES)
+        e = f"{DIFFICULTY_RANK_LUA} {c['op']} {order.index(c['level']) if c['level'] in order else 2}"
     else:
         e = "true"
     return f"not ({e})" if c.get("not") else e
@@ -658,7 +682,10 @@ def _action_lua(a, index_of_rule) -> str:
         return f"game.hide_layer({_lua_value(a['layer'])})"
     if k == "kill":
         # awake first: an unseen (sleeping) soldier's death only completes when the game updates him
-        return _each(a["objects"], "if game.keep_awake then game.keep_awake(o, true) end game.call(0x0FC, o, -1)")
+        awake = "if game.keep_awake then game.keep_awake(o, true) end "
+        if a.get("how") == "explosion":   # game.explode: the explosion death (gibs); not a soldier / older patch -> normal
+            return _each(a["objects"], awake + "if not (game.explode and game.explode(o)) then game.call(0x0FC, o, -1) end")
+        return _each(a["objects"], awake + "game.call(0x0FC, o, -1)")
     if k == "invulnerable":
         return _each(a["objects"], "game.call(0x5F8, o)")
     if k == "set_health":

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import os
 
-from commands import CommandError, Session, command  # noqa: F401  (registers into the editor's command table)
+from commands import CommandError, Session, command, mod_layout  # noqa: F401  (registers into the editor's command table)
 from conflict_ds_tools import archive, records as rec
 
 if getattr(rec, "_editor_loaded", False):   # the editor reloaded its commands: take library changes too
@@ -156,14 +156,14 @@ def record_set(s: Session, table, key, rows, mod):
         ref = R.rows(t, base)[0] if R.rows(t, base) else []
         changes = {i: v for i, v in enumerate(rows[0]) if i and (i >= len(ref) or ref[i] != v)}
         path = rec.weapon_file(folder, rows[0][0] if not game else game[0][0], base if not game else game[0][0],
-                               changes, R.schema(t))
+                               changes, R.schema(t), layout=mod_layout(s))
         return {"written": os.path.relpath(path, _game(s)), "changed_columns": sorted(changes)}
     if game:
-        rec.set_rows(folder, t, key, rows)
+        path = rec.set_rows(folder, t, key, rows, layout=mod_layout(s))
     else:   # a record this mod added
         rec.remove_new_rows(folder, t, key)
-        rec.add_rows(folder, t, rows)
-    return {"written": os.path.join("Mods", mod, t[:-4] + (".replace.txt" if game else ".txt"))}
+        path = rec.add_rows(folder, t, rows, layout=mod_layout(s))
+    return {"written": os.path.join("Mods", mod, os.path.relpath(path, folder))}   # tables\ in an organised mod
 
 
 @command("A new record in a mod, copied from an existing one (or empty columns), under a new key.",
@@ -177,14 +177,14 @@ def record_new(s: Session, table, key, mod, copy_from=""):
     if t == "WEAPS.TXT":
         if not copy_from or not R.rows(t, copy_from):
             raise CommandError("a new weapon is based on a game weapon: copy_from = its id")
-        path = rec.weapon_file(folder, key, R.rows(t, copy_from)[0][0], {}, R.schema(t))
+        path = rec.weapon_file(folder, key, R.rows(t, copy_from)[0][0], {}, R.schema(t), layout=mod_layout(s))
         return {"written": os.path.relpath(path, _game(s))}
     src = R.rows(t, copy_from) if copy_from else [["-1"] * len(R.schema(t))]
     if copy_from and not src:
         raise CommandError(f"{copy_from} is not in {t}")
     rows = [[key] + list(r[1:]) for r in src]
-    rec.add_rows(folder, t, rows)
-    return {"written": os.path.join("Mods", mod, t[:-4] + ".txt"), "rows": rows}
+    path = rec.add_rows(folder, t, rows, layout=mod_layout(s))
+    return {"written": os.path.join("Mods", mod, os.path.relpath(path, folder)), "rows": rows}
 
 
 @command("Take a mod's change to a record out again (the game's record comes back; a record the mod added is "
@@ -212,7 +212,7 @@ def record_delete(s: Session, table, key, mod):
         raise CommandError("weapons can't be deleted (levels hand them out) - change them instead")
     if not R.rows(t, key):
         raise CommandError(f"{key} is not a game record - record_revert removes a record the mod added")
-    rec.set_rows(_mod_dir(s, mod), t, key, [])
+    rec.set_rows(_mod_dir(s, mod), t, key, [], layout=mod_layout(s))
     return {"deleted": key, "used_by": len(R.references(t, key))}
 
 
@@ -260,7 +260,7 @@ def string_set(s: Session, key, text, mod, mission=""):
         raise CommandError("key: letters, digits and _")
     if mission and not re.fullmatch(r"[A-Za-z0-9]{2,8}", mission):
         raise CommandError("mission: the text file's code, e.g. M01 or T02")
-    rec.set_string(_mod_dir(s, mod), key, str(text), mission or "")
+    rec.set_string(_mod_dir(s, mod), key, str(text), mission or "", layout=mod_layout(s))
     return {"key": key, "mission": (mission or "").upper(), "hash": f"0x{rec.hash_key(key):08X}"}
 
 

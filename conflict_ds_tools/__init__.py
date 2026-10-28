@@ -9,10 +9,10 @@ The Blender UI lives in blender.py and is only loaded inside Blender, so the com
 bl_info = {
     "name": "Conflict: Desert Storm tools",
     "author": "eSKylezZ",
-    "version": (1, 4, 0),
+    "version": (1, 9, 2),
     "blender": (3, 6, 0),
     "location": "File > Import / Export > Conflict: Desert Storm",
-    "description": "Import and export .EVO meshes (props, vehicles, characters, collision, shadows, points), .prb animations and level scenes, extract the game archives",
+    "description": "Import and export .EVO meshes (props, vehicles, characters, collision, shadows, points) and .prb animations of Conflict: Desert Storm and Desert Storm II, level scenes, extract the game archives",
     "category": "Import-Export",
 }
 

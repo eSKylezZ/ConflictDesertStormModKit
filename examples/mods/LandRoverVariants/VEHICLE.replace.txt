@@ -1,0 +1,24 @@
+# SAS Land Rover variants - the two Land Rovers the game's vehicle table lists but never got bodies.
+#
+# The game has three Land Rover rows: the MILAN + .50 cal one (# The two-gun Land Rover itself, with its gunner seats swapped: the game gives gun 1 (.50 cal, front mount) to seat
+# GUNNER01 (the rear) and gun 2 (MILAN, rear mount) to GUNNER02 (front), so each gunner aimed the other man's gun and the
+# rear one stood in the .50 cal's crouched pose at the MILAN. Exits swapped with them.
+UK_VEH_SAS_LandRover_Milan_LMG_SAW, complete: body,
+# wheels, wreck, physics file, textures - used in the front-end film, the outro and multiplayer) and two that point at
+# models nobody built (SAS_LandRover_With_50cal, SAS_LandRover_With_milan - on no version of the game). Their guns
+# (VEHWPNS.TXT: .50 cal only / MILAN only) exist. This file points both rows at the complete body, so each gets the
+# real Land Rover's model, textures and physics with only its own gun: the gun goes on the rear mount (the .50 cal
+# carriage), the front mount stays empty.
+#
+# Shows: changing game rows in place (<TABLE>.replace.txt - a row replaces the game's row with the same first
+# column). No modelling, nothing copied from the game: the body is borrowed from the front-end archive when a level
+# needs it.
+#
+# Seats: the body has driver, two gunner seats (one per mount) and one passenger seat - the game's rows asked for a
+# second passenger seat it doesn't have, so the empty mount's gunner seat is the fourth seat here (4 seats: the
+# Land Rovers can stand in for Mission 9's 4-man Bradley as well as Mission 8's Humvee).
+#
+# Pick them on the VEHICLE tab of the briefing screen (Missions 8 and 9): SAS LAND ROVER (.50 CAL) / (MILAN).
+UK_VEH_SAS_LandRover_MG,SAS_LandRover_With_MILAN_saw,SAS_Land_Rover_Destroyed,-1,Hum_Vee,-20,CONNECTOR_DRIVER01,CONNECTOR_GUNNER01,CONNECTOR_PASSENGER01,CONNECTOR_GUNNER02,-1,-1,-1,-1,CONNECTOR_EXIT_DRIVER01,CONNECTOR_EXIT_GUNNER01,CONNECTOR_EXIT_PASSENGER01,CONNECTOR_EXIT_GUNNER02,-1,-1,-1,-1,shard_metal_02,-1,-1,1,2.50
+UK_VEH_SAS_LandRover_Milan,SAS_LandRover_With_MILAN_saw,SAS_Land_Rover_Destroyed,-1,Hum_Vee,-20,CONNECTOR_DRIVER01,CONNECTOR_GUNNER01,CONNECTOR_PASSENGER01,CONNECTOR_GUNNER02,-1,-1,-1,-1,CONNECTOR_EXIT_DRIVER01,CONNECTOR_EXIT_GUNNER01,CONNECTOR_EXIT_PASSENGER01,CONNECTOR_EXIT_GUNNER02,-1,-1,-1,-1,shard_metal_02,-1,-1,1,2.50
+UK_VEH_SAS_LandRover_Milan_LMG_SAW,SAS_LandRover_With_MILAN_saw,SAS_Land_Rover_Destroyed,-1,Hum_Vee_TOWmg,-20,CONNECTOR_DRIVER01,CONNECTOR_GUNNER02,CONNECTOR_GUNNER01,CONNECTOR_PASSENGER01,-1,-1,-1,-1,CONNECTOR_EXIT_DRIVER01,CONNECTOR_EXIT_GUNNER02,CONNECTOR_EXIT_GUNNER01,CONNECTOR_EXIT_PASSENGER01,-1,-1,-1,-1,shard_metal_02,-1,-1,2,2.50

@@ -22,7 +22,7 @@ import wave
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
-from conflict_ds_tools import archive, evo, images, sound  # noqa: E402
+from conflict_ds_tools import archive, evo, evo_write, games, images, modlayout, sound  # noqa: E402
 
 # mods whose files come (partly) from Blender
 BLENDER_MODS = ("SilencedSAW", "SpeedReload", "LoudMP5", "BigHeadUniform", "_BigHead", "_HeadTilt", "_BouncyRun", "_HazardDrums")
@@ -398,10 +398,12 @@ def radio_scene(left, right, windows, rate, seed):
     return clip(left), clip(right)
 
 
-def radio_cutscene(game_dir, scene, folder):
-    """Cutscene `scene` (e.g. CS_M01_S01) with its speech over the radio, for both actors: Sound\\SAS (from the English
-    file) and Sound\\Delta (from the American one) - the same steps a modder takes with ds_sound.py stream / psf and an
-    audio editor."""
+def radio_cutscene(game_dir, scene, mod_dir, layout=modlayout.ORGANISED):
+    """Cutscene `scene` (e.g. CS_M01_S01) with its speech over the radio, for both actors: sounds\\SAS (from the English
+    file) and sounds\\Delta (from the American one; a flat mod: Sound\\SAS / Sound\\Delta - DesertStormFix takes the
+    language from the .psf's folder name) - the same steps a modder takes with ds_sound.py stream / psf and an audio
+    editor."""
+    folder = os.path.join(mod_dir, "sounds" if layout == modlayout.ORGANISED else "Sound")
     base = os.path.join(game_dir, "Data", "Sound")
     rate, en_l, en_r = sound.decode_stream(open(os.path.join(base, "English", scene + ".psf"), "rb").read())
     _, us_l, us_r = sound.decode_stream(open(os.path.join(base, "American", scene + ".psf"), "rb").read())
@@ -416,7 +418,7 @@ def radio_cutscene(game_dir, scene, folder):
 
 def radio_voice(game_dir, bank, folder):
     """Every line of squad voice bank `bank` (Delta actor) with the radio effect, as <bank>_lineNN.wav."""
-    data = open(os.path.join(game_dir, "mission3.sch"), "rb").read()
+    data = open(games.game_file(game_dir, "mission3.sch"), "rb").read()   # (or PSE/Originals)
     cl = sound.chunks(data)
     b = sound.bank_chunk(cl, bank)
     have = sound.samples(cl)
@@ -460,28 +462,63 @@ def tail(seed, length=1.4):
 
 
 def bank_pack(game_dir, bank, rename):
-    for name in sorted(os.listdir(game_dir)):
-        if name.lower().endswith(".sch"):
-            data = open(os.path.join(game_dir, name), "rb").read()
+    for path in games.game_files(game_dir, exts=(".sch",)):   # game folder + PSE/Originals
+        if True:
+            data = open(path, "rb").read()
             out = sound.extract_bank(data, bank, rename)
             if out:
                 return out
     raise SystemExit("sound bank %s not found in the game's .sch files" % bank)
 
 
+# ------------------------------------------------------------------------------------------------ animations --
+def standing_gunner(game):
+    """VehicleGunnerAim (hands on the gun's grips, crouched at a hatch) standing up: the root's height and every leg
+    track (thighs, calves, feet, toes, hip connectors) from VehicleGunner01's first key. For the Land Rover's rear .50 cal."""
+    names = [n.name.upper() for n in evo.read(game.get("HERO01_ARMSTRONG.EVO"))]
+    aim = evo.read_prb(game.get("VEHICLEGUNNERAIM.PRB"))
+    stand = evo.read_prb(game.get("VEHICLEGUNNER01.PRB"))
+    legs = ("THIGH", "CALF", "FOOT", "TOE", "HIP CONNECTOR")
+    tracks = []
+    for i, name in enumerate(names):
+        keys = list(aim.tracks[i])
+        if i == 0:   # root: standing height
+            y = stand.tracks[0][0][0][1]
+            keys = [((p[0], y, p[2]), s, q) for p, s, q in keys]
+        elif any(t in name for t in legs) and "SPINE" not in name:
+            keys = [stand.tracks[i][0]] * len(keys)
+        tracks.append([tuple(k) for k in keys])
+    return evo_write.write_prb(tracks, aim.fps, [(0, 0, 0), (0, 180, 0)])
+
+
 # ------------------------------------------------------------------------------------------------- build --
-def build(game, out, work, blender):
+def build(game, out, work, blender, layout=modlayout.ORGANISED):
     src = os.path.join(HERE, "mods")
     # Start clean - but only the examples' own folders (and their switched-off "_" twins): -o may be a real Mods
     # folder with other mods in it, which must survive.
     for name in set(os.listdir(src)) | set(BLENDER_MODS):
         for variant in (name, name.lstrip("_"), "_" + name.lstrip("_")):
             shutil.rmtree(os.path.join(out, variant), ignore_errors=True)
-    for mod in sorted(os.listdir(src)):                     # the hand-written files
-        shutil.copytree(os.path.join(src, mod), os.path.join(out, mod), dirs_exist_ok=True)
+    for mod_name in sorted(os.listdir(src)):                # the hand-written files, placed by the layout
+        for rel in modlayout.files(os.path.join(src, mod_name)):
+            dst = os.path.join(out, mod_name, rel) if os.sep in rel else \
+                modlayout.path_for(os.path.join(out, mod_name), rel, layout=layout)
+            os.makedirs(os.path.dirname(dst), exist_ok=True)
+            shutil.copy2(os.path.join(src, mod_name, rel), dst)
 
     def mod(name, *path):
+        """Where a built file of mod `name` goes (modlayout: dds\\, evos\\, anims\\ ... or the top folder)."""
         d = os.path.join(out, name)
+        os.makedirs(d, exist_ok=True)
+        if len(path) == 1:
+            return modlayout.path_for(d, path[0], layout=layout)
+        return os.path.join(d, *path)
+
+    def beside(name, definition, *path):
+        """A file a .weapon / .skin names by a path from its own folder (DesertStormFix reads its shot / tail sounds
+        and voice lines from there): next to that definition, wherever the layout put it."""
+        found = modlayout.find(os.path.join(out, name), definition)
+        d = os.path.dirname(found) if found else os.path.join(out, name)
         os.makedirs(d, exist_ok=True)
         return os.path.join(d, *path)
 
@@ -498,14 +535,25 @@ def build(game, out, work, blender):
     with open(mod("QuiltedSAS", "QuiltedSAS_Bump.tga"), "wb") as f:
         f.write(images.encode_tga(w, h, bytes(px)))
     write_dds(recolour(game.texture("HERO01_UK_01"), tint((150, 128, 96)), soldier_keep()), mod("RadioSAS", "RadioSAS_01.dds"))
-    radio_voice(game.dir, "Bradley", mod("RadioSAS", "radio"))
+    radio_voice(game.dir, "Bradley", beside("RadioSAS", "RadioSAS.skin", "radio"))   # voice folder = radio
     print("cutscene sound")
-    windows, rate = radio_cutscene(game.dir, "CS_M01_S01", mod("RadioCutscene", "Sound"))
+    windows, rate = radio_cutscene(game.dir, "CS_M01_S01", os.path.join(out, "RadioCutscene"), layout)
     print("  CS_M01_S01 speech at", ", ".join("%.1f-%.1f s" % (a / rate, b / rate) for a, b in windows))
     delta = game.texture("HERO04_US_01")
     keep = soldier_keep(chest=True)
     write_dds(recolour(delta, winter_for(delta, keep), keep), mod("WinterDelta", "DeltaWinter_04.dds"))
     write_dds(recolour(game.texture("PISTOL01_DESERTEAGLE"), gold), mod("GoldenEagle", "GoldEagle.dds"))
+    # gear: each piece's own texture (named like its model) recoloured, same size
+    write_dds(recolour(game.texture("IR_BERET_RED"), tint((255, 110, 190))), mod("PinkBeret", "PinkBeret.dds"))
+    write_dds(recolour(game.texture("AN_RADIOPACK"), tint((205, 175, 125))), mod("DesertRadio", "DesertRadio.dds"))
+    write_dds(recolour(game.texture("AN_SUNGLASSES"), gold), mod("GoldShades", "GoldShades.dds"))
+    write_dds(recolour(game.texture("UK_AMMOPOUCH01"), tint((190, 160, 115))), mod("TanPouches", "TanAmmoPouch.dds"))
+    write_dds(recolour(game.texture("UK_BOTTLEPOUCH"), tint((190, 160, 115))), mod("TanPouches", "TanBottle.dds"))
+    # vehicle skins: every texture slot of the model recoloured, same size
+    for k in range(1, 5):
+        write_dds(recolour(game.texture("HUMVEE%02d" % k), tint((214, 186, 132))), mod("DesertVehicles", "DesertHumvee%02d.dds" % k))
+    for k in range(1, 4):
+        write_dds(recolour(game.texture("VHABRAMS%02d" % k), tint((200, 172, 120))), mod("DesertVehicles", "DesertAbrams%02d.dds" % k))
     saw = game.texture("LMG01_M249SAW")
     write_dds(recolour(saw, tiger), mod("TigerSAW", "TigerSAW.dds"))
     write_dds(recolour(game.texture("LMG01_M249AMMOBOX"), tiger), mod("TigerSAW", "TigerAmmoBox.dds"))
@@ -523,11 +571,15 @@ def build(game, out, work, blender):
     breacher = icon_crop(mp5, 0, 0, 8)
     write_icon(icon_tube(breacher, 0, 8, 8, 11), mod("LoudMP5", "Breacher_Icon.png"))
 
+    print("animations")
+    with open(mod("LandRoverVariants", "VehicleGunnerAim_LR.prb"), "wb") as f:
+        f.write(standing_gunner(game))
+
     print("sounds")
-    write_wav(mod("TigerSAW", "tiger_shot1.wav"), gunshot(1, thump=85))
-    write_wav(mod("TigerSAW", "tiger_shot2.wav"), gunshot(2, thump=100, decay=13))
-    write_wav(mod("TigerSAW", "tiger_tail.wav"), tail(3))
-    write_wav(mod("SilencedSAW", "shot.wav"), gunshot(4, length=0.3, thump=60, crack=0.5, decay=16))
+    write_wav(beside("TigerSAW", "TigerSAW.weapon", "tiger_shot1.wav"), gunshot(1, thump=85))
+    write_wav(beside("TigerSAW", "TigerSAW.weapon", "tiger_shot2.wav"), gunshot(2, thump=100, decay=13))
+    write_wav(beside("TigerSAW", "TigerSAW.weapon", "tiger_tail.wav"), tail(3))
+    write_wav(beside("SilencedSAW", "SilencedSAW.weapon", "shot.wav"), gunshot(4, length=0.3, thump=60, crack=0.5, decay=16))
     with open(mod("LoudMP5", "BREACHER.sch"), "wb") as f:
         f.write(bank_pack(game.dir, "REMMINGTON870", "BREACHER"))
 
@@ -548,7 +600,7 @@ def build(game, out, work, blender):
     print("Blender")
     script = os.path.join(HERE, "blender_examples.py")
     r = subprocess.run([blender, "-b", "--factory-startup", "--python-exit-code", "1", "--python", script, "--",
-                        work, out], capture_output=True, text=True)
+                        work, out, layout], capture_output=True, text=True)
     for line in r.stdout.splitlines():
         if line.startswith(("example:", "  ", "Error", "Traceback")) or "Error" in line:
             print(line)
@@ -563,25 +615,30 @@ def main():
     p.add_argument("-o", "--out", default=os.path.join(HERE, "build", "Mods"), help="output Mods folder")
     p.add_argument("--blender", help="blender.exe, for the model and animation examples")
     p.add_argument("--install", action="store_true", help="copy the built mods into <game>\\Mods")
+    p.add_argument("--layout", choices=modlayout.LAYOUTS, default=modlayout.ORGANISED,
+                   help="organised (default): files in folders by type (defs\\, dds\\, evos\\ ...); flat: all in the "
+                        "mod's top folder, as mods were made before")
     a = p.parse_args()
     game_dir = a.game or archive.find_game_dir()
     if not game_dir:
         raise SystemExit("game not found - pass -g <game folder>")
     game = Game(game_dir)
     work = os.path.join(os.path.dirname(a.out), "work")
-    build(game, a.out, work, a.blender)
+    build(game, a.out, work, a.blender, a.layout)
     print("built:", a.out)
     examples = set(os.listdir(os.path.join(HERE, "mods"))) | set(BLENDER_MODS)
     built = [m for m in sorted(os.listdir(a.out)) if m in examples]   # only ours, if -o is a real Mods folder
     for m in built:
-        print("  %-16s %s" % (m, ", ".join(sorted(os.listdir(os.path.join(a.out, m))))))
+        print("  %-16s %s" % (m, ", ".join(modlayout.files(os.path.join(a.out, m)))))
     if a.install:
         dest = os.path.join(game_dir, "Mods")
         if os.path.normcase(os.path.abspath(dest)) == os.path.normcase(os.path.abspath(a.out)):
             print("already built into", dest)
             return
         for m in built:
-            shutil.copytree(os.path.join(a.out, m), os.path.join(dest, m), dirs_exist_ok=True)
+            # replaced as a whole: an older install in the other layout would leave every file there twice
+            shutil.rmtree(os.path.join(dest, m), ignore_errors=True)
+            shutil.copytree(os.path.join(a.out, m), os.path.join(dest, m))
         print("installed into", dest)
 
 

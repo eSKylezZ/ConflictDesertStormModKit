@@ -97,6 +97,15 @@ def decorate_scene(s: Session, out: dict):
     for r in env.records:
         if not r.fields:
             continue
+        try:
+            _add_interactive(out, r, types, ids, by_hash, s)
+        except (KeyError, TypeError):
+            continue        # a record whose layout isn't mapped for this scene version yet
+    return out
+
+
+def _add_interactive(out, r, types, ids, by_hash, s):
+    if True:
         if r.kind == "SWITCH":
             targets = [t for t in (r["target_a"], r["target_b"]) if t != -1]
             t = types.get(str(r["type"]).upper(), {})

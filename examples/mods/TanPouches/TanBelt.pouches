@@ -1,0 +1,11 @@
+# A pouch set for the POUCHES row: your own pieces (TanAmmoPouch.gear, TanBottle.gear) mixed with the game's.
+#
+# One line per spot; a spot left out (or "none") stays empty. Spots: belt (the back of the belt), belt left,
+# belt right, hip left, hip right, chest left, chest right.
+
+name        = Tan Belt
+
+belt        = TAN_BOTTLE       # a .gear pouch by its id ...
+belt left   = TAN_AMMOPOUCH
+belt right  = TAN_AMMOPOUCH
+hip right   = US_HIPRPOUCH     # ... or a game pouch by its model name

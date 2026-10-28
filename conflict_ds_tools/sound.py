@@ -44,7 +44,11 @@ def bank_key(name):
 def chunks(data):
     """[(tag, chunk bytes incl. its 8-byte header)] of a .sch file."""
     if data[:4] != b"SCH\0":
-        raise ValueError("not a sound cache (.sch)")
+        # Global Storm / Denied Ops: "HDRSND" and a few u32s in front of the cache
+        at = data.find(b"SCH\0", 0, 64) if data[:6] == b"HDRSND" else -1
+        if at < 0:
+            raise ValueError("not a sound cache (.sch)")
+        data = data[at:]
     p, out = 8, []
     while p + 8 <= len(data):
         tag = data[p:p + 4]
@@ -101,6 +105,73 @@ def extract_bank(data, name, rename=None):
         struct.pack_into("<I", b, 8, bank_key(rename))
     have = samples(cl)
     return build([bytes(b)] + [c for i in bank_samples(b, have) for c in have[i]])
+
+
+def bank_to_ds1(chunk):
+    """A Desert Storm II BANK chunk in Desert Storm's layout. Both: u32 key, u16 min event, u16 max event, u16 event
+    count, u16 0xFEED, the event ids, then per event u16 n + n sample entries {u32 sample, f32 volume, f32 pitch, f32
+    weight}; Desert Storm II follows every entry with 20 more bytes (u16 7, u16 0xFEED, u32 0, u16 0, u16 0xFEED, f32
+    200 / 1000, f32 3000 - distances Desert Storm doesn't have: its loader takes them for the next entry and calls the
+    cache corrupt). A chunk already in Desert Storm's layout comes back unchanged; anything else raises ValueError."""
+    body = chunk[8:]
+    count = struct.unpack_from("<H", body, 8)[0]
+
+    def walk(extra, feed=False):
+        out = bytearray(body[:12 + 2 * count])
+        p = 12 + 2 * count
+        for _ in range(count):
+            if p + 2 > len(body):
+                return None
+            n = struct.unpack_from("<H", body, p)[0]
+            out += body[p:p + 2]
+            p += 2
+            for _ in range(n):
+                out += body[p:p + 16]
+                if feed and body[p + 18:p + 20] != b"\xed\xfe":
+                    return None
+                p += 16 + extra
+                if p > len(body):
+                    return None
+        return bytes(out) if p == len(body) else None
+
+    if walk(0) is not None:
+        return chunk
+    # Desert Storm II: 20 bytes after every entry (marked 0xFEED); Vietnam and later: another fixed size - the one
+    # whose walk ends exactly at the chunk's end
+    ds1 = walk(20, feed=True)
+    for extra in range(2, 66, 2):
+        if ds1 is not None:
+            break
+        ds1 = walk(extra)
+    if ds1 is None:
+        raise ValueError("not a Desert Storm / Desert Storm II sound bank")
+    return chunk[:4] + struct.pack("<I", len(ds1)) + ds1
+
+
+def renumber(pack, first_id):
+    """A bank pack (extract_bank) with its samples under new ids first_id, first_id + 1 ... (in the bank's order),
+    the bank's references changed to match: a pack from another game whose sample ids would clash with this game's
+    own (a level cache keeps the sample it has already - the pack's would never be heard)."""
+    cl = chunks(pack)
+    have = samples(cl)
+    banks = [bytearray(c) for tag, c in cl if tag == b"BANK"]
+    order = []
+    for b in banks:
+        order += [i for i in bank_samples(b, have) if i not in order]
+    new = {old: first_id + k for k, old in enumerate(order)}
+    out = []
+    for b in banks:
+        for o in range(12, len(b) - 3):
+            v = struct.unpack_from("<I", b, o)[0]
+            if v in new:
+                struct.pack_into("<I", b, o, new[v])
+        out.append(bytes(b))
+    for tag, c in cl:
+        if tag in (b"PFSM", b"PFST") and len(c) >= 16 and sample_id(c) in new:
+            c = bytearray(c)
+            struct.pack_into("<I", c, 12, new[sample_id(c)])
+            out.append(bytes(c))
+    return build(out)
 
 
 # ---- samples ----
@@ -236,10 +307,11 @@ STREAM_RATE = 44100
 
 
 def decode_stream(data):
-    """A .psf stream -> (rate, [left int16 ...], [right int16 ...]). 8-byte header "PSF\x80" + u32, then stereo
-    ADPCM: 16-byte blocks interleaved left, right, left, right."""
-    if data[:4] != b"PSF\x80":
-        raise ValueError("not a speech / cutscene stream (music files use another layout)")
+    """A .psf stream -> (rate, [left int16 ...], [right int16 ...]). 8-byte header "PSF\x80" + u32 (Desert Storm II's
+    front-end music: "PSF\x81"; the games skip the header), then stereo ADPCM: 16-byte blocks interleaved left, right,
+    left, right. DS2's mission music ("PSF1" + a segment table: interactive music) is another layout."""
+    if data[:4] not in (b"PSF\x80", b"PSF\x81"):
+        raise ValueError("not a plain stream (interactive mission music - \"PSF1\" - uses another layout)")
     body = data[8:]
     left = b"".join(body[o:o + 16] for o in range(0, len(body) - 31, 32))
     right = b"".join(body[o + 16:o + 32] for o in range(0, len(body) - 31, 32))

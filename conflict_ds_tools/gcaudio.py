@@ -13,7 +13,7 @@ import os
 import struct
 import time
 
-from . import gamecube, sound
+from . import gamecube, games, modlayout, sound
 
 MOD_NAME = "GameCubeAudio"
 
@@ -65,7 +65,7 @@ def convert(image, game, out=None, levels=None, all_rates=False, list_only=False
         if not disc.game_id.startswith("GCF"):
             result["warning"] = "this doesn't look like Conflict: Desert Storm (game id %s, expected GCF..)" % disc.game_id
             log("warning: " + result["warning"])
-        pc_caches = {f.lower(): f for f in os.listdir(game) if f.lower().endswith(".sch")}
+        pc_caches = {os.path.basename(p).lower(): p for p in games.game_files(game, exts=(".sch",))}   # (+ PSE/Originals)
         todo = [n for n in disc.names() if os.path.basename(n).lower().endswith(".sch")
                 and (not want or os.path.basename(n)[:-4].lower() in want)]
         encoded = {}            # (lang, id, rate, pcm hash) -> chunk, shared between levels
@@ -79,7 +79,7 @@ def convert(image, game, out=None, levels=None, all_rates=False, list_only=False
             if not pc_name:
                 log("  %s: no PC cache of that name - skipped" % base)
                 continue
-            pc = pc_samples(os.path.join(game, pc_name))
+            pc = pc_samples(pc_name)
             chunks, higher, same, missing = [], 0, 0, 0
             for lang, sid, rate, pcm in gamecube.sound_cache_samples(disc.file(name)):
                 pc_rate = pc.get((lang, sid))
@@ -106,7 +106,7 @@ def convert(image, game, out=None, levels=None, all_rates=False, list_only=False
                 continue
             os.makedirs(out, exist_ok=True)
             body = b"".join(chunks)
-            with open(os.path.join(out, pc_name.upper()), "wb") as f:
+            with open(modlayout.path_for(out, pc_name.upper()), "wb") as f:   # sounds\ in a new mod
                 f.write(b"SCH\0" + struct.pack("<I", len(body)) + body)
             result["written"] += size
         result["encoded"] = len(encoded)

@@ -1,0 +1,6835 @@
+{
+ "0x004": {
+  "name": "register_animation",
+  "args": [
+   {
+    "name": "state",
+    "type": "string"
+   },
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "int",
+  "desc": "Registers an animation for a movement state (state name, .prs file) through the registrar 0x421B30 (DS1 +0x004 FUN_00448D20); Desert Storm II adds the states SCRIPTED_ANIM_1..5 (MSR_SCRIPTED_ANIM_n_START / _STOP in its MovementStateRules) that Desert Storm hasn't got.",
+  "ds1_slot": "0x004",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x00C": {
+  "name": "register_standard_anims_c",
+  "args": [],
+  "returns": "void",
+  "desc": "Registers one of the exe's built-in animation sets (state name, .prs file pairs through the animation registrar 0x421B30); FUN_0044B120; 0x00C / 0x010 skip it when [0x62F454]+0x13D0 = 1. Desert Storm has no such slot - its script host registers the standard set itself.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x010": {
+  "name": "register_standard_anims_a",
+  "args": [],
+  "returns": "void",
+  "desc": "Registers one of the exe's built-in animation sets (state name, .prs file pairs through the animation registrar 0x421B30); FUN_00444490; 0x00C / 0x010 skip it when [0x62F454]+0x13D0 = 1. Desert Storm has no such slot - its script host registers the standard set itself.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x014": {
+  "name": "register_standard_anims_b",
+  "args": [],
+  "returns": "void",
+  "desc": "Registers one of the exe's built-in animation sets (state name, .prs file pairs through the animation registrar 0x421B30); FUN_00445290; 0x00C / 0x010 skip it when [0x62F454]+0x13D0 = 1. Desert Storm has no such slot - its script host registers the standard set itself.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x018": {
+  "name": "register_standard_anims_d",
+  "args": [],
+  "returns": "void",
+  "desc": "One of the exe's built-in animation sets (FUN_00445190: stance + idle animations - STANDING_STANCE_WITH_PISTOL upright_relaxed_with_pistol.prs ...), like 0x00C-0x014.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x020": {
+  "name": "register_goat_anims",
+  "args": [],
+  "returns": "void",
+  "desc": "Registers the four goat animation states through the animation registrar 0x421B30 (DS1 +0x004 load_anim's code): GOAT_STANDING goat_stand.prs, GOAT_GRAZING goat_grazing.prs, GOAT_WALK goat_walk.prs, GOAT_DEATH goat_death.prs. Skipped like the other registrars when [0x62F454]+0x13D0 = 1.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4453B0",
+  "lua_hint": "DS1 has the same state names (anim table 0x5EDF28); DS1's Mission1/3/5a register them themselves: call DS1 +0x004 load_anim(\"GOAT_STANDING\",\"goat_stand.prs\") etc. for the 4 pairs, once per level (a second load of a state shows DS1's 'Attempt to load anim twice!' box)."
+ },
+ "0x030": {
+  "name": "register_defuse_nuke_anim",
+  "args": [],
+  "returns": "void",
+  "desc": "Registers DEFUSE_NUKE = Upright_Defuse.prs through the registrar 0x421B30 (one pair).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445470",
+  "lua_hint": "DS1 +0x004 load_anim(\"DEFUSE_NUKE\", \"Upright_Defuse.prs\") - DS1's Mission11a/11b do exactly this; the state exists in DS1."
+ },
+ "0x034": {
+  "name": "load_sound_bank",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "pointer (bank)",
+  "desc": "Loads a .sbk sound bank (e.g. \"Mission1.sbk\") through the sound manager (FUN_0055dd20(mgr, name, 1)) and returns the bank.",
+  "confidence": "high",
+  "ds1_slot": "0x00C",
+  "match": 1.0
+ },
+ "0x040": {
+  "name": "get_stream_id",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "sound (stream id hash, 0 if unknown)",
+  "desc": "Looks up a speech/cutscene stream by file name (\"OBJ_M1_1A.wav\", \"CS_INTRO_S01.psf\"): ELF hash of the name, checked against the loaded stream table; returns the id or 0.",
+  "confidence": "high",
+  "ds1_slot": "0x018",
+  "match": 1.0
+ },
+ "0x050": {
+  "name": "play_stream",
+  "args": [
+   {
+    "name": "stream",
+    "type": "sound"
+   }
+  ],
+  "returns": "none",
+  "desc": "Stops the current stream and starts this one at full volume (FUN_0055f840); the load time is logged (\"Lost time = %d\") and up to 5000 ms of it is added back to both game timers so scripted timing does not jump.",
+  "confidence": "high",
+  "ds1_slot": "0x028",
+  "match": 0.96
+ },
+ "0x05C": {
+  "name": "stop_stream",
+  "args": [],
+  "returns": "none",
+  "desc": "Stops the playing speech/cutscene stream (FUN_0055f820).",
+  "confidence": "high",
+  "ds1_slot": "0x034",
+  "match": 0.93
+ },
+ "0x060": {
+  "name": "play_music_cue",
+  "args": [
+   {
+    "name": "cue",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays event `cue` of the level's music bank ([0x6182f0], loaded from <level>Music.sbk at level init), e.g. 0x17; mission end uses 0x19.",
+  "confidence": "medium",
+  "ds1_slot": "0x038",
+  "match": 0.88
+ },
+ "0x064": {
+  "name": "preload_stream_stub",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   },
+   {
+    "name": "unknown",
+    "type": "int"
+   }
+  ],
+  "returns": "int (always 0)",
+  "desc": "No-op on PC (xor eax,eax; ret). Training DLLs call it with .psf names - a console stream preload left as a stub.",
+  "confidence": "medium",
+  "ds1_slot": "0x03C",
+  "match": 1.0
+ },
+ "0x068": {
+  "name": "unused_0x040",
+  "args": [],
+  "returns": "none",
+  "desc": "Empty function (ret). Only Training DLLs call it, with varying arguments; does nothing on PC.",
+  "confidence": "high",
+  "ds1_slot": "0x040",
+  "match": 1.0
+ },
+ "0x070": {
+  "name": "load_scene",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Loads the level scene .env (FUN_0040b580) incl. the loading screen texts.",
+  "confidence": "low",
+  "ds1_slot": "0x044",
+  "match": 0.66
+ },
+ "0x074": {
+  "name": "load_map_image",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Loads the mission map image sheet (\"GWMission1.img\") into the map sheet [0x60EE20].",
+  "confidence": "high",
+  "ds1_slot": "0x04C",
+  "match": 1.0
+ },
+ "0x078": {
+  "name": "set_map_image",
+  "args": [
+   {
+    "name": "image",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Selects the image of the map sheet used as the level map ([0x6107C0]) and resets the map's world bounds to the level's bounds.",
+  "confidence": "high",
+  "ds1_slot": "0x050",
+  "match": 1.0
+ },
+ "0x07C": {
+  "name": "set_map_bounds",
+  "args": [
+   {
+    "name": "max",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "min",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the world area the map image covers: size = max - min, origin = min (the code stores min.x as origin y too - y is unused by the map).",
+  "confidence": "medium",
+  "ds1_slot": "0x054",
+  "match": 1.0
+ },
+ "0x080": {
+  "name": "load_level_strings",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Loads the mission's text file (\"M01Strs.loc\") into the text catalog (FUN_004f56d0).",
+  "confidence": "high",
+  "ds1_slot": "0x058",
+  "match": 0.93
+ },
+ "0x088": {
+  "name": "link_markers",
+  "args": [
+   {
+    "name": "from",
+    "type": "marker"
+   },
+   {
+    "name": "to",
+    "type": "marker"
+   },
+   {
+    "name": "both_ways",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Adds an AI route link from marker `from` to `to` (FUN_00504550), and back when both_ways = 1.",
+  "confidence": "medium",
+  "ds1_slot": "0x060",
+  "match": 0.8
+ },
+ "0x08C": {
+  "name": "unlink_markers",
+  "args": [
+   {
+    "name": "from",
+    "type": "marker"
+   },
+   {
+    "name": "to",
+    "type": "marker"
+   },
+   {
+    "name": "both_ways",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the route link from -> to (and to -> from when both_ways); if anything was removed the route set is flagged for recomputing (set +0x18 = 1).",
+  "confidence": "medium",
+  "ds1_slot": "0x064",
+  "match": 0.8
+ },
+ "0x094": {
+  "name": "clear_look_target",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the soldier's watched object (soldier +0x2594 = 0) set by 0x6C.",
+  "confidence": "medium",
+  "ds1_slot": "0x068",
+  "match": 1.0
+ },
+ "0x098": {
+  "name": "set_look_target",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets soldier +0x2594 = target object; the soldier's update reads the target's position from it (head/aim tracking of another object).",
+  "confidence": "medium",
+  "ds1_slot": "0x06C",
+  "match": 0.89
+ },
+ "0x09C": {
+  "name": "get_ladder_count",
+  "args": [],
+  "returns": "int",
+  "desc": "Number of ladders registered by the scene ([0x63C9B4]+0x2D0); scripts register the ladder-climb animations only when it is non-zero.",
+  "confidence": "high",
+  "ds1_slot": "0x070",
+  "match": 1.0
+ },
+ "0x0A0": {
+  "name": "spawn_birds",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Creates an ambient boid flock (hloboid.c) of `count` (min 10) objects inside region `region`.",
+  "confidence": "high",
+  "ds1_slot": "0x074",
+  "match": 1.0
+ },
+ "0x0A4": {
+  "name": "set_time_of_day",
+  "args": [
+   {
+    "name": "hour",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the atmosphere's hour (0-24).",
+  "confidence": "medium",
+  "ds1_slot": "0x078",
+  "match": 0.83
+ },
+ "0x0A8": {
+  "name": "get_time_of_day",
+  "args": [],
+  "returns": "float (hour, on the x87 stack)",
+  "desc": "Returns the atmosphere's current hour ([[0x63C948]+0x1A58]+0x3C).",
+  "confidence": "high",
+  "ds1_slot": "0x07C",
+  "match": 1.0
+ },
+ "0x0AC": {
+  "name": "set_time_of_day_speed",
+  "args": [
+   {
+    "name": "speed",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets how fast the hour advances (atmosphere +0x40, game seconds per real second).",
+  "confidence": "medium",
+  "ds1_slot": "0x080",
+  "match": 0.83
+ },
+ "0x0B0": {
+  "name": "set_timer_scale",
+  "args": [
+   {
+    "name": "scale",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the time scale (+0x28) of timer [0x63C954] (slow motion / speed-up of that clock). Only Mission7 calls it.",
+  "confidence": "medium",
+  "ds1_slot": "0x084",
+  "match": 1.0
+ },
+ "0x0BC": {
+  "name": "run_time_of_day_until",
+  "args": [
+   {
+    "name": "hour",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Lets the hour advance until `hour`, then stops (atmosphere +0x44 = 1, +0x48 = hour).",
+  "confidence": "medium",
+  "ds1_slot": "0x090",
+  "match": 0.83
+ },
+ "0x0C0": {
+  "name": "get_time_ms",
+  "args": [],
+  "returns": "time_ms",
+  "desc": "Current game time in ms ([0x63C954]+0x10). Used for all script delays.",
+  "confidence": "high",
+  "ds1_slot": "0x094",
+  "match": 1.0
+ },
+ "0x0CC": {
+  "name": "get_average_frame_time",
+  "args": [],
+  "returns": "float (ST0, seconds)",
+  "desc": "mov ecx,[0x680098]; jmp 0x4BE550 = fld [timer+0xAC]: the 30-frame average frame time (seconds) of timer [0x680098] (the timer time_passed 0x0D0 reads +0x10 from = DS1's [0x63C954]). Missions 07/08 multiply it (x3) for per-frame progress bars.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440010",
+  "lua_hint": "No DS1 slot reads it: return game.readf(game.read32(0x63C954) + 0xAC) (DS1 timer layout +0xA8 dt s, +0xAC 30-frame average)."
+ },
+ "0x0D0": {
+  "name": "time_passed",
+  "args": [
+   {
+    "name": "time_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1 once time_ms < now)",
+  "desc": "1 once the given game time (ms, from get_time_ms 0x0C0) is behind the clock [0x680098]+0x10 (cmp; sbb; neg), else 0 - the missions' deadlines.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x0D4": {
+  "name": "get_waypoint_position",
+  "args": [
+   {
+    "name": "out",
+    "type": "out_ptr"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "pointer (out, float[3])",
+  "desc": "Copies the waypoint's position into out and returns out (hidden struct-return argument first).",
+  "confidence": "high",
+  "ds1_slot": "0x0A0",
+  "match": 0.94
+ },
+ "0x0D8": {
+  "name": "set_waypoint_next",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "next",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the waypoint a unit walks to after this one (waypoint +0x18; -1 = end of path).",
+  "confidence": "low",
+  "ds1_slot": "0x0A4",
+  "match": 0.62
+ },
+ "0x0DC": {
+  "name": "get_waypoint_next",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "int (waypoint, -1 = end)",
+  "desc": "Returns the waypoint's next waypoint (+0x18).",
+  "confidence": "high",
+  "ds1_slot": "0x0A8",
+  "match": 1.0
+ },
+ "0x0E0": {
+  "name": "set_waypoint_wait",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "wait",
+    "type": "time_ms"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets how long a unit waits on arrival at this waypoint (+0x1C, added to the arrival time; soldier +0x238 = end of wait).",
+  "confidence": "high",
+  "ds1_slot": "0x0AC",
+  "match": 1.0
+ },
+ "0x0EC": {
+  "name": "set_object_field_2af4",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes object +0x2AF4. For soldiers it is a waypoint index (-1 = a random waypoint is picked; read in FUN_00413b30, apparently a spawn/respawn point); vehicles use the same offset as a count. Called for squad members with waypoint-like values.",
+  "confidence": "low",
+  "ds1_slot": "0x0B8",
+  "match": 1.0
+ },
+ "0x0F0": {
+  "name": "is_unit",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Calls the object's vtable +8 (non-zero for soldiers/AI units - the game uses it to choose unit-only code paths); 0 if the id is unknown.",
+  "confidence": "medium",
+  "ds1_slot": "0x0BC",
+  "match": 1.0
+ },
+ "0x0F4": {
+  "name": "is_active",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if the object is in play (+0xC bit 0); a living soldier listed with flag 1 in the zone object table (0x48) also counts as active.",
+  "confidence": "high",
+  "ds1_slot": "0x0C0",
+  "match": 1.0
+ },
+ "0x0F8": {
+  "name": "is_in_play",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "Object by script id (0x4CF4F0 on [0x6800E0]); returns +0xC & 1 (in play), 0 for an unknown id. Plain twin of is_active (0x0F4) without the zone-table soldier rule. No DLL call sites found.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440B90",
+  "lua_hint": "Exact: game.read32(obj + 0xC) & 1 on the DS1 object (DS1 object table [0x63C9A0], FUN_004CA660).",
+  "ds1_close": "0x0C0",
+  "match": "close: DS1 is_active also returns 1 for a living soldier listed with flag 1 in the zone object table"
+ },
+ "0x0FC": {
+  "name": "activate_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Brings an object into play (vtable SetActive(1) unless already in play) and records it in the zone object table.",
+  "confidence": "medium",
+  "ds1_slot": "0x0C4",
+  "match": 0.8
+ },
+ "0x100": {
+  "name": "deactivate_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Takes an object out of play (SetActive(0)) and records it in the zone object table.",
+  "confidence": "medium",
+  "ds1_slot": "0x0C8",
+  "match": 0.73
+ },
+ "0x104": {
+  "name": "activate_objects",
+  "args": [
+   {
+    "name": "ids",
+    "type": "other"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "activate_object for each id in an int array (ids pointer, count).",
+  "confidence": "low",
+  "ds1_slot": "0x0CC",
+  "match": 0.54
+ },
+ "0x108": {
+  "name": "activate_living_objects",
+  "args": [
+   {
+    "name": "ids",
+    "type": "other"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "activate_object for each id in the array that is not dead (is_dead 0x100 = 0).",
+  "confidence": "low",
+  "ds1_slot": "0x0D0",
+  "match": 0.51
+ },
+ "0x10C": {
+  "name": "deactivate_objects",
+  "args": [
+   {
+    "name": "ids",
+    "type": "other"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "deactivate_object for each id in an int array.",
+  "confidence": "low",
+  "ds1_slot": "0x0D4",
+  "match": 0.47
+ },
+ "0x110": {
+  "name": "set_ai_flag_80000",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets or clears bit 0x80000 of soldier +0x284 (AI flags); meaning of the bit not identified (Mission3 truck sequence toggles it).",
+  "confidence": "low",
+  "ds1_slot": "0x0D8",
+  "match": 0.75
+ },
+ "0x114": {
+  "name": "respawn_unit",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Respawns/resets the object (vtable +0x40; debug print \"Respawning unit:%d\") and marks it active in the zone object table. Very common in mission scripts.",
+  "confidence": "medium",
+  "ds1_slot": "0x0DC",
+  "match": 0.92
+ },
+ "0x118": {
+  "name": "set_team",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "none",
+  "desc": "Changes the object's team (FUN_004c9ea0); a soldier moved to team 0 gets AI flag 0x400000 and the squad-to-player mapping is redone (e.g. the Emir joining).",
+  "confidence": "medium",
+  "ds1_slot": "0x0E0",
+  "match": 0.88
+ },
+ "0x11C": {
+  "name": "get_team",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "team (byte, 0xFF if no object)",
+  "desc": "Returns the object's team byte (+0x10).",
+  "confidence": "high",
+  "ds1_slot": "0x0E4",
+  "match": 1.0
+ },
+ "0x128": {
+  "name": "get_object_position",
+  "args": [
+   {
+    "name": "out",
+    "type": "out_ptr"
+   },
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "pointer (out, float[3])",
+  "desc": "Copies the object's current world position (render instance) into out and returns out.",
+  "confidence": "high",
+  "ds1_slot": "0x0F0",
+  "match": 0.94
+ },
+ "0x12C": {
+  "name": "get_object_base_position",
+  "args": [
+   {
+    "name": "out",
+    "type": "out_ptr"
+   },
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "pointer (out, float[3])",
+  "desc": "Copies object +0x1FC (a second stored position; for soldiers one of the position copies, possibly the start/home spot) into out and returns out. Mission1 uses it where a table entry is an object id instead of a waypoint.",
+  "confidence": "low",
+  "ds1_slot": "0x0F4",
+  "match": 0.88
+ },
+ "0x130": {
+  "name": "is_path_finished",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if the unit has no current waypoint (+0x220 == -1), i.e. it reached the end of its waypoint path.",
+  "confidence": "high",
+  "ds1_slot": "0x0F8",
+  "match": 0.9
+ },
+ "0x134": {
+  "name": "kill_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "killer",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Kills/destroys a living object by dealing more damage than its health (soldier vtable +0x3C, vehicle/prop damage); killer = -1 for none.",
+  "confidence": "medium",
+  "ds1_slot": "0x0FC",
+  "match": 0.78
+ },
+ "0x138": {
+  "name": "stop_object_sound",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "Object by id; alive (vtable +0xC) or not, stops every playing voice tagged with the object's sound tag +0x4C (0x4B35D0 on the sound manager [0x6800EC]).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4470E0",
+  "lua_hint": "DS1 has the same function but no slot: FUN_0055E090 thiscall(sound manager [0x63C9AC], tag) stops voices whose +0x60 = tag; tag = DS1 object +0x4C (the tag 0x7DC / 0x7E0 / 0x7E4 use), e.g. x86rt.call(0x55E090, {tag}, mgr)."
+ },
+ "0x13C": {
+  "name": "is_dead",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if the object is dead/destroyed (soldier class query 3, others health == 0) or the id does not exist.",
+  "confidence": "high",
+  "ds1_slot": "0x100",
+  "match": 0.93
+ },
+ "0x144": {
+  "name": "is_down",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Units: vtable +0x44 state query; type-8 objects (training targets): +0x54 bit 2. Training scripts use it to check a shot target; probably 'knocked down / hit'.",
+  "confidence": "low",
+  "ds1_slot": "0x108",
+  "match": 0.96
+ },
+ "0x148": {
+  "name": "get_current_waypoint",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   }
+  ],
+  "returns": "waypoint (-1 none)",
+  "desc": "Returns the waypoint the unit is walking to (+0x220).",
+  "confidence": "high",
+  "ds1_slot": "0x10C",
+  "match": 1.0
+ },
+ "0x14C": {
+  "name": "set_path",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Starts the unit on the waypoint path beginning at `waypoint` (vtable +0x34); -1 clears it. Usually followed by set_ai_state.",
+  "confidence": "medium",
+  "ds1_slot": "0x110",
+  "match": 1.0
+ },
+ "0x150": {
+  "name": "set_ai_state",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   },
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the unit's AI state (+0x2378, FUN_0049d870; 5/6 = combat states) and for 0/1 also the sub-state; for vehicles state 0 sets +0x2610.",
+  "confidence": "medium",
+  "ds1_slot": "0x114",
+  "match": 0.9
+ },
+ "0x154": {
+  "name": "get_ai_state",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Returns the unit's AI state (+0x2378), e.g. compared with 5.",
+  "confidence": "high",
+  "ds1_slot": "0x118",
+  "match": 1.0
+ },
+ "0x158": {
+  "name": "set_attack_target",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Gives the unit a target object (+0x234, with the time at +0x2FC; ignored for same-team targets); 0/unknown target clears it.",
+  "confidence": "medium",
+  "ds1_slot": "0x11C",
+  "match": 0.95
+ },
+ "0x15C": {
+  "name": "set_follow_leader",
+  "args": [
+   {
+    "name": "follower",
+    "type": "object"
+   },
+   {
+    "name": "leader",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Links the follower to a leader object (+0x26A4, registers it in the follow list); used for the Emir (Mission2).",
+  "confidence": "medium",
+  "ds1_slot": "0x120",
+  "match": 0.94
+ },
+ "0x160": {
+  "name": "clear_follow_leader",
+  "args": [
+   {
+    "name": "follower",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Unlinks the follower (+0x26A4 = 0); a follower in AI state 3/4 is set back to state 2. Mission11B uses it on Franklin before walking him to the nuke.",
+  "confidence": "medium",
+  "ds1_slot": "0x124",
+  "match": 1.0
+ },
+ "0x164": {
+  "name": "set_ai_manager_flag_a4",
+  "args": [
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "Writes [0x62F424]+0xA4 = value (AI manager = DS1's [0x60EDA0]; null-checked). Read only in the follower/leader movement code (0x41DD4C: == 1 -> take a formation slot from 0x41D700 and route there; 0x41DEFA: non-zero -> followers placed on the formation offset table 0x60BFD0 around their leader +0x214). Probably a squad formation / follow-mode switch. Mission09 calls it once with 0.",
+  "confidence": "low",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440EC0",
+  "lua_hint": "DS1's AI manager has no such field in use - safe to ignore (the only call turns it off)."
+ },
+ "0x168": {
+  "name": "move_to_position",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1 route found)",
+  "desc": "Living soldier (type 1, health +0x58 > 0): route-to 0x434090(&pos inline, notify 1) and, when found, AI state 3 via 0x498560. Same code as DS1's.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4472B0",
+  "ds1_slot": "0x128",
+  "match": "close: DS2 sets AI state 3 where DS1 sets 4 - DS2 AI state numbers are DS1's minus one from 3 up (DS2 0x498560 treats 4/5 as the combat states, DS1 FUN_0049D870 5/6); behaviour the same"
+ },
+ "0x174": {
+  "name": "near_waypoint",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if the object is within `distance` (cm, 3-D) of the waypoint.",
+  "confidence": "high",
+  "ds1_slot": "0x134",
+  "match": 0.98
+ },
+ "0x178": {
+  "name": "get_distance_to_waypoint",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "float (ST0, cm)",
+  "desc": "If the object exists and is in play (+0xC bit 0): 3-D distance (fsqrt) from its render-instance position (instance +0x30 -> +0x108 or 0x4D2520) to the waypoint position (0x4D9790 on [0x6800F0]); otherwise 100000.0 (0x5E4374). No DLL call sites found.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4474B0",
+  "lua_hint": "DS1 +0x0F0 get_object_position + +0x0A0 get_waypoint_position and compute the distance in Lua; return 100000.0 when the DS1 object's in-play bit (+0xC & 1) is clear or the id is unknown."
+ },
+ "0x17C": {
+  "name": "end_waypoint_wait",
+  "args": [
+   {
+    "name": "unit",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the unit's waypoint wait end time (+0x238 = 0) so it moves on at once.",
+  "confidence": "medium",
+  "ds1_slot": "0x138",
+  "match": 1.0
+ },
+ "0x180": {
+  "name": "waypoint_in_view_cone",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "degrees",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the waypoint lies within `degrees` of the object's facing (yaw 0x4CE0E0, angle test 0x4D6330). 7 DLL sites, e.g. (unit, wp, 45.0).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x447570",
+  "ds1_slot": "0x13C",
+  "match": "same"
+ },
+ "0x184": {
+  "name": "near_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "other",
+    "type": "object"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if the two objects are within `distance` (cm, 3-D) of each other.",
+  "confidence": "low",
+  "ds1_slot": "0x140",
+  "match": 0.45
+ },
+ "0x188": {
+  "name": "near_object_or_dead",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "other",
+    "type": "object"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if `object` is dead (health <= 0) or within `distance` of `other` (else as near_object).",
+  "confidence": "medium",
+  "ds1_slot": "0x144",
+  "match": 0.75
+ },
+ "0x18C": {
+  "name": "near_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the object is within distance (cm, 3-D, 0x4D62E0) of the position given by pointer; 0 for an unknown id. Mission10.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x447800",
+  "ds1_slot": "0x148",
+  "match": "same"
+ },
+ "0x194": {
+  "name": "object_in_view_cone",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "other",
+    "type": "object"
+   },
+   {
+    "name": "degrees",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if `other` lies within `degrees` of `object`'s facing (0x4CE0E0 + 0x4D6330, no line of sight); 0 if either id is unknown. Mission08 (o, other, 45.0).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x447870",
+  "ds1_slot": "0x14C",
+  "match": "same"
+ },
+ "0x19C": {
+  "name": "play_sound_at_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays sound id from the object's own bank (obj+0x40) at its position (min distance = radius*0.25) and posts an AI noise event of that radius (FUN_0049cb20, 2000 ms) so nearby soldiers can hear it. Sites use 3000.0 / 300.0.",
+  "confidence": "high",
+  "ds1_slot": "0x154",
+  "match": 0.97
+ },
+ "0x1A4": {
+  "name": "object_in_region",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the object's position is inside region n (sphere or box; FUN_004fc600 + FUN_004fc040). 134 sites.",
+  "confidence": "low",
+  "ds1_slot": "0x15C",
+  "match": 0.62
+ },
+ "0x1A8": {
+  "name": "deactivate_all_objects",
+  "args": [],
+  "returns": "void",
+  "desc": "Walks every object (0x4CEB80 on [0x6800E0], team -1, callback 0x445D10, 1): except type 7, SetActive(0) (vtable +8), stops its tagged sounds if alive (0x4B35D0), and soldiers are recorded in the zone object table (0x4022E0(obj, 0)). 7 DLL sites. (Same call shape as DS1 +0x72C movie_restore_objects but a different callback.)",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4469B0",
+  "lua_hint": "No DS1 walk slot: iterate the DS1 object table ([0x63C9A0]+0x30 array) and call DS1 +0x0C8 deactivate_object on each that is not type 7 (DS1's deactivate also records non-soldiers in the zone table); stop tagged sounds with FUN_0055E090 if it matters."
+ },
+ "0x1AC": {
+  "name": "deactivate_enemies_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region (-1 = everywhere)"
+   }
+  ],
+  "returns": "void",
+  "desc": "For teams 1 and 2 (soldier list kind 1, 0x4CD340): every soldier inside the region (0x515940 on [0x6800F8] + 0x5158E0; region -1 = all) that isn't type 7 is taken out of play: SetActive(0), tagged sounds stopped (0x4B35D0), recorded in the zone object table (0x4022E0(obj, 0)). Teams 0 and 3 untouched. 3 DLL sites.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44B5A0",
+  "lua_hint": "Loop teams 1-2 (DS1 team lists / +0x46C next_team_object), test DS1 +0x15C object_in_region (skip for -1), call DS1 +0x0C8 deactivate_object. DS1 +0x3D4 kill_units_in_region is the nearest built-in but kills (teams 1-3)."
+ },
+ "0x1B0": {
+  "name": "team_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if any living soldier (vtable +0xBC health > 0) of the team's active soldier list (0x4CD340(team, 1)) stands inside the region (0x515940 + 0x5158E0); 0 if the region is unknown. 5 DLL sites.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4469D0",
+  "lua_hint": "For the player team DS1 +0x3D0; for any team iterate its members (DS1 +0x46C next_team_object) with DS1 +0x15C object_in_region and DS1 +0x1CC is_dead.",
+  "ds1_close": "0x3D0",
+  "match": "close: DS1 squad_in_region is fixed to the player team and has no health check"
+ },
+ "0x1B4": {
+  "name": "get_health",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "float",
+  "desc": "Returns the object's health (+0x54) if its vtable+8 check passes, else 0.0. Callers multiply by a constant (percentage).",
+  "confidence": "medium",
+  "ds1_slot": "0x160",
+  "match": 0.8
+ },
+ "0x1B8": {
+  "name": "get_max_health",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "float",
+  "desc": "0x440AB0: object by id, vtable+0xC check, 0x4962C0 = unit def type 1 -> [def+0xB0]+0x24 / type 2 -> [def+0x80]+0x24 (u16) as float, else 0.0.",
+  "ds1_slot": "0x164",
+  "match": "same",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x1BC": {
+  "name": "damage_object_ignore_invulnerable",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "amount",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "If the object exists and is alive (vtable +0xC == 1): clears the invulnerable bit 0x800000 (+0x27C, 0x496110(0)) if set, calls TakeDamage vtable +0x4C(amount, attacker 0) (= DS1 vtable +0x3C), then sets the bit back. Mission06 (0, 50.0), Training04 (0xE0, health x k).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440AF0",
+  "lua_hint": "DS1 +0x5F4 make_vulnerable, +0x168 damage_object, then +0x5F8 make_invulnerable only if the soldier had the bit (read DS1 soldier +0x284 & 0x800000 first).",
+  "ds1_slot": "0x168",
+  "match": "close: DS1 damage_object doesn't bypass the invulnerable bit (DS1 soldier +0x284 bit 0x800000)"
+ },
+ "0x1C4": {
+  "name": "set_field_2e0",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes obj+0x2E0 = value (FUN_0049e790, plain setter; meaning unknown). Only Mission1 (0x12E, 0).",
+  "confidence": "low",
+  "ds1_slot": "0x16C",
+  "match": 1.0
+ },
+ "0x1D4": {
+  "name": "has_tracked_targets",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "0x403630 on the object: 1 if any of its 3 tracked-target entries (+0x288, stride 0x18, first dword) is set, i.e. the AI is aware of an enemy; 0 for an unknown id. Mission03 (0x10, 0xBB), Mission04.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441090",
+  "lua_hint": "DS1 has the same function FUN_00405DD0 (entries at soldier +0x290, stride 0x18) but no slot: return 1 if any of DS1 obj+0x290 / +0x2A8 / +0x2C0 is non-zero."
+ },
+ "0x1D8": {
+  "name": "set_idle_look_around",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets/clears soldier +0x284 bit 0x20000 (on by default in the ctor); it gates FUN_0049cf20, the random idle head/aim glances every 2-5 s. Mission7 only.",
+  "confidence": "medium",
+  "ds1_slot": "0x17C",
+  "match": 1.0
+ },
+ "0x1DC": {
+  "name": "set_ai_enabled",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "enabled",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "enabled=0 sets soldier +0x284 bit 0x40000000, 1 clears it (AI-off flag). FrontEnd turns it off for its actors, Mission1 for the A-10s; the prisoner release turns it back on.",
+  "confidence": "medium",
+  "ds1_slot": "0x180",
+  "match": 1.0
+ },
+ "0x1E0": {
+  "name": "set_ignore_orders",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets/clears obj+0xC bit 0x1000 = AI debug text 'IGNORING ORDER CHANGES': FUN_0049d870 refuses AI mode changes while it is set. Mission11B Franklin while walking him to the nuke.",
+  "confidence": "high",
+  "ds1_slot": "0x184",
+  "match": 1.0
+ },
+ "0x1E4": {
+  "name": "set_never_excluded",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets obj+0xC bit 8 = AI debug text 'Never EXCLUDED': the soldier's AI keeps running even when it would normally be culled (far away / off screen). 45 sites.",
+  "confidence": "high",
+  "ds1_slot": "0x188",
+  "match": 1.0
+ },
+ "0x1E8": {
+  "name": "clear_never_excluded",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears obj+0xC bit 8 (see 0x188): the soldier may be excluded from AI updates again.",
+  "confidence": "high",
+  "ds1_slot": "0x18C",
+  "match": 1.0
+ },
+ "0x1F0": {
+  "name": "set_target_scanning",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   },
+   {
+    "name": "refresh",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x495FA0(on, refresh): sets (on = 1) / clears soldier +0x27C bit 0x400 (threat scan gate), refresh calls 0x405E20 - Desert Storm's set_target_scanning +0x1A0 (its soldier +0x284).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)",
+  "ds1_slot": "0x1A0"
+ },
+ "0x1F4": {
+  "name": "set_ignore_distractions",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets/clears soldier +0x284 bit 0x80 = AI debug text 'IGNORING DISTRACTIONS!' (no reaction to noises / threats; damage-reaction code skips it). For a soldier (type 1) also refreshes squad state (FUN_00407dc0). 112 sites.",
+  "confidence": "high",
+  "ds1_slot": "0x198",
+  "match": 1.0
+ },
+ "0x1F8": {
+  "name": "is_away_from_stored_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "0x4CE4C0 on the object (= DS1 FUN_004CA120): r = object +0x50 if > 0 else 1.0; returns 1 if flag +0xC bit 0x40 is set or the render-instance position is more than r from the stored position +0x34..+0x3C (DS1 +0x30..+0x38), else 0; 0 for an unknown id. Many AI callers in both exes; what the stored point and the flag mean is not known. No DLL call sites found.",
+  "confidence": "low",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441120",
+  "lua_hint": "From DS1 memory: inst = [obj+0x2C]; pos = inst+0xF4 (if [inst+0x1C8] == 0, else FUN_004CD890); r = [obj+0x50] if > 0 else 1.0; return 1 if ([obj+0xC] & 0x40) ~= 0 or |pos - obj+0x30| > r."
+ },
+ "0x1FC": {
+  "name": "destroy_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Applies damage = health + 1 to the object (FUN_0041a3f0): kills / destroys it through the normal destruction path (messages, effects).",
+  "confidence": "medium",
+  "ds1_slot": "0x19C",
+  "match": 0.87
+ },
+ "0x200": {
+  "name": "set_target_scanning",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   },
+   {
+    "name": "refresh",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets (on=1) / clears soldier +0x284 bit 0x400, which gates the threat/target scan FUN_00407550; refresh != 0 also calls FUN_00407dc0. Mission1 turns it off for captive Foley (0x1F, 0, 1) and on again on release.",
+  "confidence": "low",
+  "ds1_slot": "0x1A0",
+  "match": 1.0
+ },
+ "0x204": {
+  "name": "set_health_fraction",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "fraction",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets health (+0x54) = max health (unit stats +0x88 +0x24) * fraction. Mission1: Foley 0.25.",
+  "confidence": "high",
+  "ds1_slot": "0x1A4",
+  "match": 0.95
+ },
+ "0x208": {
+  "name": "is_moving_forward",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the soldier's movement state (+0x2674) is walking/running/kneel-walking/crawling forwards (states 7-0xC, 0x13, 0x14, 0x53). Training1 'Move forwards'.",
+  "confidence": "medium",
+  "ds1_slot": "0x1A8",
+  "match": 0.88
+ },
+ "0x20C": {
+  "name": "is_moving_backward",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the movement state is a backwards one (0xD, 0xE, 0x15, 0x16, 0x54, 0x57, 0x58). Training1 'Move backwards'.",
+  "confidence": "medium",
+  "ds1_slot": "0x1AC",
+  "match": 0.85
+ },
+ "0x210": {
+  "name": "is_strafing_a",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if +0x284 has bits 0x2000 and 0x4000 (strafing; 0x4000 probably the direction, left or right unknown). Training1 'Strafe left and right' checks 0x1B0 and 0x1B4.",
+  "confidence": "medium",
+  "ds1_slot": "0x1B0",
+  "match": 1.0
+ },
+ "0x214": {
+  "name": "is_strafing_b",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if +0x284 has bit 0x2000 but not 0x4000 (strafing the other direction). Training1 strafe step.",
+  "confidence": "medium",
+  "ds1_slot": "0x1B4",
+  "match": 1.0
+ },
+ "0x218": {
+  "name": "is_turning_left",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the movement state is a turning-left state (5, 0x11, 0x51). Training1 'Turn left and right'.",
+  "confidence": "high",
+  "ds1_slot": "0x1B8",
+  "match": 1.0
+ },
+ "0x21C": {
+  "name": "is_turning_right",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the movement state is a turning-right state (6, 0x12, 0x52).",
+  "confidence": "high",
+  "ds1_slot": "0x1BC",
+  "match": 1.0
+ },
+ "0x220": {
+  "name": "is_crouching",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if stance +0x348 is 1 or 5 (crouched). Training1 'To crouch'.",
+  "confidence": "medium",
+  "ds1_slot": "0x1C0",
+  "match": 0.8
+ },
+ "0x224": {
+  "name": "is_standing",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if stance +0x348 is 2 or 3 (standing). Training1's 'To stand back up' prompt goes with this check.",
+  "confidence": "high",
+  "ds1_slot": "0x1C4",
+  "match": 1.0
+ },
+ "0x228": {
+  "name": "is_prone",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if stance +0x348 == 0 (prone). Training1's 'To go prone' prompt goes with this check.",
+  "confidence": "high",
+  "ds1_slot": "0x1C8",
+  "match": 1.0
+ },
+ "0x22C": {
+  "name": "is_dead",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "FUN_0042b160: health <= 0 (for an in-play object of a non-player team only once +0x2A08 + 180 s has passed). 54 sites, 'test eax; je'.",
+  "confidence": "medium",
+  "ds1_slot": "0x1CC",
+  "match": 1.0
+ },
+ "0x238": {
+  "name": "set_targetable",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "targetable",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "1 clears soldier +0x284 bit 0x200, 0 sets it = AI debug text 'Cannot be targetted' (enemies ignore him). Captives are made untargetable; release passes 1.",
+  "confidence": "high",
+  "ds1_slot": "0x1D8",
+  "match": 1.0
+ },
+ "0x240": {
+  "name": "set_stick_to_waypoints",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets/clears obj+0xC bit 0x10 = AI debug text '** sticking to waypoints **': the soldier keeps to its waypoint path instead of chasing / taking cover.",
+  "confidence": "high",
+  "ds1_slot": "0x1DC",
+  "match": 1.0
+ },
+ "0x248": {
+  "name": "scale_by_skill_task_time",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "value",
+    "type": "float"
+   }
+  ],
+  "returns": "float (ST0)",
+  "desc": "Object vtable +0x6C(3, value) (= DS1 soldier vtable +0x5C, FUN_00432F80): value x skill-table column 3 for the soldier's level (DS2 table 0x6350B8 + level*0x44, +0xC; level +0xDD4); 0.0 for an unknown id. Missions 07/08: progress -= dt x 3 / scale_by_skill(soldier, 1.0) - a skill-dependent task duration.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4415F0",
+  "lua_hint": "DS1 soldiers have the same virtual: x86rt.call(vtable[+0x5C], {3, value bits}, obj) -> ST0; or value * float at 0x619434 + level*0x44 (level = DS1 soldier +0x2A18, DS1 table 0x619428, 17 floats per level). The tables' columns may hold different numbers in the two games."
+ },
+ "0x24C": {
+  "name": "set_min_alert_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0049d250: alert floor +0x2DC = level (0-4) and raises the current alert +0x2D8 to it. 4 = combat (sends script message 0x04 for enemies).",
+  "confidence": "high",
+  "ds1_slot": "0x1E4",
+  "match": 1.0
+ },
+ "0x250": {
+  "name": "set_alert_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0049d2b0: current alert +0x2D8 = level (not below the floor); level 4 on an enemy sends message 0x04 'reached combat alert'.",
+  "confidence": "high",
+  "ds1_slot": "0x1E8",
+  "match": 1.0
+ },
+ "0x254": {
+  "name": "get_alert_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Returns alert level +0x2D8 (0-4; Mission3 compares with 4 = combat).",
+  "confidence": "high",
+  "ds1_slot": "0x1EC",
+  "match": 1.0
+ },
+ "0x260": {
+  "name": "set_ai_flag_20",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets soldier +0x284 bit 0x20 (class query vtable+0x4C(0xC) returns it; read in target selection 0x404423 and weapon code 0x4A554D - possibly 'hold fire'). No clear call. Mission1 (0xC), Mission3 guards 0xF3-0xF6.",
+  "confidence": "low",
+  "ds1_slot": "0x1F8",
+  "match": 0.88
+ },
+ "0x268": {
+  "name": "set_movement_locked",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets/clears soldier +0x284 bit 0x4000000; while set the movement code (0x426ADE, 0x45C1F8) ignores the player block's stick input. Training1/3 on the player soldier.",
+  "confidence": "low",
+  "ds1_slot": "0x200",
+  "match": 1.0
+ },
+ "0x26C": {
+  "name": "stop_moving",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears +0x2394 and applies movement rules MSR_AI_STOP_MOVING (0x1D) and MSR_ZERO_SPEED (3): the soldier halts.",
+  "confidence": "medium",
+  "ds1_slot": "0x204",
+  "match": 0.77
+ },
+ "0x270": {
+  "name": "set_stance_stand_walk",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0045cf00(2, 1) + default stance +0x380 = 2 (standing; the AI itself uses 2 near its destination - walk pace).",
+  "confidence": "medium",
+  "ds1_slot": "0x208",
+  "match": 0.79
+ },
+ "0x274": {
+  "name": "set_stance_stand",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0045cf00(3, 1) + default stance +0x380 = 3 (standing, the AI's normal/run stance). 167 sites.",
+  "confidence": "medium",
+  "ds1_slot": "0x20C",
+  "match": 1.0
+ },
+ "0x278": {
+  "name": "set_stance_crouch",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0045cf00(1, 1) + default stance +0x380 = 1 (crouched).",
+  "confidence": "medium",
+  "ds1_slot": "0x210",
+  "match": 1.0
+ },
+ "0x27C": {
+  "name": "set_stance_crouch_alt",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0045cf00(5, 1) + default stance +0x380 = 5 (crouched variant, also counted as crouching by 0x1C0).",
+  "confidence": "medium",
+  "ds1_slot": "0x214",
+  "match": 1.0
+ },
+ "0x280": {
+  "name": "set_stance_prone",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0045cf00(0, 1) + default stance +0x380 = 0 (prone).",
+  "confidence": "medium",
+  "ds1_slot": "0x218",
+  "match": 0.78
+ },
+ "0x284": {
+  "name": "set_can_pursue",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "vtable+0x78 = sets/clears soldier +0x284 bit 0x100 (getter vtable+0x7C); without it the AI won't advance on its target (FUN_0049df90 holds, mode 6). Mission1 Foley 0 while captive, 1 after.",
+  "confidence": "medium",
+  "ds1_slot": "0x21C",
+  "match": 1.0
+ },
+ "0x290": {
+  "name": "face_waypoint",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns the soldier to face waypoint n (waypoint list [0x63C9B0], 0x20-byte entries; angle FUN_004BB100 -> facing target +0x374).",
+  "confidence": "high",
+  "ds1_slot": "0x228",
+  "match": 0.95
+ },
+ "0x294": {
+  "name": "turn_by",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "degrees",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the facing target +0x374 to the current rotation (+0x208) with yaw + degrees (wrapped 0-360). Mission3: 180.0.",
+  "confidence": "medium",
+  "ds1_slot": "0x22C",
+  "match": 0.85
+ },
+ "0x298": {
+  "name": "award_experience",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "points",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4743B0(points) on the object: points scaled by difficulty ([0x680128]+4: 0 x0.9, 1 x1.0, 2 x1.1, 3 x1.2), rounded, added to experience points +0xDE8 with promotion (nothing at level 9, +0xDD4).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441950",
+  "ds1_slot": "0x230",
+  "match": "close: DS1 FUN_00434190 has no 4th difficulty (x1.2); otherwise identical"
+ },
+ "0x29C": {
+  "name": "set_experience_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets experience/rank level +0x2A18 clamped 0-9 (FUN_0042d1b0; 'Experience level' in AI debug).",
+  "confidence": "high",
+  "ds1_slot": "0x234",
+  "match": 1.0
+ },
+ "0x2A0": {
+  "name": "raise_experience_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the experience level to level only if the current one (FUN_0042d150) is lower.",
+  "confidence": "high",
+  "ds1_slot": "0x238",
+  "match": 0.94
+ },
+ "0x2AC": {
+  "name": "line_up_at_waypoint",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "Lines the soldier up on the waypoint's position (0x4D9790) and rotation (0x4D97A0) with 0x473DD0(&pos, &rot, distance, 1, 1) - the line-up DS1's pick-lock path uses (DS1 FUN_00433330(pos, rot, 100.0, 0, 0)), here without a movement rule and with both trailing flags 1. Mission04 (unit, wp, 100.0).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441AB0",
+  "lua_hint": "No plain DS1 slot: x86rt.call(0x433330, {&pos, &rot, distance bits, 1, 1}, obj) (thiscall ret 0x14) with pos / rot from the DS1 waypoint table (FUN_004D13F0 / FUN_004D1400 on [0x63C9B0]); nearest slots DS1 +0x244 pick_lock_at_waypoint (adds rule 0x4C) or +0x66C place_at_waypoint_rotated (teleport)."
+ },
+ "0x2B4": {
+  "name": "mount_vehicle",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "vehicle",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Vehicle 0x490E80(soldier, &seat, &x) finds a free seat (DS1 FUN_0043CFD0), then soldier 0x482ED0(vehicle, seat, x, 0, 0) mounts (DS1 FUN_00433F00). 21 DLL sites, e.g. Mission02 (8, 0x185). The catalogue's compare_objects_490e80 was this.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442D10",
+  "ds1_slot": "0x24C",
+  "match": "same"
+ },
+ "0x2B8": {
+  "name": "mount_vehicle_seat",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "vehicle",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Mounts the soldier into the given seat of the vehicle (soldier, vehicle, seat) - not DS1 +0x24C (any free seat).",
+  "confidence": "medium",
+  "match": 0.89,
+  "ds1_close": "0x24C",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x2BC": {
+  "name": "is_in_vehicle",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "vehicle",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the soldier's current vehicle (+0x267C) has script id vehicle.",
+  "confidence": "high",
+  "ds1_slot": "0x250",
+  "match": 1.0
+ },
+ "0x2C4": {
+  "name": "get_user_of",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "object",
+  "desc": "vtable+0xA0 (soldier class: +0x26A4) -> script id of the linked object (e.g. who is using a vehicle / mounted gun), -1 if none. Training3 compares with the player (0x79) or -1.",
+  "confidence": "medium",
+  "ds1_slot": "0x254",
+  "match": 1.0
+ },
+ "0x2C8": {
+  "name": "set_skin_texture",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "texture",
+    "type": "string"
+   },
+   {
+    "name": "stop_animations",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Registers the texture (FUN_0054a0b0) and makes it the render instance's skin override (FUN_00503290); flag 1 also stops all animations of the instance (FUN_00502bb0, caged prisoners). E.g. 'AlliedPOW.bmp'.",
+  "confidence": "high",
+  "ds1_slot": "0x258",
+  "match": 1.0
+ },
+ "0x2CC": {
+  "name": "stamp_time_2a10",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "If class query vtable+0x4C(0x11) is true, writes the current game time (ms) to +0x2A10. Training1 30 sites before waits; meaning unknown.",
+  "confidence": "low",
+  "ds1_slot": "0x25C",
+  "match": 0.94
+ },
+ "0x2D0": {
+  "name": "set_calm",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets soldier +0x284 bit 0x400000 ('calm': quiet speech) and +0x2A00 = 0. Training3 per soldier.",
+  "confidence": "medium",
+  "ds1_slot": "0x260",
+  "match": 0.75
+ },
+ "0x2D4": {
+  "name": "wave_on",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_WAVE_ON (0x5C): the soldier plays the wave-on gesture.",
+  "confidence": "high",
+  "ds1_slot": "0x264",
+  "match": 1.0
+ },
+ "0x2D8": {
+  "name": "is_waving",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if movement state == STATE_WAVE_ON (0x70).",
+  "confidence": "high",
+  "ds1_slot": "0x268",
+  "match": 1.0
+ },
+ "0x2E0": {
+  "name": "flinch",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_FLINCH (0x4E).",
+  "confidence": "low",
+  "ds1_slot": "0x270",
+  "match": 0.55
+ },
+ "0x2E4": {
+  "name": "cower",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_COWER (0x5E); if it applies, plays sound 0x143 from the soldier's bank (radius 1000).",
+  "confidence": "high",
+  "ds1_slot": "0x274",
+  "match": 0.94
+ },
+ "0x2E8": {
+  "name": "is_cowering",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if movement state == STATE_COWER (0x72).",
+  "confidence": "high",
+  "ds1_slot": "0x278",
+  "match": 1.0
+ },
+ "0x2EC": {
+  "name": "start_gas_choke",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "For a soldier (type 1; no null check on the id) applies movement rule 0x68 = MSR_GAS_CHOKE (DS2 MOVEMENTSTATERULES) through vtable +0x80 (= DS1's vtable +0x70 rule call). DS2-only rule.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44A5B0",
+  "lua_hint": "DS1 has no gas-choke rule / animation: no-op, or DS1 +0x52C play_scripted_animation with a choke .prs if one gets ported."
+ },
+ "0x2F8": {
+  "name": "scripted_anim",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "n",
+    "type": "int"
+   },
+   {
+    "name": "start",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "Movement rule MSR_SCRIPTED_ANIM_<n>_START (0x6A + n - 1) or, with start 0, _STOP (0x6F + n - 1), n 1-5: plays the animation registered for SCRIPTED_ANIM_<n> (register_animation 0x004). Desert Storm has no such states - its play_scripted_animation +0x52C does the job.",
+  "confidence": "high",
+  "source": "CDS II.exe 0x443F60 (2026-10-24, crossmission work)"
+ },
+ "0x2FC": {
+  "name": "set_movement_state",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x47B150(state) on the object (= DS1 FUN_0042D240): sets the movement state +0x688 (DS1 +0x2674) with its transition side effects. No DLL call sites found. DS2 state numbers come from DS2's MOVEMENTSTATERULES (139 states) and differ from DS1's.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x444040",
+  "lua_hint": "x86rt.call(0x42D240, {ds1_state}, obj) (thiscall ret 4) after mapping the state by name from DS2's MOVEMENTSTATERULES.TXT to DS1's."
+ },
+ "0x300": {
+  "name": "stretch",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_STRETCH (0x6A), idle stretch animation.",
+  "confidence": "high",
+  "ds1_slot": "0x27C",
+  "match": 1.0
+ },
+ "0x304": {
+  "name": "start_talking",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_START_TALKING (0x66).",
+  "confidence": "high",
+  "ds1_slot": "0x280",
+  "match": 1.0
+ },
+ "0x308": {
+  "name": "stop_talking",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_STOP_TALKING (0x67).",
+  "confidence": "high",
+  "ds1_slot": "0x284",
+  "match": 1.0
+ },
+ "0x30C": {
+  "name": "disembark_vehicle",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "left_side",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Movement rule MSR_DISEMBARK_VEHICLE_LEFT (0x68) if nonzero, else _RIGHT (0x69).",
+  "confidence": "high",
+  "ds1_slot": "0x288",
+  "match": 1.0
+ },
+ "0x310": {
+  "name": "start_scripted_unconscious",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Applies movement rule 0x5A MSR_SCRIPTED_UNCONCIOUS (DS2 MOVEMENTSTATERULES); was named start_defusing_nuke.",
+  "confidence": "medium",
+  "ds1_slot": "0x28C",
+  "match": 0.88,
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x314": {
+  "name": "stop_scripted_unconscious",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Applies movement rule 0x5B (recover from MSR_SCRIPTED_UNCONCIOUS); was named stop_defusing_nuke.",
+  "confidence": "medium",
+  "ds1_slot": "0x290",
+  "match": 0.88,
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x318": {
+  "name": "set_combat_ready",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "Bundle: stance stand (0x435640(3,1) + default stance +0x380 = 3), never excluded (+0xC |= 8), clears DS2 soldier flag +0x105C bit 0x40000, minimum alert 4 (0x498500), ignore distractions off (0x497DD0(0)), and for a soldier AI state 5 (0x498560; DS2 5 = DS1 6, combat). 77 DLL sites.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44B470",
+  "lua_hint": "DS1 sequence: +0x20C set_stance_stand(o), +0x188 set_never_excluded(o), +0x1E4 set_min_alert_level(o,4), +0x198 set_ignore_distractions(o,0), +0x114 set_ai_state(o,6) (DS1 numbering); the +0x105C flag has no DS1 field."
+ },
+ "0x31C": {
+  "name": "set_patrol_mode",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "Bundle: minimum alert 4 (0x498500), stance stand (0x435640(3,1) + +0x380 = 3), stick to waypoints (+0xC |= 0x10), ignore distractions on (0x497DD0(1)), never excluded (+0xC |= 8). 22 DLL sites.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4456D0",
+  "lua_hint": "DS1 sequence: +0x1E4 set_min_alert_level(o,4), +0x20C set_stance_stand(o), +0x1DC set_stick_to_waypoints(o,1), +0x198 set_ignore_distractions(o,1), +0x188 set_never_excluded(o)."
+ },
+ "0x320": {
+  "name": "reset_soldier_state",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Calls soldier vtable+0x70(0x5F) then re-applies its movement state (+0x2674) via FUN_0042d3a0(state, 0); exact effect unclear (Mission6 only).",
+  "confidence": "low",
+  "ds1_slot": "0x294",
+  "match": 0.57
+ },
+ "0x324": {
+  "name": "freeze_animations_except_weapon",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "Like freeze_animations (0x328): every entry of the render instance (+0x30: count +0x1B4, array +0x1B8, 0x14 B) whose model is set (0x565BB0) gets 0x565FA0(0) (DS1 FUN_00503760(0)) - except the entry on the held weapon's connector (held item vtable +0x84, def +0x24 category 5 -> index 0x55DC40(def +0x94)). No null check on the id. Mission06 (0x34, 0x42, 0x3D, ...).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x449940",
+  "lua_hint": "Loop DS1 instance [obj+0x2C] entries (+0x214 count, +0x218 array, 16 B) and call FUN_00503760(0) on each with a model (+8) except index FUN_00502C30(def+0x94 hash) of the held weapon (DS1 vtable +0x74); or simply DS1 +0x298.",
+  "ds1_slot": "0x298",
+  "match": "close: DS1 freeze_animations also freezes the held weapon's entry"
+ },
+ "0x328": {
+  "name": "freeze_animations",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches off every animation layer of the object's render instance (FUN_00502bb0); nothing restarts them (Mission 1 caged Foley).",
+  "confidence": "low",
+  "ds1_slot": "0x298",
+  "match": 0.59
+ },
+ "0x32C": {
+  "name": "stop_spine_anim_layers",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches off the animation layers on the 'BIP01 SPINE1 / SPINE2 CONNECTOR' bones (upper-body layers).",
+  "confidence": "medium",
+  "ds1_slot": "0x29C",
+  "match": 0.81
+ },
+ "0x330": {
+  "name": "stop_hat_anim_layer",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches off the animation layer on the 'BIP01 HAT CONNECTOR' bone (head layer).",
+  "confidence": "medium",
+  "ds1_slot": "0x2A0",
+  "match": 0.78
+ },
+ "0x334": {
+  "name": "stop_face_anim_layer",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches off the animation layer on the 'BIP01 FACE CONNECTOR' bone.",
+  "confidence": "medium",
+  "ds1_slot": "0x2A4",
+  "match": 0.78
+ },
+ "0x338": {
+  "name": "strip_inventory",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the soldier's inventory items (FUN_00431830(0); category-8 / special items kept).",
+  "confidence": "high",
+  "ds1_slot": "0x2A8",
+  "match": 1.0
+ },
+ "0x33C": {
+  "name": "say_speech_4e",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "Soldier (type 1, no null check) speaks speech-bank event 0x4E from its own bank: 0x480170(0x4E, 0x4E, 0, 0, 0, 1, bank 0 = soldier +0x40, 0) (DS1's speech FUN_004366D0 with two more arguments: bank and one flag). Mission07 x4 (after a +0x8A4 check).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x449AD0",
+  "lua_hint": "No DS1 speech slot: DS1 +0x7DC play_sound_at_object(o, 0x4E, bank = read32(obj+0x40), 1000.0) plays the event from the soldier's bank (without the busy / dead / quiet rules)."
+ },
+ "0x340": {
+  "name": "say_speech",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "event",
+    "type": "int"
+   },
+   {
+    "name": "flag",
+    "type": "int"
+   },
+   {
+    "name": "bank",
+    "type": "pointer (0 = own)"
+   },
+   {
+    "name": "flag2",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "Soldier (type 1, no null check) speaks a speech-bank event: 0x480170(event, event, 0, 0, flag, 0, bank, flag2); bank 0 = the soldier's +0x40. Mission04 (o, 3, 1, 0, 0), Training01 (0xD7, 0xD59, 0, 0, 0).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x449B00",
+  "lua_hint": "DS1 +0x7DC play_sound_at_object(o, event, bank or read32(obj+0x40), 1000.0); for the full rules call DS1's speech FUN_004366D0 (thiscall, 6 args, ret 0x18) with x86rt.call."
+ },
+ "0x344": {
+  "name": "get_kill_count",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "For a soldier (type 1, no null check): +0xF64 (vehicles destroyed, ++ after the 'destroyed' speech at 0x491618) + +0xF60 (soldiers killed this mission, ++ in the kill credit at 0x4964DB); else 0. (0x348 returns +0xF60 alone.) No DLL call sites found.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x449B40",
+  "lua_hint": "DS1 keeps the same counters: return read32(obj+0x2C84) + read32(obj+0x2C88) (DS1 mission kills ++ at 0x49C7FA, vehicles at 0x43E394; summed the same way at 0x499CB7)."
+ },
+ "0x350": {
+  "name": "is_holding_laser_designator",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Object by script id (0x4CF4F0 on [0x6800E0]); for a soldier (type 1) whose held item (vtable+0x84 = DS1 +0x74) has definition category ([def+0] via item+0x24) 0x12 = LASER DESIGNATOR (category parser 0x4506C0) returns 1, else 0. Mission10 polls it for units 0x65 / 0x67 / 0x78.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x449BB0",
+  "lua_hint": "DS1 uses the same category number (0x12 = LASER DESIGNATOR, parser 0x493CA0): soldier = object by id (FUN_004CA660 on [0x63C9A0]); type ([obj+4]) == 1; held = vtable+0x74(); held and [[held+0x24]+0] == 0x12."
+ },
+ "0x354": {
+  "name": "vehicle_fire_at",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   },
+   {
+    "name": "weapon_slot",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Orders a vehicle to fire weapon slot n (+0x260C list) at the target object once: sets +0x2640 target, +0x2644 slot (same as the debug key 'Fire vehicle weapon').",
+  "confidence": "medium",
+  "ds1_slot": "0x2AC",
+  "match": 0.86
+ },
+ "0x358": {
+  "name": "set_ai_flag_40000000",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "Sets (on) or clears soldier +0x27C bit 0x40000000 - Desert Storm's soldier +0x284 bit 30, which its +0x180 sets.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x360": {
+  "name": "set_ai_flag_200000",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears bit 0x200000 of the soldier's AI flags (+0x284). Meaning of the bit not identified.",
+  "confidence": "low",
+  "ds1_slot": "0x2B4",
+  "match": 1.0
+ },
+ "0x364": {
+  "name": "set_ai_flag_200000_all",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears AI flag bit 0x200000 (+0x284) on every soldier of all 4 teams, except units of class 0xB.",
+  "confidence": "low",
+  "ds1_slot": "0x2B8",
+  "match": 0.83
+ },
+ "0x368": {
+  "name": "vehicle_is_occupied",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "0x48B800 on the object: seat count = byte [[unit+0x24]+0x80]+0x40 (vehicle def), occupant array [obj+0x680]; 1 if any seat pointer is non-null, else 0. No type check (vehicles only). Mission04.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442CF0",
+  "lua_hint": "api[0x80C](veh) ~= -1, or exact: seats = byte [[[obj+0x24]+0x80]+0x40], occupants [obj+0x2608] (DS1), any non-null.",
+  "ds1_close": "0x80C",
+  "match": "close: DS1 get_vehicle_driver returns the first occupied crew seat's script id or -1 (crew seats from the driver seat on); DS2 checks every seat and returns 1/0"
+ },
+ "0x36C": {
+  "name": "damage_team_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   },
+   {
+    "name": "damage_per_second",
+    "type": "float"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "none",
+  "desc": "Damages every soldier of the team standing in the region by damage_per_second x frame dt (vtable+0x3C); called per frame for kill zones.",
+  "confidence": "high",
+  "ds1_slot": "0x2BC",
+  "match": 0.97
+ },
+ "0x370": {
+  "name": "damage_team",
+  "args": [
+   {
+    "name": "damage_per_second",
+    "type": "float"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "none",
+  "desc": "Every active object of the team (0x4CD340(team, 1), next +0x18) takes damage_per_second x frame dt (dt from timer [0x680098] 0x4BE550) through vtable+0x4C(amount, 0) (= DS1 TakeDamage vtable+0x3C; DS2 soldier vtables are DS1's +0x10). Note the float comes FIRST. Mission07 (per frame, teams 2 / ebx).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4441E0",
+  "lua_hint": "Loop the team's active list (FUN_004C9720([0x63C9A0], team, 1), next +0x14) and call soldier vtable+0x3C(dps*dt, 0); or api[0x2BC] with a region covering the level.",
+  "ds1_close": "0x2BC",
+  "match": "close: DS1 damage_team_in_region(region, dps, team) only hurts members inside a region; DS2 hurts the whole team"
+ },
+ "0x378": {
+  "name": "show_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears render-instance flag 0x10000000 (+0x2C -> +0xC) = object drawn again (Mission 1 init uses it on zone pieces).",
+  "confidence": "medium",
+  "ds1_slot": "0x2C0",
+  "match": 0.89
+ },
+ "0x37C": {
+  "name": "hide_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets render-instance flag 0x10000000 (+0x2C -> +0xC) = object not drawn.",
+  "confidence": "medium",
+  "ds1_slot": "0x2C4",
+  "match": 0.89
+ },
+ "0x384": {
+  "name": "fire_weapon",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Object by id -> 0x4A0060(obj, 0, 0, 0) thiscall on itself (trigger pull with the weapon as its own shooter; ret 0x10, null-shooter check = DS1 FUN_004A1AD0). Mission01 / 04 fire placed weapons (ids 0xFC, 0xA7, 0xA8).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441BB0",
+  "ds1_slot": "0x2CC",
+  "match": "same"
+ },
+ "0x390": {
+  "name": "call_strike",
+  "args": [
+   {
+    "name": "caller",
+    "type": "object"
+   },
+   {
+    "name": "target_pos",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Queues a timed strike at a position (one of 10 slots of [0x60EDA4], 8000 ms, posts event 0x6F; target -1 = none); network MP sends it via FUN_004636f0. Probably the air / mortar strike (Training2 air-strike lesson).",
+  "confidence": "low",
+  "ds1_slot": "0x2D8",
+  "match": 0.71
+ },
+ "0x394": {
+  "name": "give_magazines",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "object"
+   },
+   {
+    "name": "magazines",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Adds magazines x magazine size (def +0x92) to a weapon item's reserve rounds (skipped in grenade-launcher mode).",
+  "confidence": "medium",
+  "ds1_slot": "0x2DC",
+  "match": 0.71
+ },
+ "0x398": {
+  "name": "weapon_is_empty",
+  "args": [
+   {
+    "name": "weapon_or_soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 when the item (or a soldier's held weapon) has no rounds left (magazine +0x80 + reserve +0x54 = 0).",
+  "confidence": "high",
+  "ds1_slot": "0x2E0",
+  "match": 1.0
+ },
+ "0x39C": {
+  "name": "clear_weapon_state",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Zeroes weapon item fields +0x74, +0x84, +0x88 (fire / reload timers?); Training1 only.",
+  "confidence": "low",
+  "ds1_slot": "0x2E4",
+  "match": 1.0
+ },
+ "0x3A0": {
+  "name": "detonate_explosive",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Object by id; if its definition ([obj+0x24]) is category 5 (weapon) and class +0xC0 is 7 (frag grenade) or 0x11 -> 0x49A890(0,0,0): explosion event in the explosion manager [0x680118] (0x4D7020; flags 0x35B0A, class 0x11 0x2DB0A + 60.0) with def +0xD4 / +0xD8 (u16) as damage / radius at the item's position, object removed (0x4CDE50), script message 0x18 (explosion). Mission03 detonates 0x79 / 0x7A / 0x7B.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x448130",
+  "lua_hint": "DS1 0x804 explosion_at_position(x, y, z, zone_object, radius, damage) with the item's position (obj+0x30) and its weapon def +0xD4 / +0xD8 (same fields DS1's weapon code passes at 0x4A1A73), then deactivate the item (api 0xC8)."
+ },
+ "0x3A8": {
+  "name": "enable_env_sound",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns an environment (ENVSND) sound slot on, restoring its volume (sound manager slot, stride 0x34).",
+  "confidence": "medium",
+  "ds1_slot": "0x2EC",
+  "match": 1.0
+ },
+ "0x3AC": {
+  "name": "disable_env_sound",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns an environment (ENVSND) sound slot off.",
+  "confidence": "medium",
+  "ds1_slot": "0x2F0",
+  "match": 1.0
+ },
+ "0x3B0": {
+  "name": "set_env_sound_volume",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   },
+   {
+    "name": "volume",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets an enabled environment sound slot's volume (0..1, e.g. 0.05, 1.0).",
+  "confidence": "low",
+  "ds1_slot": "0x2F4",
+  "match": 0.67
+ },
+ "0x3B4": {
+  "name": "play_sound",
+  "args": [
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays a sound id from a sound bank, non-positional (2D), min distance 1000.",
+  "confidence": "high",
+  "ds1_slot": "0x2F8",
+  "match": 0.95
+ },
+ "0x3B8": {
+  "name": "play_sound_at",
+  "args": [
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays a sound id from a bank at a world position (x, y, z passed inline), min distance 1000.",
+  "confidence": "medium",
+  "ds1_slot": "0x2FC",
+  "match": 0.87
+ },
+ "0x3BC": {
+  "name": "clear_sound_queue",
+  "args": [],
+  "returns": "none",
+  "desc": "Empties the scripted sound / speech sequence queue (count [0x617C50] = 0).",
+  "confidence": "high",
+  "ds1_slot": "0x300",
+  "match": 1.0
+ },
+ "0x3C0": {
+  "name": "queue_sound",
+  "args": [
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "positional",
+    "type": "bool"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "speaker",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Appends a sound to the sequence queue (max 12); position used when positional = 1, speaker -1 = none.",
+  "confidence": "low",
+  "ds1_slot": "0x304",
+  "match": 0.68
+ },
+ "0x3C4": {
+  "name": "play_sound_queue",
+  "args": [],
+  "returns": "bool",
+  "desc": "Starts the queued sound sequence (FUN_0055de90); 1 when the queue was not empty.",
+  "confidence": "medium",
+  "ds1_slot": "0x308",
+  "match": 0.88
+ },
+ "0x3C8": {
+  "name": "debug_print",
+  "args": [
+   {
+    "name": "text",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Bare ret (0x4031A0) - no-op; missions pass a sprintf buffer.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4031A0",
+  "ds1_slot": "0x30C",
+  "match": "same"
+ },
+ "0x3D4": {
+  "name": "key_down",
+  "args": [
+   {
+    "name": "dik",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 while a keyboard key (DirectInput scan code, 2..9 = keys 1..8) is down; scripts use it for debug shortcuts behind debug_mode_enabled.",
+  "confidence": "medium",
+  "ds1_slot": "0x318",
+  "match": 0.95
+ },
+ "0x3E4": {
+  "name": "set_player_soldier",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Hands an active object to every player's view controller (FUN_00472cb0): camera / control switch to it.",
+  "confidence": "medium",
+  "ds1_slot": "0x328",
+  "match": 0.88
+ },
+ "0x3E8": {
+  "name": "camera_shake",
+  "args": [
+   {
+    "name": "strength",
+    "type": "float"
+   },
+   {
+    "name": "param2",
+    "type": "float"
+   },
+   {
+    "name": "duration_ms",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Starts a camera shake on every viewport camera (e.g. 25.0, 0, 2000.0); ignored while one is running.",
+  "confidence": "medium",
+  "ds1_slot": "0x32C",
+  "match": 0.95
+ },
+ "0x3EC": {
+  "name": "camera_shake_at",
+  "args": [
+   {
+    "name": "position",
+    "type": "vec3*"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   },
+   {
+    "name": "strength",
+    "type": "float"
+   },
+   {
+    "name": "param2",
+    "type": "float"
+   },
+   {
+    "name": "duration_ms",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Camera manager [0x680120] 0x4DD2A0: for every active camera (flag 1, not already shaking 0x40; stride 0x1B4) whose eye (+0x28) is closer than radius to the position, starts a shake with strength x (1 - dist/radius), param2, duration (0x4DD220 -> 0x4DD1A0, the same starter DS2's camera_shake 0x3E8 uses). Mission02 / 06: (pos, 2000.0, 10.0, 0, 400.0).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x441F40",
+  "lua_hint": "d = distance(player 1 camera or soldier position, position); if d < radius then api[0x32C](strength*(1-d/radius), param2, duration_ms).",
+  "ds1_close": "0x32C",
+  "match": "close: DS1 camera_shake(strength, param2, duration_ms) shakes every camera with full strength; DS2 adds position + radius fall-off"
+ },
+ "0x3F4": {
+  "name": "pause_zone_tracking",
+  "args": [
+   {
+    "name": "paused",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "While set, (de)activations don't update the per-zone rosters ([0x617DD0]); scripts wrap their zone streaming in 1 ... 0.",
+  "confidence": "medium",
+  "ds1_slot": "0x330",
+  "match": 1.0
+ },
+ "0x3F8": {
+  "name": "zone_of_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "World zone index of the object's model (+0x1C -> +0xC8 -> +0x1BC); -1 if none.",
+  "confidence": "low",
+  "ds1_slot": "0x334",
+  "match": 0.49
+ },
+ "0x3FC": {
+  "name": "get_zone_objects",
+  "args": [
+   {
+    "name": "zone",
+    "type": "int"
+   },
+   {
+    "name": "list",
+    "type": "out_ptr"
+   },
+   {
+    "name": "count",
+    "type": "out_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Returns the zone's roster: pointer to {object id, enabled} pairs and their count (0 for a bad index).",
+  "confidence": "low",
+  "ds1_slot": "0x338",
+  "match": 0.45
+ },
+ "0x400": {
+  "name": "count_zone_active",
+  "args": [
+   {
+    "name": "zone",
+    "type": "int"
+   }
+  ],
+  "returns": "int",
+  "desc": "Number of the zone's roster objects currently in play (object +0xC bit 0).",
+  "confidence": "low",
+  "ds1_slot": "0x33C",
+  "match": 0.68
+ },
+ "0x404": {
+  "name": "count_zone_enabled",
+  "args": [
+   {
+    "name": "zone",
+    "type": "int"
+   }
+  ],
+  "returns": "int",
+  "desc": "Number of the zone's roster objects marked enabled (the scripts' 'grunts' count).",
+  "confidence": "low",
+  "ds1_slot": "0x340",
+  "match": 0.43
+ },
+ "0x408": {
+  "name": "restore_zone_objects",
+  "args": [
+   {
+    "name": "list",
+    "type": "pointer"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "For each {id, enabled} roster entry: enabled -> activate (soldiers resumed), else deactivate. Used when a player enters a zone.",
+  "confidence": "medium",
+  "ds1_slot": "0x344",
+  "match": 0.87
+ },
+ "0x40C": {
+  "name": "suspend_zone_objects",
+  "args": [
+   {
+    "name": "list",
+    "type": "pointer"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Records each roster object's in-play state, then deactivates it. Used when no player is in the zone.",
+  "confidence": "medium",
+  "ds1_slot": "0x348",
+  "match": 0.95
+ },
+ "0x410": {
+  "name": "zone_activate_one",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "current",
+    "type": "out_ptr"
+   },
+   {
+    "name": "zone_flags",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Keeps one roster object active in the player soldier's zone: drops *current if it left / died, else picks an enabled, idle, living one (FUN_00484640) and activates it; *current = its id or -1.",
+  "confidence": "low",
+  "ds1_slot": "0x34C",
+  "match": 0.73
+ },
+ "0x418": {
+  "name": "count_living_grunts",
+  "args": [
+   {
+    "name": "include_busy",
+    "type": "bool"
+   }
+  ],
+  "returns": "int",
+  "desc": "Counts enabled, living roster objects in all zones; with 0 only those whose +0x267C is 0.",
+  "confidence": "low",
+  "ds1_slot": "0x354",
+  "match": 0.74
+ },
+ "0x41C": {
+  "name": "set_max_spawned",
+  "args": [
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the spawn system's maximum ([0x617DC0], default 9) - the scripts' 'capacity'.",
+  "confidence": "medium",
+  "ds1_slot": "0x35C",
+  "match": 1.0
+ },
+ "0x420": {
+  "name": "get_max_spawned",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns the spawn system's maximum ([0x617DC0]).",
+  "confidence": "medium",
+  "ds1_slot": "0x360",
+  "match": 1.0
+ },
+ "0x424": {
+  "name": "set_spawning_enabled",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets spawn-system switch [0x6182F8] (1 after init_spawn_points).",
+  "confidence": "low",
+  "ds1_slot": "0x364",
+  "match": 1.0
+ },
+ "0x428": {
+  "name": "set_spawn_flag_617dd4",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets spawn-system flag [0x617DD4] (1 after init_spawn_points); meaning unclear.",
+  "confidence": "low",
+  "ds1_slot": "0x368",
+  "match": 1.0
+ },
+ "0x430": {
+  "name": "get_spawn_point",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "pointer",
+  "desc": "Pointer to a spawn point record (0x1C bytes: +0x10 state 0 off / 1 on / 2 permanently off, +0x14 counter). Scripts read / bump the fields directly.",
+  "confidence": "low",
+  "ds1_slot": "0x374",
+  "match": 0.55
+ },
+ "0x434": {
+  "name": "enable_spawn_point",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   },
+   {
+    "name": "force",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns the spawn point on (state 1); a permanently disabled one only with force (logs 'Enabling spawn point').",
+  "confidence": "low",
+  "ds1_slot": "0x378",
+  "match": 0.36
+ },
+ "0x438": {
+  "name": "enable_spawn_point_when_clear",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Spawn manager 0x631848 (records 0x40 B at +0x2C) 0x44E320(index): only for a point in state 0 or 1, and only if none of the current wave's units (lists +0x24[+0x1C], count +0xC) is still alive / in play (0x446D70); then state 2 (on), counter +0x2C = 0, script message 0x4C if it was state 0, log 'Enabling spawn point:%d'. DS2 spawn states: 0 never enabled, 1 off, 2 on, 3 permanently off. 173 call sites.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445550",
+  "lua_hint": "Check the point's previous units are dead before api[0x378](index, 0) (DS1 spawn record from api 0x374, 0x1C bytes).",
+  "ds1_close": "0x378",
+  "match": "close: DS1 enable_spawn_point(index, force) has no 'units still alive' check and no message; DS1 states are 0 off / 1 on / 2 permanently off"
+ },
+ "0x43C": {
+  "name": "force_enable_spawn_point",
+  "args": [],
+  "returns": "none",
+  "desc": "0x44E2A0(index, 1): force-enables one spawn point (was named disable_all_spawn_points).",
+  "confidence": "low",
+  "match": 0.48,
+  "ds1_close": "0x378",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x440": {
+  "name": "disable_spawn_point",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   },
+   {
+    "name": "permanent",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x431130 on 0x631848: ignored for state 3; permanent -> state 3 + script message 0x4D, else state 1; then objective re-evaluation 0x436340 and the log '%sisabling spawn point:%d' ('Permanently d' / 'D') - the same strings as DS1.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445580",
+  "ds1_slot": "0x37C",
+  "match": "same"
+ },
+ "0x448": {
+  "name": "push_dynamic_object_at",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "force",
+    "type": "vec3*"
+   },
+   {
+    "name": "offset",
+    "type": "vec3*"
+   }
+  ],
+  "returns": "none",
+  "desc": "Object type 2 with dynamics flag +0x64 = 1: dynamics +0x68 -> 0x520BD0(force, offset): wakes the Karma body (+0x48), adds force x 0.01 at body position + offset x 0.01 (cm -> m) via 0x5BA460 (add force at position). Mission03 once.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445B30",
+  "lua_hint": "api[0x8C8](obj, force, 0.01) (offset ignored); exact: dynamics [obj+0x64] FUN_00512480(force, 0.01, world position + offset).",
+  "ds1_close": "0x8C8",
+  "match": "close: DS1 push_dynamic_object(object, direction*, strength) adds direction x strength at the body centre (no offset, no 0.01 factor); DS1's internal FUN_00512480 does take an absolute position (3rd arg) the slot passes as 0"
+ },
+ "0x44C": {
+  "name": "freeze_dynamic_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Object type 2 with dynamics (+0x64 = 1): 0x520C80 on +0x68: unless already frozen (flag 8), sets flag 8, clears 1 / sets 2 and disables the Karma body (0x5BA260) - the prop stops being simulated. Mission03 (object 0xD1).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445B70",
+  "lua_hint": "DS1 dynamics object = [obj+0x64] (type 2), Karma body at dynamics +0x44: Karma disable 0x58E700(body) (enable = 0x58E780)."
+ },
+ "0x450": {
+  "name": "unfreeze_dynamic_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x520D00 on dynamics +0x68: if frozen (flag 8): clears 8 / 2, sets 1, enables the Karma body (0x5BA2D0) and stamps +0x88 = now (s). Counterpart of 0x44C. Mission03 (0xD1).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445BA0",
+  "lua_hint": "Karma enable 0x58E780 on [[obj+0x64]+0x44]."
+ },
+ "0x458": {
+  "name": "reset_view_controllers",
+  "args": [],
+  "returns": "none",
+  "desc": "Sets field +0x2AC = 0 on the 4 per-player view controllers ([0x63C990..0x63C99C]); Training1 only.",
+  "confidence": "low",
+  "ds1_slot": "0x388",
+  "match": 0.9
+ },
+ "0x45C": {
+  "name": "set_min_soldier_level",
+  "args": [
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Raises every soldier (all teams) whose experience level (+0x2DC) is below level to it (FUN_0049d250).",
+  "confidence": "medium",
+  "ds1_slot": "0x38C",
+  "match": 0.81
+ },
+ "0x460": {
+  "name": "debug_mode_enabled",
+  "args": [],
+  "returns": "bool",
+  "desc": "Debug key-mappings toggle ([0x60F560]); scripts guard debug prints / keys with it. 0 in normal play.",
+  "confidence": "medium",
+  "ds1_slot": "0x390",
+  "match": 0.88
+ },
+ "0x464": {
+  "name": "query_0x394",
+  "args": [],
+  "returns": "bool",
+  "desc": "Always returns 1 in the PC exe (stub); Mission1 skips a block when 1.",
+  "confidence": "low",
+  "ds1_slot": "0x394",
+  "match": 1.0
+ },
+ "0x468": {
+  "name": "query_0x398",
+  "args": [],
+  "returns": "bool",
+  "desc": "Always returns 0 in the PC exe (stub; console / MP leftover?).",
+  "confidence": "low",
+  "ds1_slot": "0x398",
+  "match": 1.0
+ },
+ "0x46C": {
+  "name": "campaign_flag_zero",
+  "args": [],
+  "returns": "bool",
+  "desc": "1 when the campaign object's first field ([[0x60EDC0]+0]) is 0; meaning unclear.",
+  "confidence": "low",
+  "ds1_slot": "0x39C",
+  "match": 0.73
+ },
+ "0x474": {
+  "name": "is_difficulty_easy",
+  "args": [],
+  "returns": "bool",
+  "desc": "1 when the difficulty (FUN_004f0070 on [0x63C9E0]) is 0.",
+  "confidence": "medium",
+  "ds1_slot": "0x3A4",
+  "match": 1.0
+ },
+ "0x478": {
+  "name": "is_difficulty_hard",
+  "args": [],
+  "returns": "bool",
+  "desc": "1 when the difficulty object [0x680128] (+4 level, 0x403190) is 2 (HARD) - Desert Storm's +0x3A8.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)",
+  "ds1_slot": "0x3A8"
+ },
+ "0x47C": {
+  "name": "is_difficulty_hard",
+  "args": [],
+  "returns": "bool",
+  "desc": "1 when the difficulty is 2.",
+  "confidence": "low",
+  "ds1_slot": "0x3A8",
+  "match": 0.43
+ },
+ "0x480": {
+  "name": "point_in_region",
+  "args": [
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Whether a world position lies inside the region (region manager [0x63C9B8]).",
+  "confidence": "medium",
+  "ds1_slot": "0x3AC",
+  "match": 1.0
+ },
+ "0x484": {
+  "name": "player_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Whether the first player's soldier (first input block with a soldier) is inside the region.",
+  "confidence": "low",
+  "ds1_slot": "0x3B0",
+  "match": 0.32
+ },
+ "0x488": {
+  "name": "player_near_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Whether the first player's soldier is within radius (cm) of the object.",
+  "confidence": "medium",
+  "ds1_slot": "0x3B4",
+  "match": 0.88
+ },
+ "0x48C": {
+  "name": "player_near_point",
+  "args": [
+   {
+    "name": "point",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the first player who has a soldier is within radius (cm) of the point (exe 0x4CC210 distance test). Mission1 uses radius 1000.0.",
+  "confidence": "low",
+  "ds1_slot": "0x3B8",
+  "match": 0.65
+ },
+ "0x490": {
+  "name": "get_player_soldier",
+  "args": [
+   {
+    "name": "player",
+    "type": "player"
+   }
+  ],
+  "returns": "object",
+  "desc": "Script id of the soldier the player controls (input block +0x310 -> obj+8), -1 if none.",
+  "confidence": "medium",
+  "ds1_slot": "0x3BC",
+  "match": 0.75
+ },
+ "0x494": {
+  "name": "get_player_target",
+  "args": [
+   {
+    "name": "player",
+    "type": "player"
+   }
+  ],
+  "returns": "object",
+  "desc": "Script id of the object currently targeted / under the player's crosshair (input block +0x3AC, read by the crosshair code), -1 if none. Training1 compares it with the shooting targets.",
+  "confidence": "medium",
+  "ds1_slot": "0x3C0",
+  "match": 0.75
+ },
+ "0x498": {
+  "name": "get_player_zone",
+  "args": [
+   {
+    "name": "player",
+    "type": "player"
+   }
+  ],
+  "returns": "int",
+  "desc": "Zone id the player's soldier is in (soldier+0x1C -> +0xC8 -> +0x1BC); Mission3 prints it as 'Zone ID:%d'. 0 if no soldier.",
+  "confidence": "medium",
+  "ds1_slot": "0x3C4",
+  "match": 0.71
+ },
+ "0x49C": {
+  "name": "is_player_controlled",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the object is a soldier currently driven by a player (type 1 and soldier+0x23C0 input block set).",
+  "confidence": "high",
+  "ds1_slot": "0x3C8",
+  "match": 1.0
+ },
+ "0x4A4": {
+  "name": "squad_in_region_precise",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Like squad_in_region (0x4A8) but tests each player-team soldier's body points (0x543DE0 + the position, 0x52F710 against the region from [0x6800F8] 0x515940); Desert Storm has only the position test (+0x3D0).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)",
+  "ds1_slot": "0x3D0"
+ },
+ "0x4A8": {
+  "name": "squad_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if any member of the player team (active list of team [0x5F9B94]) stands inside the region (region list [0x63C9B8]).",
+  "confidence": "high",
+  "ds1_slot": "0x3D0",
+  "match": 0.95
+ },
+ "0x4AC": {
+  "name": "squad_member_near_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   }
+  ],
+  "returns": "int (script id or -1)",
+  "desc": "Object position (obj+0x30 -> +0x108, or 0x4D2520), then the player team's active list (team [0x61B0EC], 0x4CD340(team, 1)): returns the script id (+8) of the first member within radius (0x4D62E0 distance test), else -1 (also -1 if the object doesn't exist). Mission08: radius 1000 / 200.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4476E0",
+  "lua_hint": "DS1 has player_near_object (0x3B4, player 1 only, bool). Emulate: walk the squad's team list (team [0x5F9B94], FUN_004C9720(mgr, team, 1), next +0x14) and compare positions (obj+0x30) with radius; return [member+8] or -1."
+ },
+ "0x4B8": {
+  "name": "squad_in_zone",
+  "args": [
+   {
+    "name": "zone",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if any member of the player team is in the given zone id (same zone lookup as get_player_zone).",
+  "confidence": "medium",
+  "ds1_slot": "0x3DC",
+  "match": 0.82
+ },
+ "0x4C0": {
+  "name": "teleport_player_to_waypoint",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Moves the current player's soldier to the waypoint position (waypoint manager [0x63C9B0]), re-attaches the camera and fades the view in over 1500 ms.",
+  "confidence": "low",
+  "ds1_slot": "0x3E4",
+  "match": 0.65
+ },
+ "0x4C8": {
+  "name": "get_player_team",
+  "args": [],
+  "returns": "team",
+  "desc": "Returns the player team number (byte [0x5F9B94]).",
+  "confidence": "high",
+  "ds1_slot": "0x3EC",
+  "match": 1.0
+ },
+ "0x4CC": {
+  "name": "get_loading_save_state",
+  "args": [],
+  "returns": "int",
+  "desc": "Raw value of the 'level is being loaded from a save' field ([0x60EDC4]+0xA4); scripts treat non-zero as loading a save.",
+  "confidence": "medium",
+  "ds1_slot": "0x3F0",
+  "match": 1.0
+ },
+ "0x4D0": {
+  "name": "is_loading_save",
+  "args": [],
+  "returns": "bool",
+  "desc": "True while the level is being started from a saved game ([0x60EDC4]+0xA4 != 0); scripts then skip intros and set their state to 'in game'.",
+  "confidence": "high",
+  "ds1_slot": "0x3F4",
+  "match": 1.0
+ },
+ "0x4D4": {
+  "name": "team_none_downed",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True unless some team member is down (health <= 0) but not yet finally dead (class query 3). Mission1 checks it for team 0 before ending the mission at the extraction.",
+  "confidence": "low",
+  "ds1_slot": "0x3F8",
+  "match": 0.64
+ },
+ "0x4DC": {
+  "name": "set_team_alert_level",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the AI alert level (soldier +0x2DC, raises +0x2D8) of every member of the team, active and inactive lists; hostile soldiers are kept at >= 3. Seen with 3 and 4.",
+  "confidence": "medium",
+  "ds1_slot": "0x400",
+  "match": 0.99
+ },
+ "0x4E0": {
+  "name": "set_team_ai_flag_80",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears AI flag 0x80 in soldier +0x284 for every member of the team (players' soldiers also refreshed). Meaning of the flag unknown; used in the Training levels.",
+  "confidence": "low",
+  "ds1_slot": "0x404",
+  "match": 0.99
+ },
+ "0x4E4": {
+  "name": "squad_set_flag_1000",
+  "args": [],
+  "returns": "none",
+  "desc": "Every player-team object (0x4CD340(team [0x61B0EC], 1)) whose unit has no +0xB4 gets 0x471C20(1): soldier +0x27C |= 0x1000 and, when it holds nothing (vtable+0x84 = 0), 0x45A9A0(1) (takes a weapon in hand). No Desert Storm slot touches that flag.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4463F0",
+  "lua_hint": "Probably 'squad ready weapons' - leave out, or make each squad soldier hold his main weapon."
+ },
+ "0x4E8": {
+  "name": "set_teams_not_hostile",
+  "args": [
+   {
+    "name": "team_a",
+    "type": "team"
+   },
+   {
+    "name": "team_b",
+    "type": "team"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears both entries of the team relationship matrix 0x640480[a][b] / [b][a] (non-zero = hostile). Mission1 uses (0,2),(1,2) at the extraction.",
+  "confidence": "low",
+  "ds1_slot": "0x408",
+  "match": 0.54
+ },
+ "0x4F0": {
+  "name": "get_team_skill_level",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "int",
+  "desc": "Average skill / trooper level (0-9, soldier +0x2A18 incl. rank bonus) of the team's non-captive members, rounded, capped at 9.",
+  "confidence": "low",
+  "ds1_slot": "0x410",
+  "match": 0.42
+ },
+ "0x4FC": {
+  "name": "set_team_skill_level",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the skill / trooper level (0-9, soldier +0x2A18, accuracy from table 0x619428) of every member of the team.",
+  "confidence": "medium",
+  "ds1_slot": "0x41C",
+  "match": 0.99
+ },
+ "0x500": {
+  "name": "team_has_members",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the team's active object list is not empty.",
+  "confidence": "high",
+  "ds1_slot": "0x420",
+  "match": 1.0
+ },
+ "0x504": {
+  "name": "is_player_aiming",
+  "args": [],
+  "returns": "bool",
+  "desc": "True if player 1 is in aim mode (player +8 == 2). Training tutorial check.",
+  "confidence": "medium",
+  "ds1_slot": "0x424",
+  "match": 0.73
+ },
+ "0x508": {
+  "name": "exit_aim_mode_all",
+  "args": [],
+  "returns": "none",
+  "desc": "For every input block (count u16 [0x6315B0], blocks 0x62FF7C stride 0x58C): +0x3C0 = 0, then 0x427730 (= DS1 FUN_0044D6C0) -> +0x340 = 0 and 0x426FE0(1) (= DS1 FUN_0044DC70): leaves aim / scope mode (player +8 == 2), FOV back to 70. Mission07 before cutscenes.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4408D0",
+  "lua_hint": "For i < u16 [0x610798]: block = 0x60F5B8 + i*0x478; [block+0x3E4] = 0; thiscall FUN_0044D6C0(block). (DS1 does exactly this inside its own player-control code, e.g. 0x4862FB / 0x486FB4.)"
+ },
+ "0x50C": {
+  "name": "is_player_fire_mode_burst",
+  "args": [],
+  "returns": "bool",
+  "desc": "True if player 1's held weapon (type 6) is in fire mode 2 (burst). Training tutorial check.",
+  "confidence": "medium",
+  "ds1_slot": "0x428",
+  "match": 1.0
+ },
+ "0x51C": {
+  "name": "is_door_closed",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True if the door's open flag (object +0x54 bit 1) is clear.",
+  "confidence": "medium",
+  "ds1_slot": "0x438",
+  "match": 0.91
+ },
+ "0x520": {
+  "name": "open_and_unlock_door",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x471520(door, 1.0) = set_door_open (DS2 0x530; door type 7, ignored while busy +0x58 bit 0) then 0x470890(door, 0x10, 8) = set_door_flags: flags = (flags & ~0x10) | 8. Flag 8 = unlocked (the key code 0x41F7A8 sets it, as DS1 0x4468A0 does on +0x54). 135 call sites.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445640",
+  "lua_hint": "api[0x43C](door, 1.0); api[0x440](door, 0x18, 8). DS1 door flags are at +0x54 instead of +0x58.",
+  "ds1_close": "0x43C",
+  "match": "close: DS1 needs two calls: set_door_open(door, 1.0) + set_door_flags(door, 0x18, 8)"
+ },
+ "0x528": {
+  "name": "lock_door",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x470890(door, 0x18, 0): clears door flags 8 (unlocked) and 0x10 on a type-7 object (+0x58). Missions lock many doors at start (Mission02 0x44, 0x45, 0x74, 0x17C-0x17F ...); 87 sites.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445680",
+  "lua_hint": "api[0x440](door, 0x18, 0).",
+  "ds1_close": "0x440",
+  "match": "close: DS1 set_door_flags(door, 0x18, 0) does it"
+ },
+ "0x530": {
+  "name": "set_door_open",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   },
+   {
+    "name": "open",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Opens (non-zero) or closes (0.0) a door object (type 7) unless it is locked / busy (+0x54 bit 0); sends script message 0x15. Mission1 passes 1.0.",
+  "confidence": "low",
+  "ds1_slot": "0x43C",
+  "match": 0.38
+ },
+ "0x534": {
+  "name": "set_door_flags",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   },
+   {
+    "name": "mask",
+    "type": "int"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Door object (type 7) flags +0x54 = (flags & ~mask) | value. Mission1 clears bit 8 on several doors.",
+  "confidence": "medium",
+  "ds1_slot": "0x440",
+  "match": 0.96
+ },
+ "0x538": {
+  "name": "set_all_door_flags",
+  "args": [
+   {
+    "name": "mask",
+    "type": "int"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "For every team (count [[0x6800E0]+0x10]) both the active (0x4CD340(team, 7)) and inactive (0x4CD300) door lists: set_door_flags(id, mask, value) (0x470890: +0x58 = (flags & ~mask) | value). Mission06: (0x10, 0).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44B310",
+  "lua_hint": "Loop DS1 door objects (type 7: FUN_004C9720([0x63C9A0], team, 7) and FUN_004C96D0 per team, next +0x14) and api[0x440](id, mask, value)."
+ },
+ "0x53C": {
+  "name": "add_door_route_link",
+  "args": [
+   {
+    "name": "door",
+    "type": "object"
+   },
+   {
+    "name": "marker_a",
+    "type": "marker"
+   },
+   {
+    "name": "marker_b",
+    "type": "marker"
+   },
+   {
+    "name": "flag",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Registers an AI route link (marker a -> b, flag) that passes through the door (up to 7 slots at door +0xC0), so routing follows the door's state.",
+  "confidence": "medium",
+  "ds1_slot": "0x444",
+  "match": 1.0
+ },
+ "0x540": {
+  "name": "set_target_raised",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "up",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the up/down (open) state of a non-door object class with +0x54 state bits (bit 1 state, bit 0 changing, time +0x88); non-zero raises. Training1 uses it on the shooting targets 0x85/0x86.",
+  "confidence": "low",
+  "ds1_slot": "0x448",
+  "match": 0.81
+ },
+ "0x548": {
+  "name": "set_switch_state_by_name",
+  "args": [
+   {
+    "name": "name_hash",
+    "type": "int"
+   },
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switch manager [0x680108] (entries 0x68 B at +8, count +0x10, name hash +0x48; 0x4FEAD0 finds by hash) -> 0x4FEB20(state): 0 = entry +0x10 bit 1 set / bit 0 cleared and on/off models swapped; non-zero clears bits 0-1 and swaps back (same as DS1 FUN_004F71C0). Mission04 with name hashes (0xE7AF85F1 ...).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4429F0",
+  "lua_hint": "Find the index in DS1's manager [0x63C9C4] (+8 array of 100-byte entries, +0x10 count, hash at entry +0x44) then api[0x450](index, state). Hash = FUN_004B9A10 over the name as written.",
+  "ds1_close": "0x450",
+  "match": "close: DS1 set_switch_state takes the switch INDEX, DS2 the name hash"
+ },
+ "0x54C": {
+  "name": "set_switch_hidden_by_name",
+  "args": [
+   {
+    "name": "name_hash",
+    "type": "int"
+   },
+   {
+    "name": "hidden",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Same lookup; 0x4FEC00: entry +0x44 = hidden; 1 sets render flag 0x10000000 (+0x10) on both switch model instances (entry +0 / +4), other values clear it. Mission04 (hashes, 1).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442A20",
+  "lua_hint": "DS1 switch entry +0 / +4 are the model instances; set / clear 0x10000000 in their flag word (DS1 instance flags at +0xC; DS2 uses +0x10) - the bit hide_object (0x2C4) uses."
+ },
+ "0x554": {
+  "name": "rebuild_squad_hud",
+  "args": [],
+  "returns": "none",
+  "desc": "Re-runs the HUD screen set-up ([0x617A04] vtable[3]) so the soldier panels match the current squad.",
+  "confidence": "high",
+  "ds1_slot": "0x454",
+  "match": 1.0
+ },
+ "0x560": {
+  "name": "set_pause_allowed",
+  "args": [
+   {
+    "name": "allowed",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the pause-menu allowed flag [0x61079C]; mission scripts call it with 1 once play starts.",
+  "confidence": "high",
+  "ds1_slot": "0x460",
+  "match": 1.0
+ },
+ "0x568": {
+  "name": "set_all_units_ai_flag_80000",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears AI flag 0x80000 in +0x284 of every active object in teams 0-9. Meaning unknown (Mission4 toggles it).",
+  "confidence": "low",
+  "ds1_slot": "0x468",
+  "match": 0.81
+ },
+ "0x56C": {
+  "name": "next_team_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "object",
+  "desc": "Script id of the next object in the same team list (wraps to the list's first entry); for iterating a team.",
+  "confidence": "medium",
+  "ds1_slot": "0x46C",
+  "match": 1.0
+ },
+ "0x570": {
+  "name": "set_frontend_locked",
+  "args": [
+   {
+    "name": "locked",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the front-end busy/lock flag [0x617C20] (state changes are ignored while set); locking also hides the mouse cursor.",
+  "confidence": "low",
+  "ds1_slot": "0x470",
+  "match": 0.43
+ },
+ "0x574": {
+  "name": "set_frontend_state",
+  "args": [
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Front-end state setter 0x47EF20 (0x0E = in game, 0x14 briefing, 0x1C ...).",
+  "confidence": "low",
+  "ds1_slot": "0x474",
+  "match": 0.54
+ },
+ "0x578": {
+  "name": "set_view_overlay_alpha",
+  "args": [
+   {
+    "name": "value",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets view controller +0x2BC (default 0.5) on every view; multiplies an overlay/flare alpha in the camera manager draw. Missions 5A/5B/7 use 0.25 / 0.15.",
+  "confidence": "low",
+  "ds1_slot": "0x480",
+  "match": 0.53
+ },
+ "0x57C": {
+  "name": "set_cinematic_tint_colour",
+  "args": [
+   {
+    "name": "rgba",
+    "type": "float[4]*"
+   }
+  ],
+  "returns": "none",
+  "desc": "Copies 4 floats into 0x6804A4..0x6804B0 = the colour a view controller's overlay pass 0x4DB7D0 draws with. Mission03 (0.8, 0.6, 0.4, 0.15 = sepia), Mission07 (0, 0, 0, 1). Paired with 0x580.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x444270",
+  "lua_hint": "Store the colour; draw it as a full-screen alpha quad while 0x580 is on and a cinematic plays (DS1 cinematic bit [0x63C948]+0x1B8C bit 0) - plugin overlay."
+ },
+ "0x580": {
+  "name": "set_cinematic_tint",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool (byte)"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears bit 3 (0x8) of world [0x68008C]+0x1B8C (bit 0 = cinematic). The render loop (0x40E12D) draws the per-view colour overlay 0x4DB7D0 (colour from 0x57C) while cinematic / front-end state 0x13 and this bit is set; 0x5532B4 also scales a value by it.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44AA10",
+  "lua_hint": "Plugin-side overlay flag; DS1's bit 3 of [0x63C948]+0x1B8C has no reader, so don't write it."
+ },
+ "0x588": {
+  "name": "get_mission_result",
+  "args": [],
+  "returns": "int",
+  "desc": "Campaign +4: 0 running, 1 failed, 2 success (as set by end_mission).",
+  "confidence": "high",
+  "ds1_slot": "0x488",
+  "match": 1.0
+ },
+ "0x58C": {
+  "name": "end_mission",
+  "args": [
+   {
+    "name": "result",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Ends the mission: 2 success (awards points/medals), 1 failure (also plays music cue 0x19).",
+  "confidence": "medium",
+  "ds1_slot": "0x48C",
+  "match": 0.79
+ },
+ "0x590": {
+  "name": "set_mission_index",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Campaign +0: current mission number (Mission11A 11, 11B 12, 12B 14, front end 15).",
+  "confidence": "medium",
+  "ds1_slot": "0x494",
+  "match": 1.0
+ },
+ "0x594": {
+  "name": "set_mission_texts",
+  "args": [
+   {
+    "name": "text_a",
+    "type": "text"
+   },
+   {
+    "name": "text_b",
+    "type": "text"
+   }
+  ],
+  "returns": "none",
+  "desc": "Stores two catalog text hashes in campaign +8 / +0xC (mission name texts, set during init next to the briefing).",
+  "confidence": "low",
+  "ds1_slot": "0x498",
+  "match": 1.0
+ },
+ "0x59C": {
+  "name": "add_mission_points",
+  "args": [
+   {
+    "name": "points",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Adds to campaign +0x12B8: skill points every squad soldier gets at mission success (scaled by difficulty).",
+  "confidence": "low",
+  "ds1_slot": "0x4A0",
+  "match": 0.6
+ },
+ "0x5A0": {
+  "name": "set_promotion_award",
+  "args": [
+   {
+    "name": "enabled",
+    "type": "int"
+   },
+   {
+    "name": "min_points",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Campaign +0x12D8/+0x12DC: if enabled and nobody died, the squad's top scorer with at least min_points gets an extra award/promotion (+0x11 counter) at mission end.",
+  "confidence": "medium",
+  "ds1_slot": "0x4A4",
+  "match": 1.0
+ },
+ "0x5A4": {
+  "name": "set_medal_threshold",
+  "args": [
+   {
+    "name": "points",
+    "type": "int"
+   },
+   {
+    "name": "medal",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Campaign +0x12BC[medal] (medal 0-6): a soldier whose mission points reach the threshold gets that medal at mission end.",
+  "confidence": "medium",
+  "ds1_slot": "0x4A8",
+  "match": 0.89
+ },
+ "0x5A8": {
+  "name": "set_max_mission_points",
+  "args": [
+   {
+    "name": "points",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Campaign +0x12E0: cap on the points a soldier can earn in this mission (applied at mission end).",
+  "confidence": "medium",
+  "ds1_slot": "0x4AC",
+  "match": 1.0
+ },
+ "0x5AC": {
+  "name": "activate_objective",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record (byte, sign-extended)"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x436620: only for state 0: popup of record +0x14 for 5 s (0x443820) + sound 0xCD4 (when +0x14 != -1), state = 1, display entry +0x4C gets flags |= 0xA (shown + tracked, 0x440390 = DS1 show_objective), auto types 0/1/2/6 re-evaluated at once (0x436340). The old name 'complete_objective' was wrong. DS2 objective records live in the mission data manager 0x631848 (the same object that holds the spawn points): records at [0x63189C] (= mgr+0x54), 0x54 bytes each, count mgr+0x58. Record: +0 result when achieved (0 mission success: script message 0x11, or campaign end_mission(2) when no script; 1 mission failure after +4 ms: mgr+0x5C = now + delay, then message 0x12 / end_mission(1) (0x436C90); 2 activate record +0xC; 3 deactivate record +0xC and mark ITS display entry done), +4 delay ms, +8 type (0/1/2/6 are evaluated automatically by 0x436340; 3 = composite, achieved when all records in list +0x3C/+0x40 are state 2, 0x4362B0), +0xC other record index, +0x10 achieved text hash, +0x14 activated text hash, +0x18 STATE (0 inactive, 1 active, 2 achieved), +0x30/+0x34 script-id list for the auto types, +0x3C/+0x40 sub-record list, +0x4C display index (byte, -1 none) = the campaign objective entry [0x62F454]+0x12E8 list (entry layout identical to DS1's [0x60EDC0]+0x12E4 list: +0 index byte, +0x14 flags, +0x18 12 marker positions, +0xA8 12 marker objects, next +0xD8). Display flags DS2 uses: activation |= 0xA (shown+tracked, 0x440390), achievement = (flags & ~8) | 4 + sound 0xCD4 (0x440520) - exactly DS1's bits 1|2|4|8. There is NO failed state or failed flag: a 'failure' objective is a record whose result is 1. Records are level data, not created through the API (DS2 has no add_objective slot).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4403B0",
+  "lua_hint": "Lua keeps state[i]; if state[i] == 0: state[i] = 1, api[0x4B8](display[i]) (+ popup / sound if wanted). display[i] = the record's +0x4C from the DS2 level's objective data.",
+  "ds1_close": "0x4B8",
+  "match": "close: DS1 show_objective(display index) only sets flags |= 0xA; DS2 also keeps a record state, pops up the record's text and plays 0xCD4"
+ },
+ "0x5B0": {
+  "name": "objective_is_active",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Record state ([0x63189C] + i*0x54 + 0x18) == 1 (activated, not yet achieved). Old name 'objective_is_complete' was wrong.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4403D0",
+  "lua_hint": "state[i] == 1 from the Lua objective table (DS1 0x4D0 get_objective_state only reports display flags shown/done)."
+ },
+ "0x5B4": {
+  "name": "complete_objective",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x4366B0: ignored while a delayed mission end is pending (mgr+0x5C) or already state 2; state = 2, popup of record +0x10 (5 s), display entry +0x4C = (flags & ~8) | 4 + sound 0xCD4 (0x440520 = DS1 complete_objective), script message 0x4F (record index), composite check 0x4362B0, then by result +0: 0 message 0x11 / end_mission(2), 1 delayed failure (mgr+0x5C = now + record +4 ms -> message 0x12 / end_mission(1)), 2 activate record +0xC, 3 deactivate record +0xC and mark its display entry done. Old name 'fail_objective' was wrong: there is no failed state.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4403F0",
+  "lua_hint": "if not pending_end and state[i] ~= 2: state[i] = 2; api[0x4C0](display[i]); then result: 0 -> api[0x48C](2) (DS2 sends the script message 0x11 instead when a script exists), 1 -> timer then api[0x48C](1), 2 -> activate(other), 3 -> state[other] = 0 + api[0x4C0](display[other]).",
+  "ds1_close": "0x4C0",
+  "match": "close: DS1 complete_objective(display index) does the display part (flag 4, untracked, sound 0xCD4); the record state, popup text, message 0x4F and the result chain need Lua"
+ },
+ "0x5B8": {
+  "name": "objective_is_complete",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Record state == 2 (achieved). Old name 'objective_is_failed' was wrong.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440410",
+  "lua_hint": "state[i] == 2; DS1 0x4D0 get_objective_state(display, &shown, &done) gives done = flag 4 if only the display matters."
+ },
+ "0x5BC": {
+  "name": "deactivate_objective",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x436290: an ACTIVE record (state 1) goes back to 0 (inactive). Display flags are not touched. Old name 'reopen_objective' was wrong (it does not undo a completed one).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440430",
+  "lua_hint": "if state[i] == 1 then state[i] = 0 end (pure Lua; DS1 0x4BC hide_objective only if the display should go too - DS2 doesn't)."
+ },
+ "0x5C0": {
+  "name": "remove_objective_object_marker",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   },
+   {
+    "name": "object",
+    "type": "script_id"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x431250: display entry of record +0x4C (0x42ED20) -> 0x42E8F0(id): clears the first object-marker slot (+0xA8 + n*4, position slot n zero) whose object has script id = id. Mission03 (4, 0x16) / (4, 0x3D).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440450",
+  "lua_hint": "DS1 entry (FUN_004586E0([0x60EDC0], display)) has the same layout: for n < 12 with position +0x18+n*12 = 0 and [entry+0xA8+n*4] ~= 0 and [[entry+0xA8+n*4]+8] == id: write 0. DS1 adds such markers with 0x4C8."
+ },
+ "0x5C4": {
+  "name": "add_objective_marker_at_waypoint",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective record"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Waypoint table [0x6800F0] entry (0x28 B, position at +4, 0x4D9790) -> 0x431280: display entry of record +0x4C gets a fixed-position marker in its first empty position slot (0x42E7C0). Not an object attach (old name 'objective_attach_object').",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440470",
+  "lua_hint": "api[0x4D4](display[i], waypoint position) - DS1 waypoint table [0x63C9B0] entry = base + id*0x20 (FUN_004D13F0), position at +0.",
+  "ds1_close": "0x4D4",
+  "match": "close: DS1 add_objective_marker(display index, position*) - DS2 takes a record index and a waypoint id"
+ },
+ "0x5C8": {
+  "name": "remove_objective_marker_at_waypoint",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the objective marker at a waypoint's position (DS1 0x4DC with the record's display index).",
+  "confidence": "medium",
+  "match": 0.76,
+  "ds1_close": "0x4DC",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x5CC": {
+  "name": "clear_objective_markers",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4404D0 -> 0x431300 on the mission object 0x631848: maps the mission objective index (byte, +0x54 table of 0x54-byte entries, +0x4C) to the campaign objective (0x42ED20 on [0x62F454], list +0x12E8) and calls 0x42E830: zeroes all 12 marker positions (entry +0x18.., 12 bytes each) and the marker count byte +0x15. Attached-object pointers (+0xA8..) are left. Mission07 calls it with 2.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4404D0",
+  "lua_hint": "for slot = 0, 11 do api[0x4D8](objective, slot) end (DS1 objective index = campaign index; same mapping as the other objective slots)",
+  "ds1_close": "0x4D8",
+  "match": "close: DS1 remove_objective_marker clears ONE slot - call it for slots 0-11"
+ },
+ "0x5D0": {
+  "name": "set_objective_tracked",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective"
+   },
+   {
+    "name": "slot",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets / clears the objective's tracked flag (DS1 0x4CC with the record's display index).",
+  "confidence": "low",
+  "match": 0.67,
+  "ds1_close": "0x4CC",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x5D4": {
+  "name": "remove_objective_marker_at",
+  "args": [
+   {
+    "name": "objective",
+    "type": "objective"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the objective marker whose position equals the given point.",
+  "confidence": "low",
+  "ds1_slot": "0x4DC",
+  "match": 0.62
+ },
+ "0x5D8": {
+  "name": "set_briefing_text",
+  "args": [
+   {
+    "name": "hash",
+    "type": "text"
+   },
+   {
+    "name": "slot",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "as DS1 +0x4E0: briefing title (0), date (1), place (2), story pages (3+)",
+  "confidence": "high",
+  "source": "CDS II.exe",
+  "ds1_slot": "0x4E0"
+ },
+ "0x5DC": {
+  "name": "debug_printf",
+  "args": [
+   {
+    "name": "format",
+    "type": "string"
+   },
+   {
+    "name": "args",
+    "type": "other"
+   }
+  ],
+  "returns": "none",
+  "desc": "vsprintf into a 1 KB buffer and appends it to the debug text buffer 0x757140 (debug output).",
+  "confidence": "low",
+  "ds1_slot": "0x4E4",
+  "match": 0.55
+ },
+ "0x5E0": {
+  "name": "debug_draw_unit_ids",
+  "args": [],
+  "returns": "none",
+  "desc": "Debug: draws the script ids of all team 0-3 units on screen (the player's marked '<<') plus a counter.",
+  "confidence": "medium",
+  "ds1_slot": "0x4E8",
+  "match": 0.7
+ },
+ "0x5E8": {
+  "name": "cycle_view_to_next_unit",
+  "args": [],
+  "returns": "none",
+  "desc": "Debug: steps a global index to the next suitable object and makes every player's view follow it.",
+  "confidence": "low",
+  "ds1_slot": "0x4F0",
+  "match": 0.57
+ },
+ "0x5EC": {
+  "name": "stop_all_cameras",
+  "args": [],
+  "returns": "none",
+  "desc": "Stops all 128 scripted cameras and resets view 0 to the game camera.",
+  "confidence": "high",
+  "ds1_slot": "0x4F4",
+  "match": 1.0
+ },
+ "0x5F4": {
+  "name": "set_view_camera",
+  "args": [
+   {
+    "name": "camera",
+    "type": "camera"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes camera n the active camera of view 0 (0 = back to the player camera), resets the view controller; non-zero also starts a timer ramp (1.0, 5.0).",
+  "confidence": "medium",
+  "ds1_slot": "0x4FC",
+  "match": 1.0
+ },
+ "0x5F8": {
+  "name": "is_game_camera_active",
+  "args": [],
+  "returns": "bool",
+  "desc": "True if view 0 has no scripted camera (camera id 0).",
+  "confidence": "medium",
+  "ds1_slot": "0x500",
+  "match": 0.83
+ },
+ "0x604": {
+  "name": "place_at_waypoint",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Teleports an object (types 0/1/6) to a scene waypoint's position (waypoint table [0x63C9B0], 32-byte entries), keeping the exact height (FUN_0049ce70 -> FUN_004c9f20).",
+  "confidence": "high",
+  "ds1_slot": "0x50C",
+  "match": 0.93
+ },
+ "0x608": {
+  "name": "place_at_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Teleports an object to a world position (cm) if it is active (vtable+8), exact height kept.",
+  "confidence": "high",
+  "ds1_slot": "0x510",
+  "match": 0.98
+ },
+ "0x60C": {
+  "name": "face_waypoint_direction",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x448540: waypoint rotation from [0x6800F0] (0x4D97A0, 0x28-byte entries, +0x10); soldiers (type 1): yaw + 180 wrapped at 360 -> wanted facing 0x499370(rot, 0) + 0x498740(7); types 0 / 6 rotated directly (0x4CD400). Identical to DS1 FUN_00485D20 (0x49E7B0 + 0x49D4A0(7)). Mission04 turns 20 actors with it.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x448540",
+  "ds1_slot": "0x514",
+  "match": "same"
+ },
+ "0x610": {
+  "name": "queue_call",
+  "args": [
+   {
+    "name": "callback",
+    "type": "other"
+   },
+   {
+    "name": "arg1",
+    "type": "int"
+   },
+   {
+    "name": "arg2",
+    "type": "int"
+   },
+   {
+    "name": "delay_ms",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Timed callback queue (the cutscene / overview builder). Pushes a type-6 event on the event queue [0x63C978] (FUN_004db6b0): after delay_ms (float, milliseconds from now) the game calls the DLL function callback(event*), which reads arg1 at event+0x34 and arg2 at event+0x38 and calls ONE ordinary API slot with them. Events queued while the cinematic bit is set get flags 0x1E (skippable: +0x560 runs them at once). There are no command codes - the 'command' is whichever API slot the callback wraps; see 'commands' (API slot(s) the callback calls: number of the 2783 queue_call sites).",
+  "confidence": "medium",
+  "commands": {
+   "0x4FC": "camera path start (190)",
+   "0x7C0+0x110/0x114": "look up object, then move/route it (164; +0x110/+0x114 alone: 52)",
+   "0x0C8": "deactivate object (144)",
+   "0x7C0+0x654": "play animation with mode (144)",
+   "0x57C": "start firing (129)",
+   "0x034": "unknown (126; callback is itself a DLL function pointer arg)",
+   "0x580": "stop firing (121)",
+   "0x66C": "place at waypoint with its rotation (118)",
+   "0x540": "fade out to colour (113; arg1 = ms int, arg2 = colour 0xAARRGGBB)",
+   "0x53C": "fade in from colour (112; arg1 = ms int, arg2 = colour)",
+   "0x52C": "play scripted animation / back to default (111)",
+   "0x0C4": "activate object (108)",
+   "0x028": "unknown (91)",
+   "0x20C": "unknown (85)",
+   "0x63C": "attack target (71)",
+   "0x700": "unknown (71)",
+   "0x210": "unknown (70)",
+   "0x678": "unknown (65)",
+   "0x6C4": "unknown (64)",
+   "0x674": "unknown (45)",
+   "0x54C": "select item by name (39)",
+   "0x660": "set speed percent (38)",
+   "0x6CC": "unknown (38)",
+   "0x078": "set time of day (30)",
+   "0x560+0x4FC+0x4F4+0x534+0x584+0x51C+0x598": "cutscene end chain: run queued calls, camera off, letterbox off, AI on, input on, movie end (30)",
+   "0x530": "letterbox on (29)",
+   "0x534": "letterbox off (29)",
+   "0x728": "unknown (26)",
+   "0x658": "night vision on (15)",
+   "0x65C": "night vision off (15)",
+   "0x5F8": "make invulnerable (13)",
+   "0x640": "clear attack target (12)",
+   "0x644": "aim at target (12)",
+   "0x648": "clear aim target (7)",
+   "0x610": "disable AI (5)",
+   "0x650": "dismount (4)",
+   "0x670": "set default movement state (3)",
+   "0x544": "take control of object (2)",
+   "0x548": "release control (2)",
+   "0x5F4": "make vulnerable (2)",
+   "0x634": "face object (2)",
+   "0x638": "face position (1)",
+   "0x588": "freeze AI (1)",
+   "others (1-19 each)": "0x0FC 0x730 0x06C 0x7F0 0x7F4 0x7F8 0x7E8 0x6D8 0x208 0x234 0x62C 0x43C 0x32C 0x298 0x218 0x6D4 0x6F8 0x6FC 0x080 0x718 0x848 0x6D0 0x084 0x630 0x29C 0x8AC 0x6DC 0x538"
+  },
+  "ds1_slot": "0x518",
+  "match": 0.89
+ },
+ "0x614": {
+  "name": "set_player_control",
+  "args": [
+   {
+    "name": "enabled",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns player input on/off for every player block (block +0x34); off parks each block's soldier in 0x617C40 and detaches it, on reattaches it. Used around cutscenes.",
+  "confidence": "medium",
+  "ds1_slot": "0x51C",
+  "match": 0.88
+ },
+ "0x61C": {
+  "name": "load_animation",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "anim",
+  "desc": "Loads (or finds already loaded) a .prs animation by file name through the anim manager [0x63C968] (FUN_00500a40); returns the handle used by +0x52C / +0x654.",
+  "confidence": "high",
+  "ds1_slot": "0x524",
+  "match": 1.0
+ },
+ "0x624": {
+  "name": "play_scripted_animation",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "anim",
+    "type": "anim"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays a loaded animation on a soldier as scripted movement state 0x4B (anim mode 3); anim 0 returns the soldier to the default movement state (the one set by +0x670).",
+  "confidence": "high",
+  "ds1_slot": "0x52C",
+  "match": 0.98
+ },
+ "0x628": {
+  "name": "letterbox_on",
+  "args": [],
+  "returns": "none",
+  "desc": "Starts the cinematic letterbox bars (view controller [0x63C98C] FUN_004d1d00(1); skipped with dev flag u).",
+  "confidence": "high",
+  "ds1_slot": "0x530",
+  "match": 1.0
+ },
+ "0x62C": {
+  "name": "letterbox_off",
+  "args": [],
+  "returns": "none",
+  "desc": "Removes the cinematic letterbox bars (FUN_004d1d00(0)).",
+  "confidence": "high",
+  "ds1_slot": "0x534",
+  "match": 1.0
+ },
+ "0x634": {
+  "name": "fade_in",
+  "args": [
+   {
+    "name": "duration_ms",
+    "type": "float"
+   },
+   {
+    "name": "red",
+    "type": "int"
+   },
+   {
+    "name": "green",
+    "type": "int"
+   },
+   {
+    "name": "blue",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Screen fade from a solid colour (0-255 per channel) back to the picture over duration_ms (view controller FUN_004d2c70, mode 1). Queued at the start of each cutscene shot.",
+  "confidence": "medium",
+  "ds1_slot": "0x53C",
+  "match": 0.92
+ },
+ "0x638": {
+  "name": "fade_out",
+  "args": [
+   {
+    "name": "duration_ms",
+    "type": "float"
+   },
+   {
+    "name": "red",
+    "type": "int"
+   },
+   {
+    "name": "green",
+    "type": "int"
+   },
+   {
+    "name": "blue",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Screen fade from the picture to a solid colour over duration_ms (FUN_004d2cd0, mode 0); (0, 0,0,0) clears. Queued at the end of each cutscene shot.",
+  "confidence": "medium",
+  "ds1_slot": "0x540",
+  "match": 0.92
+ },
+ "0x63C": {
+  "name": "take_control",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes every player block drive the given soldier (view 0 camera saved in 0x5ED118 and switched, block soldier = object, camera mode 1) - scripted 'player takes control' moments.",
+  "confidence": "medium",
+  "ds1_slot": "0x544",
+  "match": 0.88
+ },
+ "0x640": {
+  "name": "release_control",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Undoes +0x544: block soldier cleared, control mode 2 (AI drives), saved camera restored.",
+  "confidence": "medium",
+  "ds1_slot": "0x548",
+  "match": 0.81
+ },
+ "0x644": {
+  "name": "select_item_by_name",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "weapon",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes a soldier hold the inventory item whose definition name matches (e.g. \"US_WPN_M16A2\") (FUN_0042ec10).",
+  "confidence": "high",
+  "ds1_slot": "0x54C",
+  "match": 0.92
+ },
+ "0x674": {
+  "name": "set_combat_speech_muted",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4424F0: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x1000000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Set = the soldier says no AI speech: the gates of the spotted-enemy callouts 0x406030 (0x20/0xBB2 infantry, 0x534/0xC92 ...), 0x406950 (0x4F7/0x852), 0x480ED0, 0x481B40, 0x483290, 0x483460 all return when it is set. Mission01 sets it on the squad (ids 0, 6, 7, 8) around scripted scenes and clears it afterwards.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4424F0",
+  "lua_hint": "DS1 has no per-soldier mute: set_idle_chatter (0x1D0, obj, 0) stops only idle chatter. Full emulation needs a plugin hook on DS1's speech FUN_004366D0 (thiscall soldier) that skips listed soldiers; otherwise ignore (cosmetic)."
+ },
+ "0x678": {
+  "name": "set_acts_badly_wounded",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x442430: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x40000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Set = AI treats the soldier as badly wounded whatever his health: 0x409720 runs its < 30 %-health branch (0x496710 retreat / call-for-help request, 1500 ms, 2500.0) when it is set, the player 'help a downed soldier' check 0x4757A0 skips him, and with bit 0x2000000 (+0x680) the running movement set becomes RUNNING_PANIC (0x47B450, movement table 0x6118F8 mode 5). Slot 0x318 clears it. Mission02 sets it with +0x680 on id 0x82 (a civilian / hostage).",
+  "confidence": "low",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442430",
+  "lua_hint": "No DS1 equivalent (DS1 AI has no wounded-retreat flag). Ignore, or approximate panic by ordering the soldier to run to a waypoint (DS1 0x110 set_path + run stance)."
+ },
+ "0x67C": {
+  "name": "reset_soldier_to_idle",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4425E0 -> 0x47DF60 (only caller): if the movement state +0x6A0 is a firing / aiming state (7, 0x1B, 5, 6, 0x1A) 0x45A9A0(1); stops every sound tagged with the soldier (+0x4C) and with its held item (0x4B35D0 on [0x6800EC]); clears targets (+0x250/+0x258 moved to +0x254/+0x25C and zeroed, +0xDC8 = 0, +0x27C &= ~0x1000, +0x139C &= ~0x200), new random chatter time +0x460, movement state 0 + flag +0x105C bit 0 cleared, default animation restarted on the render instance (+0x30). Mission01/02/03/06/08 call it on every squad member right after movie_start (0x6B0) - puts actors into a clean idle pose for a cutscene.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4425E0",
+  "lua_hint": "DS1 pieces: stop_firing (0x580), stop_moving (0x204), reset_soldier_state (0x294); DS1 reset_all_soldiers (0x88C, FUN_00489E40) does the target clearing (+0x258/+0x260) + held-item release for EVERY soldier - x86rt-call its per-soldier part or just 0x580 + 0x204 per actor."
+ },
+ "0x680": {
+  "name": "set_panic_run",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x442470: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x2000000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Only read at 0x47B4CB: together with bit 0x40000 (+0x678) a soldier ordered to run uses movement state 0xE4 = RUNNING_PANIC (movement table 0x6118F8 [state*0x2A + mode], mode 5) instead of the normal run (mode 3 -> 4 limping run when health < 30 %). Mission02: 0x678(0x82, 1) + 0x680(0x82, 1).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442470",
+  "lua_hint": "DS1 has no RUNNING_PANIC state - ignore (soldier runs normally)."
+ },
+ "0x684": {
+  "name": "set_keep_weapon",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4424B0: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x20000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Set = no automatic weapon choice: the AI weapon selector 0x45AB80 (from the soldier update 0x488697; picks the best weapon for the target via 0x45A0F0 and switches with 0x45A9A0) returns at once. Missions set it with +0x690 after start_firing (0x694) so a scripted gunner keeps the weapon he was given (Mission02 ids 0x5C / 0x84, Mission03).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4424B0",
+  "lua_hint": "No DS1 flag. DS1's AI weapon switching is different; usually harmless to ignore. If a scripted gunner swaps weapons, re-hold the item each frame (DS1 0x5CC hold_item)."
+ },
+ "0x688": {
+  "name": "set_fire_at_will",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x442530 -> 0x471C20 thiscall(soldier, on): on sets +0x27C bit 0x1000 (= DS1 +0x284 bit 0x1000) and, when the soldier holds nothing (vtable +0x84), draws the best weapon (0x45A9A0(1)); 0 clears the bit. Same code as DS1 FUN_00424750 (or dh,0x10; vtable+0x74; FUN_004A5930(1)) used by the squad order toggle FUN_00404D70 (DS2 0x404680) - the fire-at-will / hold-fire order. Mission03 toggles it on ids 0x21/0x23/0x24.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442530",
+  "lua_hint": "DS1 has the identical function but no slot: x86rt call 0x424750 thiscall (ecx = soldier object from FUN_004CA660 on [0x63C9A0]) with arg on."
+ },
+ "0x68C": {
+  "name": "set_stance_locked",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x442560: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x8000000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Set = the AI stance chooser 0x435EC0 (via 0x436240 per soldier update) skips its target-distance branch: no automatic crouch when the target is within 800 cm (0x435640(1, 1)) and no random stance change every 5 s (0x475EF0). Stance itself = +0x348, setter 0x435640(stance, flag). Mission03 once.",
+  "confidence": "low",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x442560",
+  "lua_hint": "No DS1 flag: re-apply the wanted stance each update with DS1's stance / GruntMode slots."
+ },
+ "0x690": {
+  "name": "set_hold_trigger",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4425A0: object by script id (0x4CF4F0 on [0x6800E0]); on != 0 sets, 0 clears bit 0x10000 of soldier +0x105C (a DS2-only soldier flag word; DS1's AI flags +0x284 are DS2's +0x27C). Set = the AI fire control 0x406700 never releases the trigger: without a target it normally calls 0x49A4A0 (weapon +0x68 = 0) at 0x406933 - skipped when the bit is set (0x40692A); 0x406540 (keep-spraying decision, = DS1 FUN_00408410) returns 0. Used after start_firing (0x694) with +0x684 for scripted suppressive fire (Mission02 0x5C / 0x84, Mission03), cleared before stop_firing.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4425A0",
+  "lua_hint": "DS1: call start_firing (0x57C) for the soldier every frame while the flag is on (DS1's AI releases the trigger otherwise), stop with 0x580."
+ },
+ "0x694": {
+  "name": "start_firing",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Pulls the trigger of the soldier's held weapon (weapon vtable+0x3C: +0x64 = 1, burst count for mode 2) and plays the fire stance (FUN_00427420(4)).",
+  "confidence": "medium",
+  "ds1_slot": "0x57C",
+  "match": 0.85
+ },
+ "0x698": {
+  "name": "stop_firing",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Releases the trigger of the soldier's held weapon (FUN_004a4a30: weapon +0x64/+0x68 = 0).",
+  "confidence": "high",
+  "ds1_slot": "0x580",
+  "match": 1.0
+ },
+ "0x69C": {
+  "name": "resume_ai",
+  "args": [],
+  "returns": "none",
+  "desc": "End-of-cutscene resume: sets the AI-enabled bit 0x1000000 (soldier +0x284) on all soldiers via [0x60EDA0] and clears the global no-damage flag 0x60F25C.",
+  "confidence": "medium",
+  "ds1_slot": "0x584",
+  "match": 1.0
+ },
+ "0x6A0": {
+  "name": "freeze_ai",
+  "args": [],
+  "returns": "none",
+  "desc": "Cutscene freeze: clears the AI-enabled bit 0x1000000 on all soldiers and sets the global no-damage flag 0x60F25C (counterpart of +0x584).",
+  "confidence": "medium",
+  "ds1_slot": "0x588",
+  "match": 1.0
+ },
+ "0x6A4": {
+  "name": "movie_cancel_pressed",
+  "args": [],
+  "returns": "bool",
+  "desc": "Cutscene skip query: 1 when any player pressed MOVIE_CANCEL (action 0x36), with fade + [0x618348] = 1 as side effect (also 1 with dev flag u).",
+  "confidence": "low",
+  "ds1_slot": "0x58C",
+  "match": 0.36
+ },
+ "0x6A8": {
+  "name": "movie_cancel_held",
+  "args": [],
+  "returns": "bool",
+  "desc": "Same query as +0x58C without side effects.",
+  "confidence": "low",
+  "ds1_slot": "0x590",
+  "match": 0.59
+ },
+ "0x6B0": {
+  "name": "movie_start",
+  "args": [],
+  "returns": "none",
+  "desc": "Starts a cinematic (sets cinematic bit [0x63C948]+0x1B8C bit 0).",
+  "confidence": "low",
+  "ds1_slot": "0x594",
+  "match": 0.47
+ },
+ "0x6BC": {
+  "name": "clear_battlefield",
+  "args": [],
+  "returns": "void",
+  "desc": "0x4428F0: resets the 0x33C-byte entries of [0x68011C] (0x4F8AA0), clears all projectiles ([0x6800E4] 0x4F3F80), re-initialises the 0x4C-byte effect / explosion entries of [0x6800B8] (0x4E18C0), removes the corpses of the corpse manager [0x641614] (0x46EE10: 6 holders -> vtable+8(0); same manager as 0x904), stops every playing non-reserved voice (0x4B3550 on [0x6800EC]) and sets view controller [0x6800CC] +0x74 = 0. Called right before movie_start in Missions 1/2/3/6/8 (cutscene start cleanup).",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4428F0",
+  "lua_hint": "DS1 FUN_00486EB0 does the same job (effects, projectiles, decals, corpses, particles, explosions, emitters - it is what DS1 movie_end 0x598 / reset_world_state 0x884 call): x86rt call 0x486EB0 (no args), then 0x6C0 set_view_controller_74(0). Note it also stops DS1 emitters; sounds are not stopped (DS1 0x34 stop_stream only stops the stream)."
+ },
+ "0x6C0": {
+  "name": "movie_end",
+  "args": [],
+  "returns": "none",
+  "desc": "Ends a cinematic; sends script message 0x12 after the overview.",
+  "confidence": "low",
+  "ds1_slot": "0x598",
+  "match": 0.52
+ },
+ "0x6C4": {
+  "name": "link_convoy",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   },
+   {
+    "name": "ahead",
+    "type": "object"
+   },
+   {
+    "name": "behind",
+    "type": "object"
+   },
+   {
+    "name": "gap",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Links vehicles into a convoy chain: vehicle follows 'ahead' and leads 'behind' (-1 = none; +0x2C28/+0x2C2C/+0x2C30), gap in cm (2000/3000 seen). Mission 4 trucks, Mission 8.",
+  "confidence": "medium",
+  "ds1_slot": "0x59C",
+  "match": 0.94
+ },
+ "0x6C8": {
+  "name": "set_speed",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "speed",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets a vehicle/aircraft speed factor: max +0x2C38 and current +0x2C34 (0.25-5 seen).",
+  "confidence": "medium",
+  "ds1_slot": "0x5A0",
+  "match": 1.0
+ },
+ "0x6D4": {
+  "name": "set_door_key",
+  "args": [
+   {
+    "name": "key",
+    "type": "object"
+   },
+   {
+    "name": "door",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Registers a key item for a locked door (table [0x60EDA8], entries {key, door, -1}); using the key unlocks the door (flag 8). Mission 1: cooler keys 0x46 -> 0x25.",
+  "confidence": "medium",
+  "ds1_slot": "0x5AC",
+  "match": 1.0
+ },
+ "0x6D8": {
+  "name": "give_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Adds an existing item object to a soldier's inventory (AddItem FUN_004314d0).",
+  "confidence": "high",
+  "ds1_slot": "0x5B0",
+  "match": 0.94
+ },
+ "0x6DC": {
+  "name": "take_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes an item object from a soldier's inventory (FUN_004318a0).",
+  "confidence": "high",
+  "ds1_slot": "0x5B4",
+  "match": 0.94
+ },
+ "0x6E4": {
+  "name": "remove_medikits",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the soldier's category-8 item (MediKit) count to 0 and holsters it if held.",
+  "confidence": "medium",
+  "ds1_slot": "0x5BC",
+  "match": 1.0
+ },
+ "0x6E8": {
+  "name": "set_medikit_uses",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "slot",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "The soldier's first category-8 item (MediKit; 0x47D250 walks the 25 inventory slots at +0x6D4) gets its count +0x58 = uses (0x49D280; a carried kit's holder +0x78 too); with 0 and the kit held (vtable +0x84) the soldier stops holding it. Training03 on Bradley 0x79.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x6EC": {
+  "name": "has_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True when the soldier carries the item object (FUN_00437200).",
+  "confidence": "high",
+  "ds1_slot": "0x5C0",
+  "match": 1.0
+ },
+ "0x6F0": {
+  "name": "medikit_count",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Count of the soldier's category-8 item (MediKit; owner +0x2DA0 / item +0x54).",
+  "confidence": "low",
+  "ds1_slot": "0x5C4",
+  "match": 0.64
+ },
+ "0x6F4": {
+  "name": "is_holding",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "True when the soldier's held item (vtable+0x74) has this script id.",
+  "confidence": "medium",
+  "ds1_slot": "0x5C8",
+  "match": 0.88
+ },
+ "0x6F8": {
+  "name": "hold_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Makes the soldier hold the inventory item with this script id; -1 = holster. 1 on success, 0 if not carried.",
+  "confidence": "medium",
+  "ds1_slot": "0x5CC",
+  "match": 0.87
+ },
+ "0x6FC": {
+  "name": "hold_medikit",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Makes the soldier hold its category-8 item (MediKit); 0 if it has none.",
+  "confidence": "medium",
+  "ds1_slot": "0x5D0",
+  "match": 1.0
+ },
+ "0x700": {
+  "name": "set_player_soldier",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "player",
+    "type": "player"
+   }
+  ],
+  "returns": "none",
+  "desc": "Gives player n control of the soldier (block soldier = object, remembered in 0x617C40).",
+  "confidence": "low",
+  "ds1_slot": "0x5D4",
+  "match": 0.64
+ },
+ "0x708": {
+  "name": "get_item_position",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "out_ptr"
+   },
+   {
+    "name": "zone",
+    "type": "out_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes the object's world position (render instance) and its zone (+0x1C).",
+  "confidence": "medium",
+  "ds1_slot": "0x5DC",
+  "match": 1.0
+ },
+ "0x710": {
+  "name": "place_item",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "zone",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Activates an item, moves it to a position/zone and refills it (count 1, rounds reset) - Training 2 respawns an item with it.",
+  "confidence": "low",
+  "ds1_slot": "0x5E4",
+  "match": 0.66
+ },
+ "0x714": {
+  "name": "air_strike_active",
+  "args": [],
+  "returns": "bool",
+  "desc": "True while any of the 10 air-strike slots in [0x60EDA4] is running (state +8 = 1).",
+  "confidence": "medium",
+  "ds1_slot": "0x5E8",
+  "match": 0.74
+ },
+ "0x720": {
+  "name": "make_vulnerable",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the soldier's invulnerable bit 0x800000 (+0x284).",
+  "confidence": "medium",
+  "ds1_slot": "0x5F4",
+  "match": 0.83
+ },
+ "0x724": {
+  "name": "make_invulnerable",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the soldier's invulnerable bit 0x800000 (+0x284) - cutscene actors.",
+  "confidence": "medium",
+  "ds1_slot": "0x5F8",
+  "match": 0.83
+ },
+ "0x73C": {
+  "name": "disable_ai",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the soldier's AI-enabled bit 0x1000000 (+0x284); +0x60C sets it.",
+  "confidence": "medium",
+  "ds1_slot": "0x610",
+  "match": 0.83
+ },
+ "0x740": {
+  "name": "show_tutorial_text",
+  "args": [
+   {
+    "name": "text",
+    "type": "text"
+   },
+   {
+    "name": "format_args",
+    "type": "other"
+   }
+  ],
+  "returns": "none",
+  "desc": "Formats a catalog text (printf with the following arguments, e.g. control names from +0x618) into the tutorial/objective bar 0x617DE8; ignored in split screen.",
+  "confidence": "low",
+  "ds1_slot": "0x614",
+  "match": 0.68
+ },
+ "0x744": {
+  "name": "get_control_name",
+  "args": [
+   {
+    "name": "control",
+    "type": "int"
+   }
+  ],
+  "returns": "string",
+  "desc": "Returns the text of the keys/buttons bound to a control (index into 0x5D9338 -> action id), for tutorial text.",
+  "confidence": "low",
+  "ds1_slot": "0x618",
+  "match": 0.57
+ },
+ "0x760": {
+  "name": "face_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns a soldier to face another object (head bone for soldiers).",
+  "confidence": "medium",
+  "ds1_slot": "0x634",
+  "match": 0.81
+ },
+ "0x764": {
+  "name": "face_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns a soldier to face a world position.",
+  "confidence": "medium",
+  "ds1_slot": "0x638",
+  "match": 0.8
+ },
+ "0x768": {
+  "name": "attack_target",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Forces a soldier's AI target (adds it as known enemy, message 0x34) and locks fire on it (+0x2564/+0x2568 = 1).",
+  "confidence": "medium",
+  "ds1_slot": "0x63C",
+  "match": 0.9
+ },
+ "0x76C": {
+  "name": "clear_attack_target",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Releases the forced target / fire lock of +0x63C.",
+  "confidence": "medium",
+  "ds1_slot": "0x640",
+  "match": 0.71
+ },
+ "0x770": {
+  "name": "aim_at_target",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets a forced target without the fire lock (+0x2568 = 1 only) - soldier aims/tracks.",
+  "confidence": "medium",
+  "ds1_slot": "0x644",
+  "match": 0.92
+ },
+ "0x778": {
+  "name": "clear_aim_target",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Releases the target lock of +0x644 (+0x2568 = 0).",
+  "confidence": "medium",
+  "ds1_slot": "0x648",
+  "match": 0.83
+ },
+ "0x780": {
+  "name": "dismount",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes a soldier leave the vehicle / mounted gun it is on (+0x267C, FUN_0042e850).",
+  "confidence": "high",
+  "ds1_slot": "0x650",
+  "match": 0.92
+ },
+ "0x784": {
+  "name": "play_animation_mode",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "anim",
+    "type": "anim"
+   },
+   {
+    "name": "flag",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Like +0x52C but anim mode 4 (flag set) or 6 (flag 0) - probably loop vs play-once; anim 0 does nothing.",
+  "confidence": "low",
+  "ds1_slot": "0x654",
+  "match": 1.0
+ },
+ "0x788": {
+  "name": "night_vision_on",
+  "args": [],
+  "returns": "none",
+  "desc": "Turns the night-vision view effect on for all views (sound 0x4BE).",
+  "confidence": "medium",
+  "ds1_slot": "0x658",
+  "match": 0.84
+ },
+ "0x78C": {
+  "name": "night_vision_save_and_off",
+  "args": [],
+  "returns": "void",
+  "desc": "0x44A090: for the 4 view controllers [0x6800D0..0x6800DC] stores the night-vision flag (vc +0x6C) in 0x634384[i] and turns NV off (0x4DA880(0, ...) with the NV sound 0x4BE / 0xBE6), same for the main view controller [0x6800CC] -> 0x634380. Counterpart 0x790 restores the saved states (the existing catalogue maps 0x790 to DS1 night_vision_off - it is a restore). Called at cutscene start after movie_start / clear_battlefield.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44A090",
+  "lua_hint": "Save DS1 view controllers [0x63C990..0x63C99C] +0x6C (NV flag) yourself, then call 0x65C; for 0x790 call 0x658 if any saved flag was 1 (DS1 0x658 turns it on for all views).",
+  "ds1_slot": "0x65C",
+  "match": "close: DS1 night_vision_off turns NV off for all views but saves nothing"
+ },
+ "0x790": {
+  "name": "night_vision_restore",
+  "args": [],
+  "returns": "none",
+  "desc": "Restores the night-vision state 0x78C saved (DS1 has no saved state: left off).",
+  "confidence": "low",
+  "match": 0.62,
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x794": {
+  "name": "set_speed_percent",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "percent",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "+0x5A0 with the value x 0.01.",
+  "confidence": "low",
+  "ds1_slot": "0x660",
+  "match": 0.47
+ },
+ "0x798": {
+  "name": "set_reserved_soldiers",
+  "args": [
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Stores a reserved soldier count (0x6182FC) used by +0x668.",
+  "confidence": "low",
+  "ds1_slot": "0x664",
+  "match": 1.0
+ },
+ "0x79C": {
+  "name": "get_reserved_soldiers",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns the reserved soldier count (DS1 keeps it at 0x6182FC, set by +0x664).",
+  "confidence": "low",
+  "match": 0.44,
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x7A0": {
+  "name": "free_soldier_slots",
+  "args": [],
+  "returns": "int",
+  "desc": "0x445500 -> 0x44E630 on 0x631848: 16 - reserved count ([0x631888], set by 0x798) - soldiers in the active lists of teams 0-2 (0x44E600: 0x4CD340(team, 1), next +0x18). Room left for spawning. (The catalogue's 0x79C free_soldier_slots is really get_reserved_soldiers: it just returns [0x631888].) Mission01/02/05 test it before spawning.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x445500",
+  "ds1_slot": "0x668",
+  "match": "same"
+ },
+ "0x7A4": {
+  "name": "place_at_waypoint_rotated",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Teleports an object to a waypoint and turns it to the waypoint's stored rotation (cutscene actor placement).",
+  "confidence": "medium",
+  "ds1_slot": "0x66C",
+  "match": 0.73
+ },
+ "0x7A8": {
+  "name": "set_default_movement_state",
+  "args": [
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the default movement state (MovementStateRules table [0x60EC80]) that +0x52C(object, 0) returns soldiers to.",
+  "confidence": "low",
+  "ds1_slot": "0x670",
+  "match": 1.0
+ },
+ "0x7AC": {
+  "name": "light_on",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns a scene light on: sets flag 4 on light entry (index & 0xFF) of the Lights.cpp manager [0x63C95C] (+8 array, 0x108 B each). Lights without flag 4 contribute nothing (0x51E176).",
+  "confidence": "high",
+  "ds1_slot": "0x674",
+  "match": 0.92
+ },
+ "0x7B0": {
+  "name": "light_off",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns a scene light off (clears flag 4 of the light entry in [0x63C95C]). Mission 1 switches lights 0x15/0x14/0x10/0x0D off after its intro film.",
+  "confidence": "high",
+  "ds1_slot": "0x678",
+  "match": 0.92
+ },
+ "0x7B4": {
+  "name": "set_light_on",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x443590 -> 0x5499E0 on the lights manager (renderer [0x680038] +0x419E4; entry (index & 0xFF) x 0x164 B, flags +4): on sets flag 4, 0 clears it - one call for light_on (0x7AC = (light, 1)) / light_off (0x7B0 = (light, 0)). Mission06 switches lights 0x16-0x2E with it.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x443590",
+  "ds1_close": "0x674",
+  "match": "close: DS1 has separate slots - 0x674 light_on when on != 0, 0x678 light_off when 0"
+ },
+ "0x7B8": {
+  "name": "is_light_on",
+  "desc": "Light entry flag 4 (DS1 0x67C).",
+  "ds1_slot": "0x67C",
+  "match": "same",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x7BC": {
+  "name": "set_light_colours",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "colour_a",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "colour_b",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "fade_seconds",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4435D0: both colours to float RGBA (0x5486E0), then 0x549C10(light, &a, &b, fade) on the lights manager: with fade > 0 and a fader (entry flag 0x40) blends towards colour_b (fader +0xE4, 0x548930, flag 0x80); else writes colour_b into the D3D light's diffuse (+0x38+4) and ambient (+0x38+0x24) and SetLight. Same structure as DS1 FUN_0051D3F0. Mission07.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4435D0",
+  "ds1_close": "0x680",
+  "match": "close: DS1 writes colour_a to ambient and colour_b to diffuse; DS2 uses colour_b for both (colour_a unused in the code read)"
+ },
+ "0x7E8": {
+  "name": "show_message",
+  "args": [
+   {
+    "name": "text",
+    "type": "text"
+   },
+   {
+    "name": "duration",
+    "type": "time_ms"
+   }
+  ],
+  "returns": "none",
+  "desc": "Looks up a catalog text (0x4F6730) and shows it in the bottom pop-up bar (FUN_004d33a0 on view controller [0x63C98C]) for the given ms (all sites 5000).",
+  "confidence": "high",
+  "ds1_slot": "0x6AC",
+  "match": 1.0
+ },
+ "0x7F0": {
+  "name": "debug_printf",
+  "args": [
+   {
+    "name": "text",
+    "type": "string"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4031A0: bare ret - debug print, no-op in the shipped exe (Mission07 passes 'Released Tank!\\n').",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4031A0",
+  "ds1_slot": "0x6B8",
+  "match": "same"
+ },
+ "0x7FC": {
+  "name": "emitter_start",
+  "args": [
+   {
+    "name": "emitter",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x44A230: entry (index & 0xFF) x 0x108 B of the emitter list [0x62F46C] +4 -> 0x4F2D60: flags +0x70 |= 1, timer +0x50 = +0x54, +0 = +4, +0xF8 = 0, +0x104 = 0, then 0x4F1840. Same as DS1 FUN_004F31F0 (entries 0x7C B there). NOTE: the catalogue's 0x800 'emitter_start' is the stop (0x4F0C00 clears +0x70 bit 0 and stops the emitter's sound +0x104) = DS1 0x6C8.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x44A230",
+  "ds1_slot": "0x6C4",
+  "match": "same"
+ },
+ "0x800": {
+  "name": "emitter_stop",
+  "args": [
+   {
+    "name": "emitter",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Stops emitter n (DS1 0x6C8).",
+  "confidence": "low",
+  "ds1_slot": "0x6C8",
+  "match": "same",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x804": {
+  "name": "emitter_stop",
+  "args": [
+   {
+    "name": "emitter",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Stops emitter n of [0x60EDD8]: clears flags +0x70 bit 0 and +0x74.",
+  "confidence": "low",
+  "ds1_slot": "0x6C8",
+  "match": 0.44
+ },
+ "0x808": {
+  "name": "set_attack_target",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the soldier's 3-entry target list (+0x290), puts target in it (FUN_00407040, may send message 0x34 'enemy spotted'), makes it the current target (FUN_00406390), sets +0x2564/+0x2568 = 1, +0x2B60 = 0 and +0x29D8/+0x29DC = value. Only called from cutscene-queue callbacks.",
+  "confidence": "medium",
+  "ds1_slot": "0x6CC",
+  "match": 0.84
+ },
+ "0x80C": {
+  "name": "add_attack_target",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "target",
+    "type": "object"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Like 0x6CC but keeps the existing target list: adds target, makes it current, +0x2568 = 1, +0x29D8/+0x29DC = value.",
+  "confidence": "medium",
+  "ds1_slot": "0x6D0",
+  "match": 0.93
+ },
+ "0x818": {
+  "name": "soldier_signal_action",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "FUN_00408990 on the soldier: plays movement-state action 9 (or animation 0x4D via vtable+0x70); if one played, plays sound 2 of the bank of vtable+0x74's object at the soldier and posts a 500-unit AI hearing event; returns 1, else 0. Exact action unknown (gesture/shout?).",
+  "confidence": "low",
+  "ds1_slot": "0x6D8",
+  "match": 1.0
+ },
+ "0x824": {
+  "name": "play_object_anim",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "anim",
+    "type": "anim"
+   },
+   {
+    "name": "flag",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays an animation on a non-soldier object whose model is a hierarchy (model type 4, e.g. vehicles/props): FUN_00501c20(slot 0, anim, flag, 0, 3.0). anim 0 stops it (the movie clean-up uses it that way).",
+  "confidence": "medium",
+  "ds1_slot": "0x6F8",
+  "match": 1.0
+ },
+ "0x828": {
+  "name": "show_zone",
+  "args": [
+   {
+    "name": "zone",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes a world zone visible: clears flag 4 (hidden) on zone +0xC (FUN_004d1230). Zone pointer from 0x704. Mission 2 shows its BMP1WRECK / LIMO_BODY_DAMAGED zones with it later in the mission.",
+  "confidence": "medium",
+  "ds1_slot": "0x6FC",
+  "match": 1.0
+ },
+ "0x82C": {
+  "name": "hide_zone",
+  "args": [
+   {
+    "name": "zone",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Hides a world zone: sets flag 4 on zone +0xC (FUN_004d1220; the same flag object removal sets); null-safe. Mission 2 uses it at set-up on the wreck / damaged zones.",
+  "confidence": "medium",
+  "ds1_slot": "0x700",
+  "match": 1.0
+ },
+ "0x830": {
+  "name": "find_zone",
+  "args": [
+   {
+    "name": "name",
+    "type": "string"
+   }
+  ],
+  "returns": "pointer",
+  "desc": "Finds a world zone by name (hash FUN_004b9ab0 compared with zone +0x210 in the world's zone list [0x63C948]+0x1A48, next +0xB0); returns the zone pointer or 0.",
+  "confidence": "high",
+  "ds1_slot": "0x704",
+  "match": 1.0
+ },
+ "0x844": {
+  "name": "camera_zoom_in",
+  "args": [],
+  "returns": "none",
+  "desc": "Jumps to FUN_00444330: steps the current player's camera FOV in (zoom), clamped to the held weapon's zoom limit, with the scope zoom sound - the zoom key handler.",
+  "confidence": "medium",
+  "ds1_slot": "0x718",
+  "match": 0.79
+ },
+ "0x854": {
+  "name": "show_movie_text",
+  "args": [
+   {
+    "name": "key",
+    "type": "text"
+   },
+   {
+    "name": "view",
+    "type": "player"
+   }
+  ],
+  "returns": "none",
+  "desc": "Looks up a level text by hash in the mission string table (FUN_004f5e80) and adds it, line by line, to the subtitle/text box of view n ([0x60ED14+n*4], FUN_00508ed0); shows 'WARNING : MISSING MOVIE TEXT' if absent.",
+  "confidence": "low",
+  "ds1_slot": "0x728",
+  "match": 0.67
+ },
+ "0x858": {
+  "name": "reset_view_effects",
+  "args": [],
+  "returns": "void",
+  "desc": "Calls 0x4FCD10 on both view controllers ([0x62F364], [0x62F368]) - screen effect reset.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x85C": {
+  "name": "movie_restore_objects",
+  "args": [],
+  "returns": "none",
+  "desc": "Movie clean-up over all objects (callback 0x486860): cutscene actors (instance flag 0x20000) get their animation stopped and are deactivated; objects the movie start hid (flag 0x40000, see 0x7D8) are reactivated.",
+  "confidence": "medium",
+  "ds1_slot": "0x72C",
+  "match": 1.0
+ },
+ "0x860": {
+  "name": "set_sky",
+  "args": [
+   {
+    "name": "sky",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Applies a loaded .sky record (from 0x734) to the atmosphere: FUN_004e2be0 sets sky, fog colour and fog distances (+0x40/+0x44 -> atmosphere +4/+0xC) and the far clip.",
+  "confidence": "medium",
+  "ds1_slot": "0x730",
+  "match": 1.0
+ },
+ "0x864": {
+  "name": "load_sky",
+  "args": [
+   {
+    "name": "out",
+    "type": "out_ptr"
+   },
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Loads a .sky file (e.g. 'Mid_day_sunny.sky') into the next free sky slot and writes the slot pointer to *out (for 0x730).",
+  "confidence": "medium",
+  "ds1_slot": "0x734",
+  "match": 0.83
+ },
+ "0x868": {
+  "name": "init_skies",
+  "args": [
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Allocates count sky slots (0x84 B each) for 0x734; called before loading skies (count 2 in Missions 1/4/8/9).",
+  "confidence": "low",
+  "ds1_slot": "0x738",
+  "match": 0.6
+ },
+ "0x870": {
+  "name": "set_view_tint",
+  "args": [
+   {
+    "name": "view",
+    "type": "int"
+   },
+   {
+    "name": "r",
+    "type": "float"
+   },
+   {
+    "name": "g",
+    "type": "float"
+   },
+   {
+    "name": "b",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "View controller [0x62F364 + view*4] 0x4FCCA0({r, g, b, 1.0}) - a screen colour.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x878": {
+  "name": "get_player_count",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns the number of local players (input blocks, [0x610798] & 0xFFFF); scripts test > 1 for split screen.",
+  "confidence": "low",
+  "ds1_slot": "0x7B4",
+  "match": 0.4
+ },
+ "0x87C": {
+  "name": "set_movie_version",
+  "args": [
+   {
+    "name": "version",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Records the movie/cutscene data version ([0x5ED11C], first call wins); warns 'We have different movie versions used together' if another one was set. All sites pass 9.",
+  "confidence": "high",
+  "ds1_slot": "0x7BC",
+  "match": 1.0
+ },
+ "0x880": {
+  "name": "get_movie_version",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns the movie version set by 0x7BC; the cutscene command code branches on > 5.",
+  "confidence": "high",
+  "ds1_slot": "0x7C0",
+  "match": 1.0
+ },
+ "0x884": {
+  "name": "set_vehicle_free",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   },
+   {
+    "name": "free",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Vehicles only (object type 0): false sets vehicle flag +0x2CD8 bit 2, true clears it; the bit is passed to the vehicle dynamics (+0x2C20/+0x2C24, FUN_005192b0/0x51a350) - looks like a brake/hold. Used by cutscene command callbacks.",
+  "confidence": "low",
+  "ds1_slot": "0x7C4",
+  "match": 1.0
+ },
+ "0x88C": {
+  "name": "show_briefing",
+  "args": [],
+  "returns": "none",
+  "desc": "Switches the front end to state 0x14 = the mission briefing popup.",
+  "confidence": "high",
+  "ds1_slot": "0x7D0",
+  "match": 1.0
+ },
+ "0x890": {
+  "name": "play_sound_at_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "min_distance",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays a sound id from a bank (FUN_0055de20) at the object's position, tagged with the object (+0x4C) so 0x7E4 can test it; distance e.g. 1000.0 / 10000.0.",
+  "confidence": "medium",
+  "ds1_slot": "0x7DC",
+  "match": 0.71
+ },
+ "0x894": {
+  "name": "play_object_sound_at_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "min_distance",
+    "type": "float"
+   },
+   {
+    "name": "lipsync_anim",
+    "type": "pointer"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x447AF0: sound manager [0x6800EC] 0x4B5870(bank, sound, position, min_distance, object's sound tag +0x4C, 7) - like play_sound_at_object (0x890) but at a given point, still tagged with the object so object_sound_playing (0x8A4) sees it; then 0x515470(9, object, sound, 0) and, for a soldier, 0x475370 + lip sync 0x47D500(anim): anim = lipsync_anim, else the lip-sync table entry for the sound (0x43FDE0, filled by 0x9D4), else the default talk anim (0x5641E0(1) on [0x6800A4]). Mission02 (2 calls).",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x447AF0",
+  "lua_hint": "DS1 0x7DC plays at the object; for a point call DS1's sound play directly: x86rt thiscall 0x55DE20 (ecx = [0x63C9AC]; args bank, sound, position ptr, min_distance, [object+0x4C]) - the same call 0x7DC makes, so 0x7E4 still works. Lip sync: none on DS1."
+ },
+ "0x898": {
+  "name": "play_object_sound_2d",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "bank",
+    "type": "other"
+   }
+  ],
+  "returns": "none",
+  "desc": "Plays a sound id from a bank non-positionally (no position, distance 0), tagged with the object's sound tag (+0x4C).",
+  "confidence": "low",
+  "ds1_slot": "0x7E0",
+  "match": 0.52
+ },
+ "0x89C": {
+  "name": "play_object_sound_if_quiet",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "min_distance",
+    "type": "float"
+   },
+   {
+    "name": "lipsync_anim",
+    "type": "pointer"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x447C10: returns at once while a sound tagged with the object is playing (0x4B2B70 on [0x6800EC] = object_sound_playing); else plays at the object's position (render instance +0x108 / 0x4D2520) like 0x890: 0x4B5870(bank, sound, pos, min_distance, tag +0x4C, 7) + soldier lip sync (as 0x894); no 0x515470 event. Sites pass distances 1000-10000 (e.g. (0x21, 0x990, bank, 10000.0, 0)). 15 sites in Missions 2/3/4/6/8/10, Training 2/4.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x447C10",
+  "lua_hint": "if api[0x7E4](obj) == 0 then api[0x7DC](obj, sound, bank, min_distance) end",
+  "ds1_close": "0x7DC",
+  "match": "close: DS1 play_sound_at_object has no 'only if quiet' check and no lip sync - test 0x7E4 object_sound_playing first"
+ },
+ "0x8A0": {
+  "name": "play_object_sound",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "sound",
+    "type": "sound"
+   },
+   {
+    "name": "bank",
+    "type": "other"
+   },
+   {
+    "name": "flag",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "Unless the object's voice channel (+0x4C) is playing (0x4B2B70 on the sound manager [0x6800EC]): plays sound id from bank on that channel (0x4B5870(bank, sound, 0, 0, channel, 0xF)); for a soldier also 0x475370 and the lip sync (0x47D500 with the line's length; flag 0 -> length from the bank). Desert Storm's closest: play_sound +0x2F8 (bank, sound), not positional.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x8A4": {
+  "name": "object_sound_playing",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 while any sound tagged with this object (+0x4C) is still playing (FUN_0055e130), else 0. Scripts wait on it before the next line.",
+  "confidence": "high",
+  "ds1_slot": "0x7E4",
+  "match": 1.0
+ },
+ "0x8AC": {
+  "name": "kill_with_anim",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "anim",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Kills the soldier: damage = 2 x health (+0x54) via vtable+0x3C, then vtable+0x70(anim) plays the given animation/state (death animation).",
+  "confidence": "medium",
+  "ds1_slot": "0x7E8",
+  "match": 0.84
+ },
+ "0x8B0": {
+  "name": "kill_soldier",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0042b1b0: health +0x54 = 0, damage 1.0 via vtable+0x3C, death time backdated 180 s (+0x2A08) - instant death / corpse. Used in loops over soldier lists.",
+  "confidence": "medium",
+  "ds1_slot": "0x7EC",
+  "match": 0.87
+ },
+ "0x8B8": {
+  "name": "viewfinder_on",
+  "args": [],
+  "returns": "none",
+  "desc": "Shows the camcorder-style viewfinder overlay ([0x618418] = 1) used in mission overviews.",
+  "confidence": "high",
+  "ds1_slot": "0x7F4",
+  "match": 1.0
+ },
+ "0x8BC": {
+  "name": "viewfinder_off",
+  "args": [],
+  "returns": "none",
+  "desc": "Hides the viewfinder overlay ([0x618418] = 0).",
+  "confidence": "high",
+  "ds1_slot": "0x7F8",
+  "match": 1.0
+ },
+ "0x8C0": {
+  "name": "set_sound_mode",
+  "args": [
+   {
+    "name": "mode",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sound manager FUN_0055f270(mode, 1): requests sound context 'mode' (+0x14 = 1 when it differs from the current +0x10). Called with 1 before MovieStart and 0 when the movie/briefing ends - movie vs game sound mode.",
+  "confidence": "low",
+  "ds1_slot": "0x7FC",
+  "match": 1.0
+ },
+ "0x8CC": {
+  "name": "explosion_at_position_flags",
+  "args": [
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   },
+   {
+    "name": "damage",
+    "type": "float"
+   },
+   {
+    "name": "flags",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x443CD0: explosion manager [0x680118] 0x4D7020(&pos, zone 0, radius, damage, 0, 0, flags, 0, 0, 0) - like 0x8C8 (= DS1 0x804, zone from an object, fixed flags 0x25B0A) but without a zone object and with caller flags (sites: 0x61B02, radius 400.0, damage 100.0). Missions 2/3.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x443CD0",
+  "lua_hint": "api[0x804](x, y, z, <any object in that zone, e.g. the player soldier>, radius, damage); or x86rt thiscall 0x4E92C0 (ecx = [0x63C9D0]; &pos, zone, radius, damage, 0, 0, flags, 0) - DS2 flag bits may not mean the same on DS1, 0x5B0A is the safe value.",
+  "ds1_close": "0x804",
+  "match": "close: DS1 0x804 needs a zone object (its +0x1C) and uses fixed flags 0x5B0A"
+ },
+ "0x8D4": {
+  "name": "get_vehicle_driver",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   }
+  ],
+  "returns": "object",
+  "desc": "Returns the script id of the first occupied crew seat of a vehicle (FUN_0043d440: seat flags +0x260C / occupants +0x2608, starting at the driver seat), or -1.",
+  "confidence": "medium",
+  "ds1_slot": "0x80C",
+  "match": 0.95
+ },
+ "0x8D8": {
+  "name": "show_text_screen",
+  "args": [
+   {
+    "name": "text",
+    "type": "text"
+   },
+   {
+    "name": "colour",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Draws a full-screen page with the catalog text and 'press any key' (FUN_0040b1e0, background colour) and blocks until a key / button / mouse press (FUN_00539a20(0)).",
+  "confidence": "medium",
+  "ds1_slot": "0x810",
+  "match": 1.0
+ },
+ "0x8E0": {
+  "name": "hash_name",
+  "args": [
+   {
+    "name": "name",
+    "type": "string"
+   }
+  ],
+  "returns": "int",
+  "desc": "Returns the engine's name hash (FUN_004b9ab0, lower-case LFSR as used for zone / texture names).",
+  "confidence": "low",
+  "ds1_slot": "0x818",
+  "match": 0.65
+ },
+ "0x8E4": {
+  "name": "set_vehicle_flag_10",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   },
+   {
+    "name": "enable",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Vehicle: on sets +0x2CD8 bit 4 (0x10) and +0x2E8 = 360.0, +0x2EC = 180.0 (full angle ranges, probably turret / sight arcs); off clears the bit. When set and the vehicle is stopped its dynamics inputs are zeroed (0x43A14C).",
+  "confidence": "low",
+  "ds1_slot": "0x824",
+  "match": 1.0
+ },
+ "0x8F0": {
+  "name": "movie_freeze_world",
+  "args": [
+   {
+    "name": "hide_objects",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Pauses timer [0x63C954] (FUN_004ba560(0)) and points the camera manager's clock at the main timer [0x63C958]; with 1 also hides (render flag 4) every active object that isn't type 2/3.",
+  "confidence": "low",
+  "ds1_slot": "0x830",
+  "match": 1.0
+ },
+ "0x8F8": {
+  "name": "set_node_rotation",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "angles",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "node",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Gives the object's render instance a node override controller (+0x2C4) for the model node named 'node' (archive hash) with the given vector - Mission 3 turns its RADARDISH this way.",
+  "confidence": "low",
+  "ds1_slot": "0x838",
+  "match": 0.92
+ },
+ "0x900": {
+  "name": "remove_vehicles_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "none",
+  "desc": "Takes every type-0 object (vehicles / props) whose position is inside the region out of play (FUN_004c93a0: in-play bit cleared, hidden, moved to the inactive list).",
+  "confidence": "medium",
+  "ds1_slot": "0x840",
+  "match": 1.0
+ },
+ "0x904": {
+  "name": "remove_corpses_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x440060: region by index ([0x6800F8] 0x515940); corpse manager [0x641614] 0x46F7C0: each of its 6 in-play corpse holders (+0x24 array) whose render position is inside the region (0x5158E0) is taken out of play (vtable +8(0)). Same as DS1 0x844 (FUN_0041B4F0, which uses FUN_004C93A0). Mission01.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x440060",
+  "ds1_slot": "0x844",
+  "match": "same"
+ },
+ "0x908": {
+  "name": "tint_soldier_red",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_00436b10: applies colour (0.5, 0, 0, 1) with value 15.0 to the soldier's skinned mesh (FUN_005019f0 -> 0x528990) - likely a blood / damage tint.",
+  "confidence": "low",
+  "ds1_slot": "0x848",
+  "match": 0.93
+ },
+ "0x90C": {
+  "name": "has_startup_flag",
+  "args": [
+   {
+    "name": "letter",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "FUN_004b9cd0: 1 if the start-up option letter is set (Training 3 checks 'u', the dev movie-skip flag).",
+  "confidence": "high",
+  "ds1_slot": "0x84C",
+  "match": 0.94
+ },
+ "0x918": {
+  "name": "set_squad_banter",
+  "args": [
+   {
+    "name": "enable",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets [0x5E91F4] (1 by default): enables squad idle speech 0xFD8 when a squad mate is near and in view (FUN_0042af80). Training 3 only.",
+  "confidence": "low",
+  "ds1_slot": "0x860",
+  "match": 1.0
+ },
+ "0x91C": {
+  "name": "set_flag_5f5678",
+  "args": [
+   {
+    "name": "enable",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets [0x5F5678] (equipment ctor sets 1): when on, equipment items get +0x64 = 1 (FUN_004a4a10). Training 3 only; meaning unclear.",
+  "confidence": "low",
+  "ds1_slot": "0x864",
+  "match": 1.0
+ },
+ "0x920": {
+  "name": "set_auto_target_assist",
+  "args": [
+   {
+    "name": "enable",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets [0x5F567C]: enables FUN_00435760 (the player's soldier picks a nearby / aimed combat soldier within 2 m as a target) and an inventory check at 0x45335D. Mission 1 turns it off then on; Training 3 too.",
+  "confidence": "low",
+  "ds1_slot": "0x868",
+  "match": 1.0
+ },
+ "0x958": {
+  "name": "allow_stance_0",
+  "args": [
+   {
+    "name": "allow",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets [0x5F5668]: while 0, soldiers can't switch to stance 0 (FUN_0045cf00 refuses). Training 1/3 use it to unlock a stance (probably prone/crouch) for the tutorial.",
+  "confidence": "low",
+  "ds1_slot": "0x8A4",
+  "match": 1.0
+ },
+ "0x95C": {
+  "name": "get_local_player_count",
+  "args": [],
+  "returns": "none",
+  "desc": "Returns 1 on PC (DS1 0x8A8, which DesertStormFix's co-op scripts answer with the player count).",
+  "confidence": "low",
+  "ds1_slot": "0x8A8",
+  "match": "same",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)"
+ },
+ "0x960": {
+  "name": "set_head_tracking_off",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x43FF60: soldier +0x105C |= 0x400000. While set the head-look update in 0x47B970 skips the blend towards the look target and zeroes the head angles +0x30C..+0x314 every frame (what it does for everyone during a cinematic, [0x68008C]+0x1B8C bit 0) - the soldier looks straight ahead. Counterpart 0x964. Mission02.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x43FF60",
+  "lua_hint": "DS1 does this only for all soldiers during cinematics (+0x8AC / +0x8B0, flag [0x60F20C], code 0x42E4CF). Per soldier: zero DS1 soldier view / head angles (+0x310..) each frame from Lua while the flag is on, or ignore (cosmetic)."
+ },
+ "0x964": {
+  "name": "set_head_tracking_on",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x43FF80: clears soldier +0x105C bit 0x400000 (see 0x960) - head looks at targets again.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x43FF80",
+  "lua_hint": "See 0x960 (stop zeroing the head angles)."
+ },
+ "0x96C": {
+  "name": "get_value_8c0",
+  "args": [
+   {
+    "name": "handle",
+    "type": "pointer"
+   }
+  ],
+  "returns": "float",
+  "desc": "Returns **(handle+0x18) as a float (FUN_004d0e30), 0.0 for a null handle; 0x8C4 is the matching setter. Mission 12B doubles the result.",
+  "confidence": "low",
+  "ds1_slot": "0x8C0",
+  "match": 1.0
+ },
+ "0x978": {
+  "name": "spawn_debris_at_waypoint",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "effect",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Spawns a particle / debris burst of effect type (table [0x63C9C8], index & 0x3FF; FUN_0054c5c0) at waypoint n's position / direction ([0x63C9B0], 0x20-byte entries). Mission 1 uses waypoints 0x154-0x15D with type 0x2C (explosions).",
+  "confidence": "medium",
+  "ds1_slot": "0x8CC",
+  "match": 0.87
+ },
+ "0x97C": {
+  "name": "set_view_camera",
+  "args": [
+   {
+    "name": "camera",
+    "type": "camera"
+   },
+   {
+    "name": "view",
+    "type": "player"
+   }
+  ],
+  "returns": "none",
+  "desc": "Makes camera n the active camera of view / viewport v (camera manager FUN_004d4f80), resets the view controller; for camera != 0 also starts a ramp (1.0 -> 5.0) on timer [0x63C954].",
+  "confidence": "medium",
+  "ds1_slot": "0x8D0",
+  "match": 1.0
+ },
+ "0x980": {
+  "name": "get_soldier_view",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Returns the viewport index (+0x474 of the controlling input block +0x23C0) of a player-controlled soldier, -1 if no player drives it.",
+  "confidence": "high",
+  "ds1_slot": "0x8D4",
+  "match": 1.0
+ },
+ "0x9B8": {
+  "name": "set_music_fade_time",
+  "args": [
+   {
+    "name": "time",
+    "type": "int"
+   }
+  ],
+  "returns": "void",
+  "desc": "Sound manager [0x6800EC] +0x28 = (target - +0x24) / time: the music volume's fade rate.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x9C0": {
+  "name": "set_music_volume",
+  "args": [
+   {
+    "name": "volume",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "Sound manager [0x6800EC] +0x24 = volume.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x9C4": {
+  "name": "holster",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "void",
+  "desc": "For a soldier (+4 = 1): hold nothing - 0x47EFF0(0) (the held-item switch: +0x6CC, sounds, animations). Desert Storm's hold_item (+0x5CC) with -1 does the same.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, crossmission work)"
+ },
+ "0x9D0": {
+  "name": "random_int",
+  "args": [
+   {
+    "name": "n",
+    "type": "int"
+   }
+  ],
+  "returns": "int",
+  "desc": "0x4457A0 jmp 0x4BD5C0 (cdecl): next dword of the game's 2048-entry random table (0x65B748, index 0x65F74C) modulo n; 0 when n = 0. NOT a key-frame animation call (the catalogue guess is wrong). Sites: random(2) choices, random(0x14), delays random(0xFA0) / random(0xAFC8) ms; 41 calls.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4BD5C0",
+  "lua_hint": "DS1 has the same helper without a slot: x86rt cdecl call 0x4B7E60(n) (int table 0x619FE0, index 0x61DFE8) - keeps online / determinism runs in step (seeded by the lockstep reseed); guard n = 0 (DS1's divides by zero)."
+ },
+ "0x9D4": {
+  "name": "register_lipsync_anims",
+  "args": [
+   {
+    "name": "list",
+    "type": "pointer"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x43FE50: list of 12-byte entries {int sound id (< 0 ends), char* key-frame anim name, out handle}: each name is loaded through the key-frame animation manager [0x6800A4] (0x565910; 'Failed to load key frame anim \"%s\"' if missing), the handle stored at +8, and the list pointer kept in [0x634BF8]. 0x43FDE0(sound) looks a sound up there: the soldier sound slots (0x890/0x894/0x89C/0x8A0) play that facial animation as lip sync. Mission02 registers 5 speech ids -> 'FaceTalk.kan'.",
+  "confidence": "high",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x43FE50",
+  "lua_hint": "DS1 has no facial / key-frame animation: make it a no-op (lip sync is cosmetic). Could be faked only with a DS1 head animation layer, not worth it."
+ },
+ "0x9D8": {
+  "name": "set_split_views_enabled",
+  "args": [
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4428E0: [0x62F3A8] = on (level init 0x412690 sets 1). Read by the render loop (0x40DBC0, 0x40FD10): outside cinematics and certain front-end states, 0 = only the first player's view is rendered, full screen (renderer +0x41A00 viewport, the per-player loop stops after player 1); 1 = each player gets its own viewport (0x536BB0(i)). Missions 1/2/3/7/9 switch it off around scripted sequences and back on.",
+  "confidence": "medium",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4428E0",
+  "lua_hint": "DS1 renders cutscenes full screen by itself (FUN_0040E080 = 0 while the cinematic bit is set), so a no-op is fine for scripted films; for non-cinematic use DesertStormFix's split-screen code would need a 'one view' switch."
+ },
+ "0x9E8": {
+  "name": "set_fixed_bump_lighting",
+  "args": [
+   {
+    "name": "kind1",
+    "type": "bool"
+   },
+   {
+    "name": "kind0",
+    "type": "bool"
+   },
+   {
+    "name": "intensity",
+    "type": "float"
+   }
+  ],
+  "returns": "void",
+  "desc": "0x4457E0: renderer [0x680038] +0x20 = kind1, +0x24 = kind0, +0x28 = intensity (level init 0x412690 zeroes them). Read by 0x553210 / 0x553730, the per-instance light used for DOT3 bump mapping (instance byte +0x144 = light kind; callers 0x4D316A, 0x560A5C): for a kind whose flag is 1 the strength is the fixed intensity instead of the time-of-day value (atmosphere [0x68008C]+0x1A4C +0x3C hour) and the direction a fixed vector ([0x61C88C]) instead of the scene light's. Missions 1 and 4 call (0, 1, 0.35) at set-up in single player only (after 0x95C <= 1).",
+  "confidence": "low",
+  "source": "CDS II.exe (2026-10-24, slot mapping round 2)",
+  "ds2_fn": "0x4457E0",
+  "lua_hint": "Cosmetic; DS1's bump lighting follows its own sun keys - no-op."
+ }
+}

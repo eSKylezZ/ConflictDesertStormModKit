@@ -28,7 +28,9 @@ if "commands" in sys.modules and sys.modules["commands"].__dict__.get("EnvFile")
     importlib.reload(_env_module)   # the server reloaded this file: pick up field-layout changes in env.py too
     importlib.reload(_terrain_module)
     importlib.reload(_roads_module)
-from conflict_ds_tools.env import EnvFile  # noqa: E402
+from conflict_ds_tools import games  # noqa: E402
+from conflict_ds_tools import modlayout  # noqa: E402
+from conflict_ds_tools.env import EnvFile, ZONE_TYPES  # noqa: E402
 from conflict_ds_tools.routes import RouteFile  # noqa: E402
 
 COMMANDS = {}  # name -> (function, description, {arg: description}, mutates)
@@ -46,6 +48,15 @@ class CommandError(Exception):
     pass
 
 
+def catalog_dir(s) -> str:
+    """The extracted catalog archive's folder ("catalog"; Denied Ops: "catalog.pc")."""
+    for name in ("catalog", "catalog.pc"):
+        d = os.path.join(s.data_dir, name)
+        if os.path.isdir(d):
+            return d
+    return os.path.join(s.data_dir, "catalog")
+
+
 def _find_file(folder, name):
     """A file in an extracted archive folder by name, or as _<HASH>.* when it was extracted without a name."""
     for f in os.listdir(folder):
@@ -55,6 +66,30 @@ def _find_file(folder, name):
     return hashed[0] if hashed else None
 
 
+def mod_layout(s) -> str:
+    """The layout new mods get (Session.mod_layout: --mod-layout / set_mod_layout; default organised)."""
+    return getattr(s, "mod_layout", None) or modlayout.ORGANISED
+
+
+def _mod_out(s, folder, name, create=True):
+    """Where the editor writes `name` into a mod folder (conflict_ds_tools.modlayout: the mod's own copy anywhere is
+    rewritten in place, a flat mod stays flat, else the organised folder)."""
+    return modlayout.path_for(folder, name, layout=mod_layout(s), create=create)
+
+
+def _mod_path(s, folder, name):
+    """A mod file to read and write back: the mod's copy anywhere, else where a new one would go (no folders made)."""
+    return modlayout.find(folder, name) or _mod_out(s, folder, name, create=False)
+
+
+def _mod_remove(folder, name):
+    """Remove every copy of `name` in the mod (a flat leftover and an organised copy can both be there); True if any."""
+    hits = modlayout.find_all(folder, name)
+    for p in hits:
+        os.remove(p)
+    return bool(hits)
+
+
 _entry_ids = itertools.count(1)       # undo entries' ids (Session._state_token)
 
 
@@ -62,6 +97,12 @@ class Session:
     def __init__(self, data_dir, game_dir=None):
         self.data_dir = os.path.abspath(data_dir)
         self.game_dir = game_dir
+        # the game: its folder's exe, else the extracted folder's .game marker (ds_extract writes it), else the current one
+        self.profile = games.use_folder(game_dir) or games.detect_extracted(data_dir) or games.current()
+        games.set_current(self.profile)       # (s.game is the game process Play started)
+        if self.profile.id == "do":           # Denied Ops: models / textures live in APKG packages - unpack them once
+            from conflict_ds_tools import apkg
+            apkg.unpack_extracted(self.data_dir)
         self.level = None          # e.g. "MISSION1"
         self.folder = None         # extracted folder of its archive
         self.env: EnvFile | None = None
@@ -71,10 +112,12 @@ class Session:
         self.layers = {}           # script id -> layer name
         self.layer_start = {}      # layer name -> "hidden" (waits for game.show_layer, the default) / "shown"
         self.mission = None        # (mod folder, NAME) once saved / opened as a mission
+        self.game_mission = None   # (mod, Mission stem, source folder): a game mission opened as Lua (game_missions.py)
         self.terrains = {}         # model name -> conflict_ds_tools.terrain.Terrain (placed by an ENVI record)
         self.roads = {}            # model name -> conflict_ds_tools.roads.Road (placed by an ENVI record)
         self.kits = {}             # KIT_<MODEL>_<n> -> {"level", "source", "index", "centre"} (kits.py pieces)
         self.objectives, self.rules, self.patrols, self.objectives_win = [], [], {}, False   # logic.py
+        self.mod_layout = modlayout.ORGANISED   # where new mods' files go (modlayout.ORGANISED / FLAT; older mods keep theirs)
 
     # --- unsaved changes: the history position at the last save / open, compared with the current one, so undoing back
     # to the saved state is clean again. Each undo entry carries an id that moves with it between the undo and redo
@@ -241,46 +284,154 @@ def _vec(v):
 
 
 # ------------------------------------------------------------------------------------------------- queries --
+@command("The game the editor works on: id (ds1 ds2 cv cg), title, short name, exe, plugin.")
+def game_info(s: Session):
+    g = s.profile
+    return {"id": g.id, "title": g.title, "short": g.short, "exe": g.exes[0], "plugin": g.plugin,
+            "script_host": g.script_host, "mod_layout": mod_layout(s)}
+
+
 @command("Levels in the data folder that have a scene file.")
 def list_levels(s: Session):
-    out = []
+    return sorted(_level_map(s))
+
+
+def _level_map(s: Session) -> dict:
+    """{LEVEL: extracted folder} - a level is a scene file (<LEVEL>.ENV starting "Version"); usually in the archive
+    folder of the same name (mission1/MISSION1.ENV), The Great Escape's in another (level01/GE_LEVEL01.ENV)."""
+    cached = getattr(s, "_levels", None)
+    if cached is not None and cached[0] == s.data_dir:
+        return cached[1]
+    out = {}
     for d in sorted(os.listdir(s.data_dir)):
         folder = os.path.join(s.data_dir, d)
         if not os.path.isdir(folder) or d.startswith("_"):
             continue
-        env = _find_file(folder, d.upper() + ".ENV")
-        if env and open(env, "rb").read(7) == b"Version":
-            out.append(d.upper())
+        for f in os.listdir(folder):
+            if f.upper().endswith(".ENV") and not f.startswith("_"):
+                with open(os.path.join(folder, f), "rb") as fh:
+                    if fh.read(7) == b"Version":
+                        out.setdefault(f[:-4].upper(), folder)
+    s._levels = (s.data_dir, out)
     return out
+
+
+def level_folder(s: Session, level) -> str:
+    """The extracted folder with a level's scene (see _level_map); <data>/<level> when unknown."""
+    level = str(level).upper()
+    d = os.path.join(s.data_dir, level.lower())
+    if os.path.isdir(d) and _find_file(d, level + ".ENV"):
+        return d
+    return _level_map(s).get(level, d)
 
 
 @command("Open a level's scene and routes.", level="level name, e.g. MISSION1")
 def open_level(s: Session, level):
     level = level.upper()
-    folder = os.path.join(s.data_dir, level.lower())
-    if not os.path.isdir(folder):
-        folder = os.path.join(s.data_dir, level)
+    s.game_mission = None   # (game_mission_open sets it again after opening the level)
+    folder = level_folder(s, level)
     path = _find_file(folder, level + ".ENV") if os.path.isdir(folder) else None
     if not path:
         raise CommandError(f"no scene for {level} in {s.data_dir}")
     s.level, s.folder = level, folder
     s.env = EnvFile.load(path)
-    rmd = _find_file(folder, level + ".RMD")
-    s.routes = RouteFile.load(rmd) if rmd else None
+    rmd = _find_file(folder, level + ".RMD") or _find_file(folder, level + ".RDA")   # Global Storm: routes in .RDA
+    try:
+        s.routes = RouteFile.load(rmd) if rmd else None
+    except ValueError:                         # a route layout the kit doesn't read yet (Denied Ops' .RDA)
+        s.routes = None
     s.undo_stack.clear(), s.redo_stack.clear()
     s.dirty = False
     s.layers, s.layer_start, s.mission = {}, {}, None
+    s.mission_dll = None
     s.terrains = {}
     s.roads = {}
     s.kits = {}
     s.blank = False
     logic.set_extras(s, None)
     s._base_objectives = None
-    # the base mission's own data (editor/level_base.json, texts from the player's game): its objectives, briefing,
+    # the base mission's own data (editor/games/<game>/level_base.json, texts from the player's game): its objectives, briefing,
     # music and the objects its DLL needs - resolved now so the panels start filled
     s.base_objectives = logic.base_objectives(s)
     return {"level": level, **s.env.summary(), "route_markers": len(s.routes.markers) if s.routes else 0,
             "base_objectives": len(s.base_objectives), "base_targets": len(logic.base_targets(s))}
+
+
+def _unit_rows(s: Session):
+    """UNITS.TXT rows by unit name (upper case), from the extracted catalog (Global Storm: col 2 body model, 5 body
+    texture, 6 head model, 7 head texture). Cached per data folder."""
+    cache = getattr(s, "_units_cache", None)
+    if cache is None or cache[0] != s.data_dir:
+        rows = {}
+        folder = catalog_dir(s)
+        path = _find_file(folder, "UNITS.TXT") if os.path.isdir(folder) else None
+        if path is None and os.path.isdir(folder):
+            # Denied Ops: the table's name isn't recovered - it is the unnamed catalog file of "<unit>,SOLDIER,<body>" rows
+            for f in sorted(os.listdir(folder)):
+                p = os.path.join(folder, f)
+                if f.upper().endswith(".BIN") and os.path.getsize(p) < 1 << 20:
+                    head = open(p, "rb").read(4096)
+                    if re.search(rb"\n\w+,SOLDIER,\w+,", head):
+                        path = p
+                        break
+        if path:
+            for line in open(path, encoding="latin-1").read().splitlines():
+                cols = [c.strip() for c in line.split(",")]
+                if len(cols) > 7:
+                    rows.setdefault(cols[0].upper(), cols)
+        cache = s._units_cache = (s.data_dir, rows)
+    return cache[1]
+
+
+def _soldier_look(s: Session, r) -> dict:
+    """Global Storm: the body texture ("skin") and head {model, skin} of an HLOI soldier - its own body / head texture
+    fields, NOTEXTURE = the unit's defaults from UNITS.TXT. Empty for other games / objects.
+    Denied Ops: the head model is on the line itself (a name before the zone) and attachments are {"bone", int,
+    "model"} without the float."""
+    if s.profile.id == "do":
+        if r.kind != "HLOI" or "unit" not in r.fields:
+            return {}
+        row = _unit_rows(s).get(str(r["unit"]).upper())
+        out = {}
+        # the unit's row (Global Storm's UNITS.TXT layout): body texture col 5, head model col 6, head texture col 7;
+        # a head named on the line (HLOU) replaces the unit's
+        if row and row[5] not in ("", "-1"):
+            out["skin"] = row[5]
+        head = str(r["head"]).upper() if "head" in r.fields else (row[6].upper() if row and row[6] not in ("", "-1") else "")
+        if head:
+            out["head"] = {"model": head, "skin": "" if "head" in r.fields or not row else row[7]}
+        toks, att = r.tokens, []
+        for i in range(len(toks) - 2):
+            b, m = toks[i], toks[i + 2]
+            if b.quoted and m.quoted and re.fullmatch(r"-?\d+", toks[i + 1].text) and                     (b.text[1:].upper().startswith("BIP01") or "CONNECTOR" in b.text.upper()):
+                att.append({"bone": b.text.strip('"'), "model": m.text.strip('"').upper()})
+        if att:
+            out["attach"] = att
+        return out
+    if "body" not in r.fields:
+        return {}
+    def tex(v):
+        v = str(v or "")
+        return "" if v.upper() in ("", "NOTEXTURE", "-1") else v
+    row = _unit_rows(s).get(str(r["unit"]).upper())
+    out = {}
+    # attachments at the end of the line: n x {"bone", int, "model", float} (hats, radio, pouches, holsters) - rigid
+    # models in that bone's space
+    toks, att = r.tokens, []
+    for i in range(len(toks) - 3):
+        b, m = toks[i], toks[i + 2]
+        if b.quoted and m.quoted and re.fullmatch(r"-?\d+", toks[i + 1].text) and \
+                re.fullmatch(r"-?\d+\.\d+", toks[i + 3].text) and \
+                (b.text[1:].upper().startswith("BIP01") or "CONNECTOR" in b.text.upper()):
+            att.append({"bone": b.text.strip('"'), "model": m.text.strip('"').upper()})
+    if att:
+        out["attach"] = att
+    skin = tex(r["body"]) or (tex(row[5]) if row else "")
+    if skin:
+        out["skin"] = skin
+    if row and tex(row[6]):
+        out["head"] = {"model": row[6].upper(), "skin": tex(r["head"]) or tex(row[7])}
+    return out
 
 
 @command("Everything the viewport draws: world zones, props, objects, waypoints, regions, cameras, sounds, lights, "
@@ -297,14 +448,14 @@ def scene(s: Session):
         try:
             if k == "ENVI" and r.fields:
                 ground = getattr(s, "terrains", {}).get(str(r["model"]).upper())
-                if r["type"] == 5 and ground is not None and ground.zone:
+                if r["type"] in r.file.zone_types() and ground is not None and ground.zone:
                     out["props"].append({"line": line, "name": r["name"], "model": r["model"], "pos": list(ground.origin),
                                          "rot": (0, 0, 0), "scale": (1, 1, 1), "terrain": ground.to_json(),
                                          "ground": True})
-                elif r["type"] == 5 and r["parent"].upper() == "ROOT" and str(r["model"]).upper() not in chunks:
+                elif r["type"] in r.file.zone_types() and r["parent"].upper() == "ROOT" and str(r["model"]).upper() not in chunks:
                     out["zones"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
                                          "rot": r["rot"], "scale": r["scale"]})   # MP_MISSION1's sits at (600,10,-16000)
-                elif r["type"] == 5 and str(r["model"]).upper() in chunks:      # one chunk of a zone model
+                elif r["type"] in r.file.zone_types() and str(r["model"]).upper() in chunks:      # one chunk of a zone model
                     c = chunks[str(r["model"]).upper()]
                     if c["root"]:
                         out["zones"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
@@ -313,9 +464,12 @@ def scene(s: Session):
                                           "zone": c["zone"], "index": c["index"], "root": c["root"], "pos": r["pos"],
                                           "rot": r["rot"], "scale": r["scale"],
                                           "pivot": list(_kit_centre_world(r, c))})
-                elif r["type"] == 0:
+                elif r.file.is_prop(r):
                     out["props"].append({"line": line, "name": r["name"], "model": r["model"], "pos": r["pos"],
                                          "rot": r["rot"], "scale": r["scale"] if "scale.x" in r.fields else (1, 1, 1)})
+                    tex = str(r.get("texture") or "")     # the record's own texture (Global Storm: car paint, variants)
+                    if tex and tex.upper() != "NOTEXTURE":
+                        out["props"][-1]["skin"] = tex
                     t = getattr(s, "terrains", {}).get(str(r["model"]).upper())
                     if t:
                         out["props"][-1]["terrain"] = t.to_json()
@@ -330,6 +484,7 @@ def scene(s: Session):
                         out["props"][-1]["road"] = {**road.to_json(), "mesh": {"pos": pos, "uv": uv, "tris": tris}}
             elif k == "HLOI" and r.fields:
                 out["objects"].append({"line": line, "model": r["model"], "unit": r["unit"], "stat": r["stat"],
+                                       **_soldier_look(s, r),
                                        "script_id": r["script_id"], "pos": r["pos"], "rot": r["rot"],
                                        "active": r["in_play"], "layer": s.layers.get(r["script_id"], ""),
                                        "cutscene": bool(r["flags"] & 0x20000)})
@@ -345,6 +500,24 @@ def scene(s: Session):
                 out["regions"].append(reg)
             elif k.startswith("CAM") and r.fields:
                 out["cameras"].append({"line": line, "kind": k, "name": r["name"], "pos": r["pos"]})
+            elif k == "NEWPOSMARKER" and r.fields:      # Global Storm AI position markers
+                out.setdefault("aipoints", []).append({"line": line, "kind": "marker", "id": r["id"], "pos": r["pos"],
+                                                       "name": f"marker {r['id']}"})
+            elif k == "ENVCOVERPOINT" and r.fields:     # cover points (Global Storm: + facing and arc)
+                out.setdefault("aipoints", []).append({"line": line, "kind": "cover", "id": r["id"], "pos": r["pos"],
+                                                       "name": r["name"], "facing": r.get("facing"), "arc": r.get("arc")})
+            elif k in ("PLGT", "SLGT", "DLGT") and "pos.x" in r.fields:
+                lt = {"line": line, "kind": k, "name": r["name"], "pos": r["pos"],
+                      "colour": [r[f"colour{i}"] for i in range(3)]}
+                if k == "PLGT":
+                    lt["radius"] = r["radius"]
+                elif "pitch" in r.fields:             # Global Storm
+                    lt["dir"] = [r["pitch"], r["yaw"]]
+                    if k == "SLGT":
+                        lt.update(range=r["range"], cone=r["cone_outer"])
+                elif k == "SLGT":                     # Vietnam: rot vector, cones cone0 / cone1
+                    lt.update(dir=list(r["rot"])[:2], range=r["range"], cone=r["cone1"])
+                out["lights"].append(lt)
             elif k == "ENVSND" and r.fields:
                 out["sounds"].append({"line": line, "name": r["name"], "sound": r["sound"], "pos": r["pos"],
                                       "min_distance": r["min_distance"], "max_distance": r["max_distance"]})
@@ -551,6 +724,11 @@ def duplicate(s: Session, line, pos=None):
         changes["pos"] = _vec(pos)
     if r.kind == "HLOI":
         changes["script_id"] = max(o["script_id"] for o in s.env.find("HLOI")) + 1
+        stat = str(r.get("stat") or "")
+        if s.profile.id == "ds1" and re.search(r"[A-Za-z]", stat) and stat.upper() != "NONE":
+            # its own name = its own editor ID: save_mod writes the copy as a record edit (based_on), which other mods'
+            # copies don't collide with (placed.split_edits)
+            changes["stat"] = _unique(s, "HLOI", "stat", stat)
     if r.kind == "NEWENVWAYPT":
         changes["id"] = paths._free_ids(s, 1)[0]
         changes["next"] = -1
@@ -578,9 +756,9 @@ def copy(s: Session, lines):
     out = []
     for ln in lines if isinstance(lines, list) else [lines]:
         r = s.record(ln)
-        if r.kind not in _PASTE_END or (r.kind == "ENVI" and (r.get("type") != 0 or r.children)):
+        if r.kind not in _PASTE_END or (r.kind == "ENVI" and (not r.file.is_prop(r) or r.children)):
             raise CommandError(f"line {ln}: {r.kind} records can't be copied (world pieces stay with their zone)")
-        out.append({"kind": r.kind, "text": r.text, "pos": list(r["pos"]), "level": s.level,
+        out.append({"kind": r.kind, "text": r.text, "pos": list(r["pos"]), "level": s.level, **_block_of(s.env, r),
                     "crew": _crew_texts(s.env, r) if r.kind == "HLOI" else []})
     _CLIPBOARD = out
     return {"copied": len(out), "kinds": sorted({e["kind"] for e in out})}
@@ -646,6 +824,47 @@ def fix_rinfo(s: Session):
     return {"fixed": fixed}
 
 
+def _insert_new(s: Session, keyword, text, block=None, tag=None):
+    """Insert a new ENVI / HLOI (a library template or a copy) where the scene keeps that kind; returns its record.
+    Denied Ops: the whole block (env.do_block) at the end of its section, counts and links kept by env.py; other
+    games: the line before the section end (ENDI / HLOX), the RINFO flag dropped (copies are the line alone)."""
+    if s.env.version >= 300:
+        if block is None:
+            if keyword != "ENVI":
+                raise CommandError("objects in a Denied Ops scene can only be copied from a Denied Ops scene")
+            block, tag = [' <SGNODE> 1 0 "" </SGNODE>', text, "<MaterialOverrides> 0", "</MaterialOverrides>"], \
+                "ENVINSTANCES"
+        before = len(s.env.lines)
+        try:
+            new = s.env.insert_block(block, tag or ("ENVINSTANCES" if keyword == "ENVI" else "HLOS"), keyword)
+        except (KeyError, StopIteration) as e:
+            raise CommandError(str(e).strip("'\""))
+        # (where, how many lines): the block went in before the section's close tag; the counts / link lines it
+        # changed or added lie after it, below any earlier paste in that section
+        s.last_insert = (new.index - block.index(next(b for b in block if b.lstrip().startswith(keyword) or
+                                                     b.lstrip().startswith(("PHYI", "HLOU")))),
+                         len(block))
+        return new
+    end = _PASTE_END[keyword]
+    at = next((r.index for r in s.env.records if r.kind == end), None)
+    if at is None:
+        raise CommandError(f"this scene has no {end} section")
+    s.env.lines.insert(at, text)
+    s.env._parse()
+    new = s.env.record_at(at + 1)
+    _drop_rinfo_flag(new)
+    s.last_insert = (at, 1)
+    return new
+
+
+def _block_of(env, r):
+    """{"block", "tag"} for a Denied Ops record (copied with its block), else {}."""
+    if env.version < 300:
+        return {}
+    block, tag = env.do_block(r)
+    return {"block": block, "tag": tag}
+
+
 def _paste_entries(s: Session, entries, pos, yaw=0.0, anchor=None):
     """Insert copied records ({kind, text, pos, crew}) so that `anchor` (default: the first one's position) lands on
     pos, the group turned by yaw degrees about it; new script ids / waypoint ids / unique names, nearest zones.
@@ -654,15 +873,9 @@ def _paste_entries(s: Session, entries, pos, yaw=0.0, anchor=None):
     yaw = float(yaw or 0.0)
     new_lines = []
     for e in entries:
-        end = _PASTE_END[e["kind"]]
-        at = next((r.index for r in s.env.records if r.kind == end), None)
-        if at is None:
-            raise CommandError(f"this scene has no {end} section")
-        s.env.lines.insert(at, e["text"])
-        s.env._parse()
-        new_lines = [l + 1 if l >= at + 1 else l for l in new_lines]   # earlier pastes below the insertion move
-        r = s.env.record_at(at + 1)
-        _drop_rinfo_flag(r)
+        r = _insert_new(s, e["kind"], e["text"], e.get("block"), e.get("tag"))
+        at, added = s.last_insert
+        new_lines = [l + added if l >= at + 1 else l for l in new_lines]   # earlier pastes below the insertion move
         off = _turn([c - a for c, a in zip(e["pos"], anchor)], yaw)
         target = tuple(p + o for p, o in zip(pos, off))
         r["pos"] = target
@@ -713,7 +926,7 @@ def _is_vehicle(rec):
 
 
 def _crew(rec):
-    if not _is_vehicle(rec):
+    if not _is_vehicle(rec) or "kit_count" not in rec.fields:     # other games' HLOI layouts don't name the kit
         return []
     return [(rec[f"kit{k}.item"], rec[f"kit{k}.category"], rec[f"kit{k}.amount"]) for k in range(rec["kit_count"])]
 
@@ -736,7 +949,7 @@ def _kit_categories(s: Session):
 
 
 def _table_rows(s: Session, name):
-    folder = os.path.join(s.data_dir, "catalog")
+    folder = catalog_dir(s)
     path = _find_file(folder, name) if os.path.isdir(folder) else None
     if not path:
         return []
@@ -988,17 +1201,18 @@ def route_delete(s: Session, index):
 
 # ------------------------------------------------------------------------------------------------- library --
 # Every prop (ENVI type 0) and object (HLOI) type of every shipped scene, as a template record: placing one copies
-# that real record (all its AI / kit fields stay valid) and changes position, facing, zone and script id.
-_LIBRARY = None
+# that real record (all its AI / kit fields stay valid) and changes position, facing, zone and script id. One list per
+# game folder: the app opens every game in one process, so a single cached list handed the last game's to the next.
+_LIBRARY = {}
 
 
 def _library(s: Session):
-    global _LIBRARY
-    if _LIBRARY is not None:
-        return _LIBRARY
+    key = os.path.normcase(s.data_dir)
+    if key in _LIBRARY:
+        return _LIBRARY[key]
     entries = {}
     for level in list_levels(s):
-        folder = os.path.join(s.data_dir, level.lower())
+        folder = level_folder(s, level)
         path = _find_file(folder, level + ".ENV")
         try:
             env = EnvFile.load(path)
@@ -1008,7 +1222,7 @@ def _library(s: Session):
             if not r.fields or r.kind not in ("ENVI", "HLOI"):
                 continue
             if r.kind == "ENVI":
-                if r.get("type") != 0 or r.children:
+                if not r.file.is_prop(r) or r.children:
                     continue
                 key = ("prop", r["model"].upper())
                 label = r["model"]
@@ -1017,12 +1231,13 @@ def _library(s: Session):
                 label = f"{r['unit']} ({r['model']})"
             if key not in entries:
                 entries[key] = {"id": len(entries), "kind": key[0], "keyword": r.kind, "model": r["model"],
-                                "label": label, "level": level, "text": r.text,
+                                "label": label, "level": level, "text": r.text, "version": env.version,
+                                **_block_of(env, r),
                                 "unit": r.get("unit"), "stat": r.get("stat"),
                                 "script_id": r.get("script_id") if r.kind == "HLOI" else None,
                                 "crew": _crew_texts(env, r) if r.kind == "HLOI" else []}
-    _LIBRARY = list(entries.values())
-    return _LIBRARY
+    _LIBRARY[key] = list(entries.values())
+    return _LIBRARY[key]
 
 
 def _models_in_level(s: Session):
@@ -1036,29 +1251,233 @@ def _models_in_level(s: Session):
     return names
 
 
-@command("Prop and object types of all shipped levels (templates for place). in_level = the model is in the open "
-         "level's archive (others need packing into the mod).", search="filter text", kind="prop / object / all")
-def library(s: Session, search="", kind="all"):
+@command("Prop and object types to place: the open game's shipped levels, (Desert Storm) the converted libraries "
+         "of the other games and every installed mod - each entry with its source (source / source_label / "
+         "source_kind game / converted / mod, from). in_level = the model is in the open level's archive (shipped "
+         "models from other levels get packed into the mod; mod / converted items bring their files on save).",
+         search="filter text", kind="prop / object / all", source="optional source id (game, @LIB-DS2, @MOD-<name>)")
+def library(s: Session, search="", kind="all", source=""):
     if s.env is None:
         raise CommandError("no level open")
     here = _models_in_level(s)
     q = search.lower()
+    game = s.profile.id
+    game_label = s.profile.short.upper()
     out = []
-    for e in _library(s):
+    for e in _all_library(s):
+        src = e.get("source") or "game"
         if kind != "all" and e["kind"] != kind:
             continue
-        if q and q not in (e["label"] + " " + (e["stat"] or "")).lower():
+        if source and src.upper() != source.upper():
+            continue
+        if q and q not in (e["label"] + " " + (e["stat"] or "") + " " + e.get("from", e["level"])).lower():
             continue
         m = e["model"].upper()
         in_level = m in here or ("_%08X" % archive_hash(m + ".EVO")) in here
-        out.append({k: e[k] for k in ("id", "kind", "model", "label", "level", "unit", "stat")} | {"in_level": in_level})
+        out.append({k: e.get(k) for k in ("id", "kind", "model", "label", "level", "unit", "stat")} | {
+            "in_level": in_level, "source": src, "source_kind": e.get("source_kind", "game"),
+            "source_label": e.get("source_label") or game_label,
+            "from": e.get("from") or e["level"].title(), "thumb": e.get("thumb") or e["level"]})
     return out
+
+# ---- library sources: the open game, (Desert Storm) the converted libraries, every mod ----------------------------
+# Every library entry names its source: {"source": id, "source_label", "source_kind": game / converted / mod, "from"}.
+# Converted libraries = <Desert Storm>\PSE\Library\<game> (conflict_ds_tools/library.py: DS2_ / GE_ / CV_ / CG_ files
+# the plugin serves by name when a scene asks for them). Mods = <game>\Mods\<mod> (switched-off "_" mods left out).
+# Props from them are placed on one of the game's own prop records with the model swapped; soldier types / vehicles
+# (.unit / .vehicle with "based on" a game type) on that type's object record with unit and model swapped. Files a
+# placed item needs that the target mod doesn't have (its definition, a mod's model + textures) are copied into the
+# mod when it's saved (_pack_sources) - converted models themselves stay in the library (served by name).
+GAME_TAGS = {"ds1": "DS1", "ge": "TGE", "ds2": "DS2", "cv": "CV", "cg": "CGS", "do": "DO"}
+_EXTRA = {}
+
+
+def _game_root(s: Session):
+    g = s.game_dir if s.game_dir and os.path.isdir(s.game_dir) else None
+    if not g:
+        try:
+            g = games.find_game_dir(s.profile)
+        except Exception:  # noqa: BLE001
+            g = None
+    return g if g and os.path.isdir(g) else None
+
+
+def _def_fields(path):
+    """id / based on / model of a .unit / .vehicle file (key = value lines)."""
+    out = {}
+    try:
+        with open(path, encoding="latin-1") as f:
+            for line in f:
+                line = line.split("#", 1)[0]
+                if "=" in line:
+                    k, v = line.split("=", 1)
+                    k = k.strip().lower()
+                    if k in ("id", "based on", "model", "name") and k not in out:
+                        out[k] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def _template_for(game_lib, kind, based_on=None):
+    """The game's library entry an item from another source is placed on: its first prop (props), the object entry
+    of the type it is based on (soldier types / vehicles)."""
+    if kind == "prop":
+        return next((e for e in game_lib if e["kind"] == "prop"), None)
+    b = (based_on or "").upper()
+    return next((e for e in game_lib if e["kind"] == "object" and str(e.get("unit") or "").upper() == b), None)
+
+
+def _texture_files(model_path, folder):
+    """The textures a mod's model names that the same mod has (copied with it)."""
+    out = []
+    try:
+        from conflict_ds_tools import evo
+        names = {m.texture for o in evo.load(model_path).objects for m in o.node.meshes if m.texture}
+    except Exception:  # noqa: BLE001
+        return out
+    for t in sorted(names):
+        for ext in (".dds", ".tga", ".png"):
+            hit = modlayout.find(folder, t + ext)
+            if hit:
+                out.append(hit)
+                break
+    return out
+
+
+def _extra_entries(s: Session, game_lib):
+    """Library entries of the converted libraries and the mods (cached per game folder + the mods' file times)."""
+    root = _game_root(s)
+    if not root:
+        return []
+    mods_dir = os.path.join(root, "Mods")
+    lib_dir = os.path.join(root, "PSE", "Library") if s.profile.id == "ds1" else None
+    stamp = []
+    for d in (mods_dir, lib_dir):
+        if d and os.path.isdir(d):
+            stamp += [(n, os.path.getmtime(os.path.join(d, n))) for n in sorted(os.listdir(d))]
+    key = (os.path.normcase(root), s.profile.id, tuple(stamp))
+    if _EXTRA.get("key") == key:
+        return _EXTRA["entries"]
+    out = []
+
+    def add(kind, model, label, source, source_label, source_kind, where, files, template, unit=None):
+        if template is None:
+            return
+        out.append({"kind": kind, "keyword": template["keyword"], "model": model, "label": label,
+                    "level": template["level"], "text": template["text"], "version": template.get("version"),
+                    "block": template.get("block"), "tag": template.get("tag"), "crew": template.get("crew") or [],
+                    "unit": unit or template.get("unit"), "stat": template.get("stat"),
+                    "script_id": None, "source": source, "source_label": source_label,
+                    "source_kind": source_kind, "from": where, "files": files,
+                    "model_override": model, "unit_override": unit, "thumb": source})
+
+    prop_tpl = _template_for(game_lib, "prop")
+    # converted libraries (Desert Storm only: the porter converts into Desert Storm)
+    if lib_dir and os.path.isdir(lib_dir):
+        for gid in sorted(os.listdir(lib_dir)):
+            folder = os.path.join(lib_dir, gid)
+            index = os.path.join(folder, "library.txt")
+            if not os.path.isfile(index):
+                continue
+            game = games.GAMES.get(gid)
+            src_id = "@LIB-" + gid.upper()
+            src_label = "%s \u2192 %s" % (GAME_TAGS.get(gid, gid.upper()), GAME_TAGS.get(s.profile.id, ""))
+            short = game.short if game else gid.upper()
+            with open(index, encoding="latin-1") as f:
+                rows = [ln.rstrip("\r\n").split("\t") for ln in f if ln.strip() and not ln.startswith("#")]
+            for r in rows:
+                if len(r) < 3:
+                    continue
+                name, kind = r[0], r[1]
+                stem, ext = os.path.splitext(name)
+                where = "%s: %s (converted)" % (short, r[2])
+                if ext.upper() == ".EVO" and kind == "model":
+                    add("prop", stem, stem, src_id, src_label, "converted", where, [], prop_tpl)
+                elif ext.upper() in (".UNIT", ".VEHICLE"):
+                    d = _def_fields(os.path.join(folder, name))
+                    if d.get("id") and d.get("model"):
+                        label = "%s (%s)" % (d["id"], d.get("name") or d["model"])
+                        add("object", d["model"], label, src_id, src_label, "converted", where,
+                            [os.path.join(folder, name)], _template_for(game_lib, "object", d.get("based on")),
+                            unit=d["id"])
+    # mods
+    if os.path.isdir(mods_dir):
+        for mod in sorted(os.listdir(mods_dir)):
+            folder = os.path.join(mods_dir, mod)
+            if mod.startswith(("_", ".")) or not os.path.isdir(folder):
+                continue
+            src_id = "@MOD-" + mod
+            for rel in modlayout.files(folder):
+                path = os.path.join(folder, rel)
+                stem, ext = os.path.splitext(os.path.basename(rel))
+                where = "%s\\%s" % (mod, rel)
+                if ext.upper() == ".EVO":
+                    add("prop", stem, stem, src_id, "MOD: " + mod, "mod", where,
+                        [path] + _texture_files(path, folder), prop_tpl)
+                elif ext.upper() in (".UNIT", ".VEHICLE"):
+                    d = _def_fields(path)
+                    if d.get("id") and d.get("model"):
+                        model_file = modlayout.find(folder, d["model"] + ".evo")
+                        files = [path] + ([model_file] + _texture_files(model_file, folder) if model_file else [])
+                        add("object", d["model"], "%s (%s)" % (d["id"], d.get("name") or d["model"]), src_id,
+                            "MOD: " + mod, "mod", where, files, _template_for(game_lib, "object", d.get("based on")),
+                            unit=d["id"])
+    base = len(game_lib)
+    for k, e in enumerate(out):
+        e["id"] = base + k
+    _EXTRA.update(key=key, entries=out)
+    return out
+
+
+def _all_library(s: Session):
+    """The game's own library (shipped levels) + the other sources; ids are list positions."""
+    game_lib = _library(s)
+    return game_lib + _extra_entries(s, game_lib)
+
+
+def source_folder(s: Session, source, model):
+    """The folder a library source's model is in (model thumbnails: server.py /model/@LIB-DS2/<MODEL>.glb)."""
+    root = _game_root(s)
+    if not root:
+        return None
+    if source.upper().startswith("@LIB-"):
+        return os.path.join(root, "PSE", "Library", source[5:].lower())
+    if source.upper().startswith("@MOD-"):
+        folder = os.path.join(root, "Mods", source[5:])
+        hit = modlayout.find(folder, model + ".evo") if os.path.isdir(folder) else None
+        return os.path.dirname(hit) if hit else folder
+    return None
+
+
+def _pack_sources(s: Session, folder):
+    """Copy what items placed from mods / converted libraries need into the mod being saved (names already there are
+    kept: the mod's own copy wins). Returns the file names copied."""
+    import shutil
+    used = {str(r.get("model")).upper() for r in s.env.records if r.kind in ("ENVI", "HLOI") and r.fields} | \
+           {str(r.get("unit")).upper() for r in s.env.records if r.kind == "HLOI" and r.fields}
+    copied = []
+    for key, paths in sorted(getattr(s, "foreign_files", {}).items()):
+        if key not in used:
+            continue                            # placed, then deleted again
+        for src in paths:
+            name = os.path.basename(src)
+            if not os.path.isfile(src) or modlayout.find(folder, name):
+                continue
+            if os.path.normcase(os.path.dirname(os.path.abspath(src))).startswith(os.path.normcase(os.path.abspath(folder))):
+                continue                        # already this mod's file
+            shutil.copy2(src, _mod_out(s, folder, name))
+            copied.append(name)
+    return copied
+
 
 
 def _zones(s: Session):
     """Names a record can hang from: "Root" and every ENVI of the scene (zones such as MIS1_ZONE1-6821, interiors,
     and props - a cigarette pack hangs from its table)."""
-    return {"Root"} | {str(r.get("name")) for r in s.env.find("ENVI")}
+    # GLOBALZONE (Vietnam on): a zone built into the engine, always present - 1286 links in Vietnam's missions
+    engine = {"GLOBALZONE"} if s.env.version >= 107 else set()
+    return {"Root"} | engine | {str(r.get("name")) for r in s.env.records if r.kind in ("ENVI", "ANMI", "VAMI")}
 
 
 def _nearest_zone(s: Session, keyword, pos, skip=None):
@@ -1074,7 +1493,7 @@ def _nearest_zone(s: Session, keyword, pos, skip=None):
             p, z = r["pos"], r[field]
         except KeyError:
             continue
-        if keyword == "ENVI" and r.get("type") != 0:
+        if keyword == "ENVI" and not r.file.is_prop(r):
             continue
         if str(z) not in zones:
             continue
@@ -1083,7 +1502,7 @@ def _nearest_zone(s: Session, keyword, pos, skip=None):
             best, zone = d, z
     if zone is None:                            # nothing placed yet (a new level): the level's ground zone
         zone = next((str(r["name"]) for r in s.env.find("ENVI")
-                     if r.get("type") == 5 and str(r.get("parent")) == "Root" and r.index != skip), None)
+                     if r.get("type") in r.file.zone_types() and str(r.get("parent")) == "Root" and r.index != skip), None)
     return zone
 
 
@@ -1091,33 +1510,43 @@ def _nearest_zone(s: Session, keyword, pos, skip=None):
          mutates=True, template="library id", pos="[x, y, z]", yaw="facing in degrees",
          scale="optional size factor for props (e.g. 0.9-1.1 for variety)")
 def place(s: Session, template, pos, yaw=0.0, scale=None):
-    lib = _library(s)
+    lib = _all_library(s)
     if not 0 <= int(template) < len(lib):
         raise CommandError("unknown template")
     e = lib[int(template)]
     pos = _vec(pos)
-    end = {"HLOI": "HLOX", "ENVI": "ENDI"}[e["keyword"]]
-    at = next((r.index for r in s.env.records if r.kind == end), None)
-    if at is None:
-        raise CommandError(f"the scene has no {end}")
-    s.env.lines.insert(at, e["text"])
-    s.env._parse()
-    new = s.env.record_at(at + 1)
-    _drop_rinfo_flag(new)
+    # a Denied Ops scene takes Denied Ops templates (whole blocks); other games' lines don't fit its layout
+    same = e.get("version", s.env.version) >= 300 if s.env.version >= 300 else True
+    if not same:
+        raise CommandError("%s comes from another game's scene - it can't be placed in a Denied Ops scene"
+                           % e["label"])
+    new = _insert_new(s, e["keyword"], e["text"], e.get("block"), e.get("tag"))
+    if e.get("model_override"):                 # an item from a mod / converted library on a game template record
+        new["model"] = e["model_override"]
+        if e.get("unit_override") and "unit" in new.fields:
+            new["unit"] = e["unit_override"]
+        new = s.env.record_at(new.index + 1)
+        if e.get("files"):
+            ff = s.__dict__.setdefault("foreign_files", {})
+            ff[(e.get("unit_override") or e["model_override"]).upper()] = list(e["files"])
     new["pos"] = pos
     rot = new["rot"]
     new["rot"] = (rot[0], float(yaw) % 360.0, rot[2])
+    if e["keyword"] != "HLOI" and "name" in new.fields:
+        # world piece names are unique per scene - before the zone: a parent link line is written under this name
+        new["name"] = _unique(s, "ENVI", "name", f"{e['model']}{new.index + 1}")
+    line = new.index
     zone = _nearest_zone(s, e["keyword"], pos, skip=new.index)
-    if zone:
+    if zone and (e["keyword"] != "HLOI" or "zone" in new.fields):
         new["zone" if e["keyword"] == "HLOI" else "parent"] = zone
+        new = s.env.record_at(line + 1)         # a parent link line re-reads the scene (the block sits above it)
     result = {"line": new.index + 1}
     if e["keyword"] == "HLOI":
         result["script_id"] = new["script_id"] = max(o["script_id"] for o in s.env.find("HLOI")) + 1
-        new["in_play"] = 1                     # templates from levels that spawn them later start hidden
+        if "in_play" in new.fields:
+            new["in_play"] = 1                 # templates from levels that spawn them later start hidden
         new = _attach_crew(s, new, e.get("crew") or [])
         result["line"] = new.index + 1
-    elif "name" in new.fields:
-        new["name"] = f"{e['model']}{new.index + 1}"   # world piece names are unique per scene
     if scale is not None and e["keyword"] == "ENVI" and "scale.x" in new.fields:
         k = float(scale)
         if not 0.1 <= k <= 10:
@@ -1295,7 +1724,7 @@ def _chunk_map(s: Session):
     out = {}
     from conflict_ds_tools import evo
     for r in s.env.find("ENVI"):
-        if not r.fields or r.get("type") != 5 or str(r.get("parent")).upper() != "ROOT":
+        if not r.fields or r.get("type") not in r.file.zone_types() or str(r.get("parent")).upper() != "ROOT":
             continue
         model = str(r["model"]).upper()
         if model in getattr(s, "terrains", {}):
@@ -1327,14 +1756,14 @@ def _chunk_guard(s: Session, r, action):
 
 def _chunk(s: Session, r):
     """The zone chunk a record places (see _chunk_map), or None."""
-    if r.kind != "ENVI" or not r.fields or r.get("type") != 5:
+    if r.kind != "ENVI" or not r.fields or r.get("type") not in r.file.zone_types():
         return None
     return _chunk_map(s).get(str(r.get("model")).upper())
 
 
 def _kit_data(s: Session, level, model):
     from conflict_ds_tools import evo
-    folder = os.path.join(s.data_dir, level.lower())
+    folder = level_folder(s, level)
     path = evo.AssetFinder(_find_file(folder, level.upper() + ".ENV") or os.path.join(folder, "x")).find(model, (".evo",))
     if not path:
         raise CommandError(f"no {model}.EVO in {level}")
@@ -1344,8 +1773,8 @@ def _kit_data(s: Session, level, model):
 @command("World-piece models of a level that kit pieces can come from (its ground / zone models).", level="level name")
 def kit_models(s: Session, level=None):
     level = (level or s.level).upper()
-    env = EnvFile.load(_find_file(os.path.join(s.data_dir, level.lower()), level + ".ENV"))
-    return sorted({str(r["model"]) for r in env.find("ENVI") if r.get("type") == 5 and str(r.get("parent")) == "Root"})
+    env = EnvFile.load(_find_file(level_folder(s, level), level + ".ENV"))
+    return sorted({str(r["model"]) for r in env.find("ENVI") if r.get("type") in r.file.zone_types() and str(r.get("parent")) == "Root"})
 
 
 @command("The pieces of a world-piece model: index, textures, size (m), collision - search filters by texture name; "
@@ -1588,9 +2017,9 @@ def _save_roads(s: Session, folder, refs):
     for model, road in getattr(s, "roads", {}).items():
         if model not in used:
             continue
-        with open(os.path.join(folder, model + ".EVO"), "wb") as f:
+        with open(_mod_out(s, folder, model + ".EVO"), "wb") as f:
             f.write(road.to_evo(template, model))
-        with open(os.path.join(folder, model + ".road.json"), "w") as f:
+        with open(_mod_out(s, folder, model + ".road.json"), "w") as f:
             f.write(road.dumps())
         written += [model + ".EVO", model + ".road.json"]
         if not (_find_file(s.folder, road.texture + ".DDS") or _find_file(s.folder, road.texture + ".TGA")):
@@ -1622,12 +2051,12 @@ def _save_terrains(s: Session, folder, refs):
                     if y < ground + 5:
                         h["pos"] = (x, ground + 10, z)
         warnings = []
-        with open(os.path.join(folder, model + ".EVO"), "wb") as f:
+        with open(_mod_out(s, folder, model + ".EVO"), "wb") as f:
             if t.zone:
                 f.write(t.to_evo(open(zone_template, "rb").read(), model, warnings, offset=t.origin))
             else:
                 f.write(t.to_evo(open(template, "rb").read(), model, warnings))
-        with open(os.path.join(folder, model + ".terrain.json"), "w") as f:
+        with open(_mod_out(s, folder, model + ".terrain.json"), "w") as f:
             f.write(t.dumps())
         written += [model + ".EVO", model + ".terrain.json"]
         for name in filter(None, (t.texture, t.steep_texture)):
@@ -1646,12 +2075,13 @@ def new_level(s: Session, environment, mod, name, size=400, vertices=65):
     from conflict_ds_tools import blank
     from conflict_ds_tools.terrain import Terrain
     open_level(s, environment)
+    _require_script_host(s, "A new level")
     base = s.env
     start = next((r for r in base.find("HLOI") if r.fields and r["unit"] == "Bradley" and not r["flags"] & 0x20000), None)
     if start is None:
         raise CommandError(f"{environment} has no squad start (Bradley) - pick a campaign mission")
     centre = start["pos"]
-    tpl = next(r for r in base.find("ENVI") if r.get("type") == 5 and str(r.get("parent")) == "Root")
+    tpl = next(r for r in base.find("ENVI") if r.get("type") in r.file.zone_types() and str(r.get("parent")) == "Root")
     lines = blank.blank_lines(base, extra_envi=[tpl.text])
 
     s.env.lines = lines
@@ -1686,20 +2116,156 @@ def _same_as_shipped(s: Session):
     path = _find_file(s.folder, s.level + ".ENV") if s.folder and os.path.isdir(s.folder) else None
     if not path or EnvFile.load(path).lines != s.env.lines:
         return False
-    rmd = _find_file(s.folder, s.level + ".RMD")
+    rmd = _find_file(s.folder, s.level + ".RMD") or _find_file(s.folder, s.level + ".RDA")
     if s.routes is None or rmd is None:
         return s.routes is None and rmd is None
     with open(rmd, "rb") as f:
-        return f.read() == s.routes.to_bytes()
+        return f.read() == (s.routes.to_rda_bytes() if s.routes.is_rda else s.routes.to_bytes())
 
 
-@command("Write the edited scene (and routes) as a mod: <game>\\Mods\\<mod>\\<LEVEL>.ENV / .RMD. Refuses a scene identical "
-         "to the shipped level (it would only copy game files into the mod) unless allow_unchanged.",
+def _save_mod_references(s: Session, mod, game_dir, allow_unchanged):
+    """save_mod for plugins that build game data from the player's install (gamerefs.py; DesertStorm2Fix
+    mods_levels.cpp): the scene and routes as changes against the shipped level - no game file in the mod. Older full
+    copies of <LEVEL>.ENV / .RMD in the mod are removed (a real file would win over the patch); the plugin rebuilds the
+    octree and the AI navigation (walk map + generated route markers, the level's hand-placed markers kept) for the
+    changed scene."""
+    from conflict_ds_tools import gamerefs
+    if not allow_unchanged and _same_as_shipped(s):
+        raise CommandError("no changes: the scene is exactly the shipped level")
+    game = game_dir or s.game_dir
+    if not game or not os.path.isdir(game):
+        raise CommandError("game folder unknown - start the editor with --game")
+    if not mod or any(c in mod for c in '\\/:*?"<>|'):
+        raise CommandError("bad mod name")
+    base_env = _find_file(s.folder, s.level + ".ENV")
+    if not base_env:
+        raise CommandError(f"the shipped {s.level}.ENV isn't in the extraction - can't write the scene as changes")
+    folder = os.path.join(game, "Mods", mod)
+    os.makedirs(folder, exist_ok=True)
+    records = os.path.join("records", s.level.lower() + ".placed.lua")
+    names = [s.level + ".ENV", s.level + ".RMD", s.level + ".envpatch", s.level + ".rmdpatch", records]
+    backup = workflow.backup_files(s, folder, names, mod, s.level)
+    written, removed = [], []
+    base_lines = EnvFile.load(base_env).lines
+    # Desert Storm: changed / copied objects, waypoints and regions as record edits (mods merge them field by field -
+    # docs/sdk/data-files.md "Several mods, one level"); the .envpatch keeps only the rest
+    edits, lines = [], s.env.lines
+    if s.profile.id == "ds1":
+        from conflict_ds_tools import placed
+        with open(base_env, "rb") as f:
+            edits, lines = placed.split_edits(f.read(), s.env, s.level)
+    rec_path = _mod_out(s, folder, records, create=False)   # records\ stays where the plugin reads it
+    if edits:
+        from conflict_ds_tools import pse_data
+        os.makedirs(os.path.dirname(rec_path), exist_ok=True)
+        doc = pse_data.Document(pse_data.from_python(edits), [
+            f"{s.level} - objects, waypoints and regions changed with the Conflict Editor (written by save_mod: the",
+            "next save replaces this file; other mods' edits of the same level merge with these field by field)"])
+        with open(rec_path, "wb") as f:
+            f.write(pse_data.dumps_bytes(doc))
+        written.append(records)
+    elif os.path.exists(rec_path):
+        os.remove(rec_path)
+        removed.append(records)
+    if lines != base_lines:
+        with open(_mod_out(s, folder, s.level + ".envpatch"), "w", encoding="latin-1", newline="\n") as f:
+            f.write(gamerefs.make_env_patch(base_lines, lines, s.level + ".ENV"))
+        written.append(s.level + ".envpatch")
+    elif _mod_remove(folder, s.level + ".envpatch"):
+        removed.append(s.level + ".envpatch")
+    base_rmd = _find_file(s.folder, s.level + ".RMD")
+    if s.routes and base_rmd:
+        base_routes = RouteFile.load(base_rmd)
+        if base_routes.to_bytes() != s.routes.to_bytes():
+            with open(_mod_out(s, folder, s.level + ".rmdpatch"), "w", newline="\n") as f:
+                f.write(gamerefs.make_rmd_patch(base_routes, s.routes, s.level + ".RMD"))
+            written.append(s.level + ".rmdpatch")
+        else:
+            _mod_remove(folder, s.level + ".rmdpatch")   # routes unchanged: the plugin rebuilds them for the changed scene
+    elif s.routes:
+        s.routes.save(_mod_out(s, folder, s.level + ".RMD"))
+        written.append(s.level + ".RMD")
+    for old in (s.level + ".ENV", s.level + ".RMD"):
+        if old not in written and _mod_remove(folder, old):
+            removed.append(old)
+    if problems := s.env.problems:
+        raise CommandError("saved, but the scene has problems: " + "; ".join(problems[:3]))
+    s.dirty = False
+    written += _pack_sources(s, folder)
+    return {"folder": folder, "files": written, "removed": removed, "backup": backup, "record_edits": len(edits)}
+
+
+def _mod_level_scene(s: Session, folder, level):
+    """A shipped level's scene as one mod's files make it in the game: the mod's own <LEVEL>.ENV, else the shipped
+    scene + the mod's <LEVEL>.envpatch, then the placed-reference edits of its records\\*.lua (files by name, as
+    DesertStormFix applies them). None when the mod changes nothing of that level."""
+    from conflict_ds_tools import gamerefs, placed, pse_data
+    own = modlayout.find(folder, level + ".ENV")
+    if own:
+        return EnvFile.load(own)
+    base = _find_file(s.folder, level + ".ENV")
+    if not base:
+        return None
+    env = EnvFile.load(base)
+    changed = False
+    patch = modlayout.find(folder, level + ".envpatch")
+    if patch:
+        env.lines = gamerefs.apply_env_patch(open(patch, encoding="latin-1").read(), env.lines)
+        env._parse()
+        changed = True
+    rec = os.path.join(folder, "records")
+    if os.path.isdir(rec):
+        mod = os.path.basename(folder)
+        edits = []
+        for f in sorted(os.listdir(rec), key=str.lower):
+            if f.lower().endswith(".lua"):
+                doc = pse_data.load(os.path.join(rec, f))
+                edits.append((mod, f, [e for e in doc.root.items if isinstance(e, pse_data.Table)]))
+        if level.lower() in placed.edit_levels(edits):
+            placed.apply_edits(env, level, edits)
+            changed = True
+    return env if changed else None
+
+
+@command("Open a shipped level as a mod changed it (save_mod's files: the mod's <LEVEL>.ENV, or the level + its "
+         ".envpatch + its records' placed edits) - to go on editing it. Save with save_mod to the same mod.",
+         mod="mod folder", level="level name, e.g. MISSION1")
+def open_mod_level(s: Session, mod, level):
+    from conflict_ds_tools import gamerefs
+    folder = _mod_folder(s, mod, create=False)
+    open_level(s, level)
+    env = _mod_level_scene(s, folder, s.level)
+    if env is None:
+        raise CommandError(f"Mods\\{mod} doesn't change {s.level}")
+    s.env = env
+    rpatch, rmd = modlayout.find(folder, s.level + ".rmdpatch"), modlayout.find(folder, s.level + ".RMD")
+    if rpatch and s.routes:
+        s.routes = gamerefs.apply_rmd_patch(open(rpatch).read(), s.routes)
+    elif rmd:
+        s.routes = RouteFile.load(rmd)
+    s.dirty = False
+    return {"level": s.level, "mod": mod, "problems": s.env.problems[:5]}
+
+
+@command("Write the edited scene (and routes) as a mod: <game>\\Mods\\<mod>\\<LEVEL>.ENV / .RMD - or, for a game whose plugin "
+         "builds them from the player's install (Desert Storm, Desert Storm II), <LEVEL>.envpatch / .rmdpatch with only "
+         "the changes (Desert Storm: changed / copied objects, waypoints and regions go to records\\<level>.placed.lua "
+         "as record edits instead, which other mods' edits of the level merge with). "
+         "Refuses a scene identical to the shipped level (it would only copy game files into the mod) unless "
+         "allow_unchanged.",
          mod="mod folder name", game_dir="game folder (default: the session's)",
-         allow_unchanged="write it even when nothing differs from the shipped level")
-def save_mod(s: Session, mod, game_dir=None, allow_unchanged=False):
+         allow_unchanged="write it even when nothing differs from the shipped level",
+         references="patches instead of full copies (default: what the game's plugin supports)")
+def save_mod(s: Session, mod, game_dir=None, allow_unchanged=False, references=None):
     if s.env is None:
         raise CommandError("no level open")
+    if references is None:
+        references = getattr(s.profile, "game_refs", False)
+    if references and not s.env.split_files() and not (s.routes and s.routes.is_rda):
+        return _save_mod_references(s, mod, game_dir, allow_unchanged)
+    if s.profile.id == "do":
+        raise CommandError("Denied Ops reads levels only from its archives (no Mods folder): saving needs an archive "
+                           "rebuild or a plugin, which the editor doesn't have yet - the level can be viewed and edited")
     if not allow_unchanged and _same_as_shipped(s):
         raise CommandError("no changes: the scene is exactly the shipped level - saving would only copy the game's "
                            f"{s.level}.ENV / .RMD into the mod (and Export refuses copies of game files)")
@@ -1710,27 +2276,53 @@ def save_mod(s: Session, mod, game_dir=None, allow_unchanged=False):
         raise CommandError("bad mod name")
     folder = os.path.join(game, "Mods", mod)
     os.makedirs(folder, exist_ok=True)
-    backup = workflow.backup_files(s, folder, [s.level + ".ENV", s.level + ".RMD"], mod, s.level)
-    written = []
-    s.env.save(os.path.join(folder, s.level + ".ENV"))
-    written.append(s.level + ".ENV")
-    if s.routes:
-        s.routes.save(os.path.join(folder, s.level + ".RMD"))
+    parts = s.env.split_files()
+    if parts:
+        # Global Storm: the .ENV is only an index - write the part files (.ART / .DES / .SND) that differ from the
+        # shipped ones; the game finds them by name like any other file
+        changed = {}
+        for name, data in parts.items():
+            shipped = _find_file(s.folder, name)
+            if shipped is None or open(shipped, "rb").read() != data:
+                changed[name.upper()] = data
+        backup = workflow.backup_files(s, folder, list(changed) + [s.level + ".RMD"], mod, s.level)
+        written = []
+        for name, data in changed.items():
+            with open(_mod_out(s, folder, name), "wb") as f:
+                f.write(data)
+            written.append(name)
+    else:
+        backup = workflow.backup_files(s, folder, [s.level + ".ENV", s.level + ".RMD"], mod, s.level)
+        written = []
+        s.env.save(_mod_out(s, folder, s.level + ".ENV"))
+        written.append(s.level + ".ENV")
+    if s.routes and s.routes.is_rda:
+        # Global Storm: the routes live in <LEVEL>.RDA (with the walk-map quadtree and door data) - written only when
+        # the network changed
+        shipped = _find_file(s.folder, s.level + ".RDA")
+        data = s.routes.to_rda_bytes()
+        if shipped is None or open(shipped, "rb").read() != data:
+            with open(_mod_out(s, folder, s.level + ".RDA"), "wb") as f:
+                f.write(data)
+            written.append(s.level + ".RDA")
+    elif s.routes:
+        s.routes.save(_mod_out(s, folder, s.level + ".RMD"))
         written.append(s.level + ".RMD")
     if problems := s.env.problems:
         raise CommandError("saved, but the scene has problems: " + "; ".join(problems[:3]))
     s.dirty = False
+    written += _pack_sources(s, folder)
     return {"folder": folder, "files": written, "backup": backup}
 
 
 # ------------------------------------------------------------------------------------------ save as mission --
 # A new mission = a mod with the edited scene under a new name and a Lua script that sets the map up the way the base
-# mission's DLL does (editor/level_setups.json, scripts/gen_level_setups.py) but loads that scene. The game names the
+# mission's DLL does (editor/games/<game>/level_setups.json, scripts/gen_level_setups.py) but loads that scene. The game names the
 # octree / AI walk map / routes after the scene, so the base level's .OCT / .QTD are copied under the new name (the game
 # rebuilds the .OCT over that copy when it loads a .lua level - edited props need it - and the copy makes the name known
 # to its mod index); the
 # script's "--@archive <base>" line gives it the base level's archive and sound cache (DesertStormFix scripthost).
-_SETUPS = None
+_SETUPS = {}                 # game id -> level_setups.json
 _SINGLE_ARG = {0x0C, 0x44, 0x4C, 0x58}   # sound bank, scene, map image, strings
 _NAMED = {0x0C: "game.load_sound_bank", 0x44: "game.load_scene", 0x4C: "game.load_map_image",
           0x58: "game.load_strings", 0x4E0: "game.set_briefing_text"}   # +0x4E0: briefing title / date / place / pages
@@ -1738,12 +2330,22 @@ _ENEMY = ("IRAQ", "RU_", "RUSSIAN")
 _NOT_ENEMY = ("GOATHERDER", "CIVILIAN", "IRAQCIV")
 
 
+def game_data(name):
+    """editor/games/<game id>/<name> - per-game data (API slot names, base missions) - or None when the game has none
+    yet (Desert Storm II / Global Storm: their script APIs aren't mapped)."""
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "games", games.current().id, name)
+    return path if os.path.isfile(path) else None
+
+
 def _setups():
-    global _SETUPS
-    if _SETUPS is None:
-        with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "level_setups.json")) as f:
-            _SETUPS = json.load(f)
-    return _SETUPS
+    gid = games.current().id
+    if gid not in _SETUPS:
+        path = game_data("level_setups.json")
+        _SETUPS[gid] = {}
+        if path:
+            with open(path) as f:
+                _SETUPS[gid] = json.load(f)
+    return _SETUPS[gid]
 
 
 def _lua_value(v):
@@ -1779,11 +2381,143 @@ def _setup_lines(base, scene_file, legacy=False):
 
 
 def _base_dll(s: Session, base):
-    """The shipped mission DLL of a level (Mission1.dll ...) in the game folder, or None (MP levels, no game folder)."""
+    """The mission DLL a level's script runs underneath (--@base): a custom DLL mission opened with open_dll_mission,
+    else the shipped one of the level (Mission1.dll ...) in the game folder, or None (MP levels, no game folder)."""
+    own = getattr(s, "mission_dll", None)
+    if own and base == s.level:
+        return os.path.basename(own["path"])
     if not s.game_dir:
         return None
     path = _find_file(s.game_dir, base + ".DLL")
     return os.path.basename(path) if path else None
+
+
+def _is_mission_dll(path):
+    """A mission DLL exports LevelSetup (the game calls it with the script API table)."""
+    try:
+        import pefile
+        with open(path, "rb") as f:            # (pefile keeps a file it opened mapped)
+            pe = pefile.PE(data=f.read(), fast_load=True)
+        pe.parse_data_directories(directories=[pefile.DIRECTORY_ENTRY["IMAGE_DIRECTORY_ENTRY_EXPORT"]])
+        return any(e.name == b"LevelSetup" for e in getattr(pe, "DIRECTORY_ENTRY_EXPORT", None).symbols)
+    except Exception:  # noqa: BLE001 - not a PE / no exports
+        return False
+
+
+def mission_dll(s: Session, name, mod=None):
+    """Where the game finds <name>.dll: {path, mod (None = game folder), shipped (the game folder has one of that
+    name)}. Mods first (the given one, then the enabled ones - a later one wins, as in the game), then the game folder."""
+    game = s.game_dir
+    if not game or not name:
+        return None
+    file = name if name.lower().endswith(".dll") else name + ".dll"
+    shipped = games.game_file(game, file)   # (or PSE/Originals)
+    shipped = shipped if os.path.isfile(shipped) else None
+    mods = [m for m in reversed(_enabled_mods(game))]
+    if mod:
+        mods = [mod] + [m for m in mods if m != mod]
+    for m in mods:
+        path = modlayout.find(os.path.join(game, "Mods", m), file)
+        if path:
+            return {"path": path, "mod": m, "shipped": bool(shipped)}
+    return {"path": shipped, "mod": None, "shipped": True} if shipped else None
+
+
+def script_base(path):
+    """The DLL named on a mission script's --@base line, or None."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("--@base"):
+                    return line.split(None, 1)[1].strip() if len(line.split()) > 1 else None
+                if line.strip() and not line.startswith("--"):
+                    break
+    except OSError:
+        pass
+    return None
+
+
+def _dll_scene(analysis):
+    """The scene a mission DLL loads (script API +0x44 with a file name) - in LevelSetup's init or what it calls."""
+    funcs, seen, todo = analysis["functions"], set(), [analysis["init_fn"]]
+    while todo:
+        va = todo.pop(0)
+        if va in seen:
+            continue
+        seen.add(va)
+        stack = list(funcs.get(va, []))
+        while stack:
+            st = stack.pop(0)
+            if st.get("op") == "api" and st.get("slot") == 0x44 and st["args"] and st["args"][0].get("k") == "str":
+                return st["args"][0]["s"]
+            for k in ("then", "else", "body"):
+                stack[0:0] = st.get(k) or []
+            for c in st.get("cases", []):
+                stack[0:0] = c["body"]
+        todo += analysis["calls"].get(va, [])
+    return None
+
+
+@command("Custom mission DLLs in the Mods folders: DLLs exporting LevelSetup. shipped = named like one of the game's "
+         "(a changed copy - it is packaged as a byte patch against the player's own DLL), else a mission of its own.",
+         game_dir="game folder (default: the session's)")
+def list_dll_missions(s: Session, game_dir=None):
+    game = game_dir or s.game_dir
+    root = os.path.join(game or "", "Mods")
+    out = []
+    if os.path.isdir(root):
+        for m in sorted(os.listdir(root), key=str.lower):
+            folder = os.path.join(root, m)
+            if not os.path.isdir(folder):
+                continue
+            for rel in modlayout.files(folder):
+                p, f = os.path.join(folder, rel), os.path.basename(rel)
+                if f.lower().endswith(".dll") and _is_mission_dll(p):
+                    out.append({"mod": m, "dll": f, "shipped": os.path.isfile(games.game_file(game, f)),
+                                "enabled": not m.startswith(("_", "."))})
+    return out
+
+
+@command("Open a mission DLL from a mod (a mission someone built as a DLL): its scene - from the mod when it has the "
+         "file, else the shipped level's - and routes become editable, its logic shows in the mission-logic view. Save "
+         "as mission keeps the DLL running underneath (--@base); Play runs it.", mod="mod folder",
+         dll="the DLL's file name", base="the shipped level whose models / archive the scene uses (needed only when "
+         "the scene isn't a shipped level's)")
+def open_dll_mission(s: Session, mod, dll, base=None):
+    _require_script_host(s, "Mission DLLs")
+    found = mission_dll(s, dll, mod)
+    if not found or found["mod"] != mod:
+        raise CommandError(f"no {dll} in Mods\\{mod}")
+    from conflict_ds_tools import missionflow
+    try:
+        flow = missionflow.analyse(found["path"])
+    except Exception as e:  # noqa: BLE001
+        raise CommandError(f"{dll} isn't a mission DLL the editor can read ({type(e).__name__}: {e})")
+    scene = _dll_scene(flow)
+    if not scene:
+        raise CommandError(f"{dll} loads no scene in its set-up (script API +0x44) - can't tell which level it plays on")
+    stem = os.path.splitext(os.path.basename(scene))[0].upper()
+    folder = os.path.join(s.game_dir, "Mods", mod)
+    own = modlayout.find(folder, stem + ".ENV")
+    levels = _level_map(s)
+    if base:
+        base = base.upper()
+    elif stem in levels:
+        base = stem
+    else:
+        raise CommandError(f"{dll} plays on its own scene {scene} - pick the shipped level whose models it uses (base)")
+    open_level(s, base)
+    if env := _mod_level_scene(s, folder, stem):   # the mod's own scene, or the level + its patch / record edits
+        s.env = env
+    if own:
+        rmd = modlayout.find(folder, stem + ".RMD")
+        if rmd:
+            s.routes = RouteFile.load(rmd)
+    name = os.path.splitext(found["path"])[0]
+    s.mission_dll = {"path": found["path"], "mod": mod, "shipped": found["shipped"], "scene": scene}
+    s.mission = (mod, os.path.basename(name).upper())
+    return {"mission": list(s.mission), "base": base, "dll": os.path.basename(found["path"]), "scene": scene,
+            "scene_from_mod": bool(own), "changed_copy": found["shipped"], **s.env.summary()}
 
 
 _SAFE_SETUP = {0x0C, 0x44, 0x4C, 0x50, 0x54, 0x58, 0x494, 0x498, 0x4AC, 0x3F0, 0x8A8, 0x70}
@@ -1807,7 +2541,7 @@ def _blank_script(s: Session, name, base):
         lines.append(l)
     setup = "\n".join(lines)
     return f"""--@archive {base.lower()}
--- {name}: a new level made with the Desert Storm Editor ({base}'s sky, sounds and textures).
+-- {name}: a new level made with the Conflict Editor ({base}'s sky, sounds and textures).
 -- setup() loads the scene and the level data; write the mission below it. game.EVENT has the game's events,
 -- game.* the helpers (DesertStormFix scripthost.cpp).
 
@@ -1844,7 +2578,7 @@ def _mission_script(s: Session, name, base):
     if dll:
         return f"""--@archive {base.lower()}
 --@base {dll}
--- {name}: made with the Desert Storm Editor from {base}.
+-- {name}: made with the Conflict Editor from {base}.
 -- {dll} runs the original mission on this scene (objectives, cutscenes, triggers, mission end); this script
 -- runs after it each frame and gets every message after it. Add to the mission here:
 -- game.EVENT has the game's events, game.* the helpers (DesertStormFix scripthost.cpp).
@@ -1887,7 +2621,7 @@ def _mission_script_standalone(s: Session, name, base, legacy=False):
         won = "            if goal then game.complete_objective(goal) end"
         goal = "local goal   -- the game's index of the kill-everyone objective (handed out when it is added)\n"
     return f"""--@archive {base.lower()}
--- {name}: made with the Desert Storm Editor from {base}.
+-- {name}: made with the Conflict Editor from {base}.
 -- setup() sets the map up the way {base.title()}.dll does, with this mission's scene. Write the mission below it:
 -- game.EVENT has the game's events, game.* the helpers (DesertStormFix scripthost.cpp).
 
@@ -2016,7 +2750,7 @@ def _catalog(s: Session, table):
     """A catalog.dat CSV table as {first column (upper case): [rows]}."""
     if table not in _CATALOG:
         rows = {}
-        path = _find_file(os.path.join(s.data_dir, "catalog"), table)
+        path = _find_file(catalog_dir(s), table)
         if path:
             for line in open(path, errors="replace").read().splitlines():
                 cols = [c.strip() for c in line.split(",")]
@@ -2052,7 +2786,8 @@ def _pack_banks(s: Session, folder, name):
     from conflict_ds_tools import sound
     import glob
     game = s.game_dir
-    base = _find_file(game, s.level + ".sch") if game else None
+    base = games.game_file(game, s.level + ".sch") if game else None   # (or PSE/Originals)
+    base = base if base and os.path.isfile(base) else None
     if not base:
         return []
     have = _level_banks(base)
@@ -2062,8 +2797,10 @@ def _pack_banks(s: Session, folder, name):
             bank = w[63] if len(w) > 63 else ""
             if bank and bank != "-1" and sound.bank_key(bank) not in have and bank not in wanted:
                 wanted.append(bank)
-    for old in glob.glob(os.path.join(folder, name + "_*.sch")):
-        os.remove(old)                         # bank packs of older saves: the banks are referenced now
+    import fnmatch
+    for rel in modlayout.files(folder):        # bank packs of older saves (anywhere in the mod): referenced now
+        if fnmatch.fnmatch(os.path.basename(rel).lower(), (name + "_*.sch").lower()):
+            os.remove(os.path.join(folder, rel))
     return wanted                              # "bank X" lines: DesertStormFix copies them from the player's caches
 
 
@@ -2073,12 +2810,10 @@ def _remove_game_copies(s: Session, folder, up, refs):
     and stays."""
     removed = []
     for ext in (".ENV", ".RMD", ".OCT", ".QTD"):
-        path = os.path.join(folder, up + ext)
-        if os.path.exists(path) and (ext != ".RMD" or _find_file(s.folder, s.level + ".RMD")):
-            os.remove(path); removed.append(up + ext)
+        if (ext != ".RMD" or _find_file(s.folder, s.level + ".RMD")) and _mod_remove(folder, up + ext):
+            removed.append(up + ext)
     for name, src in refs.items():
-        path = _find_file(folder, name)
-        if path:
+        for path in modlayout.find_all(folder, name):
             with open(path, "rb") as a, open(src, "rb") as b:
                 same = a.read() == b.read()
             if same:
@@ -2117,7 +2852,7 @@ def _pack_models(s: Session, folder, refs):
         if r.kind == "SWITCH" and r.fields:     # its off / on models (Switches.txt)
             todo += [(m.upper(), None) for m in interactive.switch_models(s, r)]
             continue
-        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and r.get("type") != 0):
+        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and not r.file.is_prop(r)):
             continue
         todo.append((r["model"].upper(), r.get("unit") if r.kind == "HLOI" else None))
         if r.kind == "HLOI":
@@ -2150,6 +2885,15 @@ def _pack_models(s: Session, folder, refs):
     return packed
 
 
+# Lua missions (save_mission / new_level / play) run on the plugin's script host (DesertStormFix scripthost.cpp). The
+# other games' plugins have none yet, and their script API tables are laid out differently (Vietnam: scene +0x1A0,
+# strings +0x980, sound bank +0xD0, map image +0x974, bounds +0x97C, teams +0xB10 / +0xB14 - see
+# scripts/gen_level_setups.py), so they are refused there; Save as mod (the level's own scene / routes replaced) works.
+def _require_script_host(s: Session, what):
+    if not s.profile.script_host:
+        raise CommandError(f"{what} needs {s.profile.plugin}'s Lua mission host, which isn't there yet - use Save as mod")
+
+
 @command("Save the edited level as a new mission: <game>\\Mods\\<mod>\\ gets <NAME>.ENV/.RMD/.OCT/.QTD, models placed "
          "from other levels, and <name>.lua (generated once - an existing script is kept). campaign = add it to that "
          "mod's campaign.txt (created with this name if missing).", mod="mod folder", name="mission name (letters, "
@@ -2158,6 +2902,7 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
     import re
     if s.env is None:
         raise CommandError("no level open")
+    _require_script_host(s, "Saving as a mission")
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,23}", name or ""):
         raise CommandError("mission name: a letter, then up to 23 letters, digits or _")
     if s.level not in _setups():
@@ -2177,23 +2922,27 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
     from conflict_ds_tools import gamerefs
     refs = {}
     base_env = EnvFile.load(_find_file(s.folder, s.level + ".ENV"))
-    with open(os.path.join(folder, up + ".envpatch"), "w", encoding="latin-1", newline="\n") as f:
+    with open(_mod_out(s, folder, up + ".envpatch"), "w", encoding="latin-1", newline="\n") as f:
         f.write(gamerefs.make_env_patch(base_env.lines, s.env.lines, s.level + ".ENV"))
     written.append(up + ".envpatch")
+    own = modlayout.find(folder, up + ".ENV")
+    if own:                                    # a real scene file in the mod wins over the patch -
+        s.env.save(own)                        # keep it the edited one (a DLL mission's own scene)
+        written.append(os.path.basename(own))
     base_rmd = _find_file(s.folder, s.level + ".RMD")
     if s.routes and base_rmd:
-        with open(os.path.join(folder, up + ".rmdpatch"), "w", newline="\n") as f:
+        with open(_mod_out(s, folder, up + ".rmdpatch"), "w", newline="\n") as f:
             f.write(gamerefs.make_rmd_patch(RouteFile.load(base_rmd), s.routes, s.level + ".RMD"))
         written.append(up + ".rmdpatch")
     elif s.routes:                             # the base has no route file: the network is the scene's own markers
-        s.routes.save(os.path.join(folder, up + ".RMD")); written.append(up + ".RMD")
+        s.routes.save(_mod_out(s, folder, up + ".RMD")); written.append(up + ".RMD")
     renamed = {}
     # The walk map (.qtd) is left out on purpose: without one the game builds it - and the generated route markers -
     # from this mission's scene, so placed objects block the AI's paths; DesertStormFix adds the hand-placed markers
     # from <NAME>.RMD back at their indices (scripthost.cpp BuildNav). The octree is rebuilt anyway; its file must exist.
     if _find_file(s.folder, s.level + ".OCT"):
         renamed[up + ".OCT"] = s.level + ".OCT"
-    script = os.path.join(folder, name.lower() + ".lua")
+    script = _mod_path(s, folder, name.lower() + ".lua")
     if os.path.exists(script):
         kept = not _upgrade_script(script, s, up)
         _update_layers_block(script, s)
@@ -2207,21 +2956,22 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
     written += _save_terrains(s, folder, refs)
     written += _save_roads(s, folder, refs)
     packed = _pack_models(s, folder, refs)
+    written += _pack_sources(s, folder)
     banks = _pack_banks(s, folder, up)
     lines = [f"# {up}: game files this mission uses from the player's own install (DesertStormFix builds them at start-up -",
-             "# nothing of the game is shipped with the mod). Written by the Desert Storm Editor."]
+             "# nothing of the game is shipped with the mod). Written by the Conflict Editor."]
     lines += [f"file {dst} = {src}" for dst, src in renamed.items()]
     lines += [f"file {dst}" for dst in sorted(refs)]
     lines += [f"bank {b}" for b in banks]
     used_models = {str(r.get("model")).upper() for r in s.env.find("ENVI")}
     lines += [f"piece {name} = {k['source']} {k['index']}" for name, k in sorted(getattr(s, "kits", {}).items())
               if name in used_models]
-    with open(os.path.join(folder, up + ".uses"), "w", newline="\n") as f:
+    with open(_mod_out(s, folder, up + ".uses"), "w", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     written.append(up + ".uses")
     removed = _remove_game_copies(s, folder, up, refs)
     if campaign:
-        cfile = os.path.join(folder, "campaign.txt")
+        cfile = os.path.join(folder, "campaign.txt")   # always the mod's top folder (the plugins read it there)
         lines = open(cfile).read().splitlines() if os.path.exists(cfile) else [f"name = {campaign}"]
         entry = f"mission = {name.lower()}.lua"
         if not any(l.strip().lower() == entry for l in lines):
@@ -2229,12 +2979,25 @@ def save_mission(s: Session, mod, name, campaign=None, game_dir=None):
         with open(cfile, "w", newline="\n") as f:
             f.write("\n".join(lines) + "\n")
         written.append("campaign.txt")
-    with open(os.path.join(folder, up + ".editor.json"), "w", newline="\n") as f:
+    with open(_mod_out(s, folder, up + ".editor.json"), "w", newline="\n") as f:
         json.dump({"base": s.level, "blank": getattr(s, "blank", False), "terrains": sorted(getattr(s, "terrains", {})),
                    "roads": sorted(getattr(s, "roads", {})), "kits": getattr(s, "kits", {}),
                    "layers": {str(k): v for k, v in s.layers.items()},
-                   "layer_start": s.layer_start, **logic.extras(s)}, f, indent=1)
+                   "layer_start": s.layer_start, **logic.extras(s),
+                   **({"dll": os.path.basename(s.mission_dll["path"])} if getattr(s, "mission_dll", None) else {})},
+                  f, indent=1)
     written.append(up + ".editor.json")
+    own_dll = getattr(s, "mission_dll", None)
+    if own_dll and own_dll.get("mod") and not own_dll.get("shipped"):
+        # a DLL of its own played as a level (X.dll) loads X.dat / X.sch by its name - <X>.level points the plugin at
+        # the base level's archive instead (kept when the modder wrote one)
+        dll_mod = os.path.join(s.game_dir or game, "Mods", own_dll["mod"])
+        side_name = os.path.splitext(os.path.basename(own_dll["path"]))[0] + ".level"
+        if not modlayout.find(dll_mod, side_name):
+            side = _mod_out(s, dll_mod, side_name)
+            with open(side, "w", newline="\n") as f:
+                f.write(f"--@archive {s.level.lower()}\n")
+            written.append(os.path.basename(side))
     s.dirty = False
     s.mission = (mod, up)
     return {"folder": folder, "files": written, "script_kept": kept, "packed_models": packed, "packed_banks": banks,
@@ -2246,11 +3009,13 @@ def _script_path(s: Session):
     if not s.mission:
         raise CommandError("open or save a mission first (Save as mission / Open mission)")
     mod, up = s.mission
-    return os.path.join(s.game_dir or "", "Mods", mod, up.lower() + ".lua")
+    return _mod_path(s, os.path.join(s.game_dir or "", "Mods", mod), up.lower() + ".lua")   # any depth in the mod
 
 
 @command("The open mission's Lua script.")
 def get_script(s: Session):
+    if s.game_mission:   # a game mission opened as Lua: its events (editor/game_missions.py)
+        return game_missions.script_get(s)
     path = _script_path(s)
     if not os.path.exists(path):
         raise CommandError(f"{path} is missing - save the mission again to generate it")
@@ -2261,7 +3026,10 @@ def get_script(s: Session):
 @command("Write the open mission's Lua script (the editor's layers / regions block is refreshed from the scene).",
          text="the whole script")
 def save_script(s: Session, text):
+    if s.game_mission:
+        return game_missions.script_save(s, text)
     path = _script_path(s)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8", newline="\n") as f:
         f.write(text.replace("\r\n", "\n"))
     _update_layers_block(path, s)
@@ -2269,12 +3037,12 @@ def save_script(s: Session, text):
         return {"path": path, "text": f.read()}
 
 
-@command("The game's messages about the open mission's script from Mods\\DesertStormFix-report.txt (load / run "
+@command("The game's messages about the open mission's script from Mods\\<plugin>-report.txt (load / run "
          "errors with their line numbers) - written when the game runs it.")
 def script_report(s: Session):
     path = _script_path(s)
     name = os.path.basename(path).lower()
-    report = os.path.join(s.game_dir or "", "Mods", "DesertStormFix-report.txt")
+    report = os.path.join(s.game_dir or "", "Mods", s.profile.plugin + "-report.txt")
     if not os.path.exists(report):
         return {"lines": [], "report": report}
     with open(report, encoding="utf-8", errors="replace") as f:
@@ -2284,20 +3052,22 @@ def script_report(s: Session):
 
 def _game_running():
     import subprocess
-    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq DesertStorm.exe", "/NH"], capture_output=True, text=True,
+    exe = games.current().exes[0]
+    out = subprocess.run(["tasklist", "/FI", f"IMAGENAME eq {exe}", "/NH"], capture_output=True, text=True,
                          creationflags=0x08000000).stdout
-    return "DesertStorm.exe" in out
+    return exe.lower() in out.lower()
 
 
 @command("Play the open mission: saves it (scene, routes, layers, regions - the script keeps your code), then starts "
-         "DesertStorm.exe +level <mission>.lua (DesertStormFix presses Play in the launcher and loads the mission; "
+         "the game's exe with +level <mission>.lua (DesertStormFix presses Play in the launcher and loads the mission; "
          "the game quits after its end screen).")
 def play(s: Session):
     import subprocess
     if not s.mission:
         raise CommandError("save it as a mission first (Save as mission…)")
     game = s.game_dir
-    exe = os.path.join(game or "", "DesertStorm.exe")
+    _require_script_host(s, "Play")
+    exe = os.path.join(game or "", s.profile.exes[0])
     if not os.path.exists(exe):
         raise CommandError("game folder unknown - start the editor with --game")
     if _game_running():
@@ -2362,7 +3132,7 @@ def scene_problems(s: Session):
     zones = _zones(s)
     out = []
     for r in s.env.records:
-        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and r.get("type") != 0):
+        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and not r.file.is_prop(r)):
             continue
         z = str(r.get("zone" if r.kind == "HLOI" else "parent"))
         if z not in zones:
@@ -2402,7 +3172,7 @@ def scene_problems(s: Session):
 def fix_zones(s: Session):
     zones, fixed = _zones(s), []
     for r in s.env.records:
-        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and r.get("type") != 0):
+        if r.kind not in ("HLOI", "ENVI") or not r.fields or (r.kind == "ENVI" and not r.file.is_prop(r)):
             continue
         field = "zone" if r.kind == "HLOI" else "parent"
         if str(r.get(field)) in zones:
@@ -2427,7 +3197,7 @@ def _crash_event(since):
     except (OSError, subprocess.SubprocessError):
         return None
     for event in out.split("Event["):
-        if "DesertStorm.exe" not in event:
+        if games.current().exes[0].lower() not in event.lower():
             continue
         get = lambda key: (re.search(key + r":\s*(\S+)", event) or [None, None])[1]
         module, code, offset = get("Faulting module name"), get("Exception code"), get("Fault offset")
@@ -2466,12 +3236,12 @@ def _crash_report(s: Session, code, log_lines):
     return report
 
 
-@command("The game console: new DesertStormFix.log lines since `offset` (bytes), whether the game the editor started "
+@command("The game console: new <plugin>.log lines since `offset` (bytes), whether the game the editor started "
          "is running, and a crash report when it stopped with an error.", offset="bytes already read (0 = from the start)",
          all_lines="include file opens and voice counters")
 def game_console(s: Session, offset=0, all_lines=False):
     game = getattr(s, "game", None)
-    path = os.path.join(s.game_dir or "", "DesertStormFix.log")
+    path = os.path.join(s.game_dir or "", s.profile.plugin + ".log")
     lines, size = [], 0
     if os.path.exists(path):
         size = os.path.getsize(path)
@@ -2518,9 +3288,9 @@ def list_missions(s: Session, game_dir=None):
         for mod in sorted(os.listdir(mods)):
             folder = os.path.join(mods, mod)
             if os.path.isdir(folder):
-                for f in sorted(os.listdir(folder)):
-                    if f.upper().endswith(".EDITOR.JSON"):
-                        out.append({"mod": mod, "name": f[:-len(".editor.json")].upper()})
+                names = {os.path.basename(r)[:-len(".editor.json")].upper() for r in modlayout.files(folder)
+                         if r.upper().endswith(".EDITOR.JSON")}       # flat mods: top folder, organised: levels\
+                out += [{"mod": mod, "name": n} for n in sorted(names)]
     return out
 
 
@@ -2529,38 +3299,41 @@ def list_missions(s: Session, game_dir=None):
 def open_mission(s: Session, mod, name, game_dir=None):
     folder = os.path.join(game_dir or s.game_dir or "", "Mods", mod)
     up = name.upper()
-    meta_path = os.path.join(folder, up + ".editor.json")
-    if not os.path.exists(meta_path):
+    meta_path = modlayout.find(folder, up + ".editor.json")   # the mod's files at any depth (flat or organised)
+    if not meta_path:
         raise CommandError(f"no mission {up} in {folder}")
     with open(meta_path) as f:
         meta = json.load(f)
     open_level(s, meta["base"])
     from conflict_ds_tools import gamerefs
-    patch = os.path.join(folder, up + ".envpatch")
-    if os.path.exists(patch):                  # scene = base scene + this mission's changes
+    patch = modlayout.find(folder, up + ".envpatch")
+    if patch:                                  # scene = base scene + this mission's changes
         lines = gamerefs.apply_env_patch(open(patch, encoding="latin-1").read(), s.env.lines)
         s.env.lines = lines
         s.env._parse()
     else:                                      # saved before patches: a full copy
-        s.env = EnvFile.load(os.path.join(folder, up + ".ENV"))
-    rpatch, rmd = os.path.join(folder, up + ".rmdpatch"), os.path.join(folder, up + ".RMD")
-    if os.path.exists(rpatch) and s.routes:
+        full = modlayout.find(folder, up + ".ENV")
+        if not full:
+            raise CommandError(f"mission {up} in {folder} has neither {up}.envpatch nor {up}.ENV")
+        s.env = EnvFile.load(full)
+    rpatch, rmd = modlayout.find(folder, up + ".rmdpatch"), modlayout.find(folder, up + ".RMD")
+    if rpatch and s.routes:
         s.routes = gamerefs.apply_rmd_patch(open(rpatch).read(), s.routes)
-    elif os.path.exists(rmd):
+    elif rmd:
         s.routes = RouteFile.load(rmd)
     s.layers = {int(k): v for k, v in meta.get("layers", {}).items()}
     s.blank = bool(meta.get("blank"))
     from conflict_ds_tools.terrain import Terrain
     s.terrains = {}
     for model in meta.get("terrains", []):
-        src = os.path.join(folder, model + ".terrain.json")
-        if os.path.exists(src):
+        src = modlayout.find(folder, model + ".terrain.json")
+        if src:
             s.terrains[model] = Terrain.from_json(json.load(open(src)))
     from conflict_ds_tools.roads import Road
     s.roads = {}
     for model in meta.get("roads", []):
-        src = os.path.join(folder, model + ".road.json")
-        if os.path.exists(src):
+        src = modlayout.find(folder, model + ".road.json")
+        if src:
             s.roads[model] = Road.from_json(json.load(open(src)))
     s.kits = dict(meta.get("kits", {}))
     for name, k in s.kits.items():             # the editor's local copies for the view
@@ -2571,6 +3344,10 @@ def open_mission(s: Session, mod, name, game_dir=None):
     s.layer_start = dict(meta.get("layer_start", {}))
     logic.set_extras(s, meta)
     s.mission = (mod, up)
+    if meta.get("dll"):                        # saved from a mission DLL (open_dll_mission): its logic runs underneath
+        found = mission_dll(s, meta["dll"], mod)
+        if found:
+            s.mission_dll = {"path": found["path"], "mod": found["mod"], "shipped": found["shipped"], "scene": None}
     return {"mission": [mod, up], "base": meta["base"], **s.env.summary()}
 
 
@@ -2584,6 +3361,7 @@ WEAPON_KEYS = ["id", "based on", "display name", "faction", "damage", "time betw
 SKIN_KEYS = ["uniform", "uniform name", "soldier", "texture", "first name", "last name", "portrait", "body",
              "normal map", "voice"]
 UPLOAD_EXTS = {".dds", ".tga", ".png", ".evo", ".wav", ".prb", ".sch"}
+_FILE_RELATIVE_KEYS = {"shot sound", "shot sound 2", "tail sound"}   # paths from the .weapon's folder (DesertStormFix)
 HAND_WEAPONS = {"MACHINE GUN", "PISTOL", "SNIPER RIFLE", "SUB-MACHINE GUN", "ASSAULT RIFLE", "SHOTGUN",
                 "GRENADE LAUNCH/RIFLE", "ANTI TANK", "SMOKE GRENADE"}
 
@@ -2602,7 +3380,7 @@ def _mod_folder(s: Session, mod, create=True):
 @command("Choices for the asset forms: weapons to base on, soldiers, uniforms, factions, existing mods.")
 def asset_options(s: Session):
     weapons = []
-    path = _find_file(os.path.join(s.data_dir, "catalog"), "WEAPS.TXT") if os.path.isdir(os.path.join(s.data_dir, "catalog")) else None
+    path = _find_file(catalog_dir(s), "WEAPS.TXT") if os.path.isdir(catalog_dir(s)) else None
     if path:
         for line in open(path, errors="replace").read().splitlines():
             cols = [c.strip() for c in line.split(",")]
@@ -2618,19 +3396,25 @@ def asset_options(s: Session):
             "mods": mods, "weapon_keys": WEAPON_KEYS, "skin_keys": SKIN_KEYS}
 
 
-def _write_mod_file(folder, filename, keys, fields):
+def _write_mod_file(s, folder, filename, keys, fields):
     unknown = [k for k in fields if k not in keys]
     if unknown:
         raise CommandError(f"unknown setting(s): {', '.join(unknown)}")
-    lines = [f"# made with the Desert Storm Editor"]
+    path = _mod_out(s, folder, filename)       # defs\ in an organised mod
+    lines = [f"# made with the Conflict Editor"]
     width = max((len(k) for k in fields), default=0)
     for k in keys:
         v = str(fields.get(k, "")).strip()
         if v:
             if "\n" in v or "#" in v:
                 raise CommandError(f"{k}: no line breaks or # in values")
+            if k in _FILE_RELATIVE_KEYS and not re.search(r"[\\/]", v):
+                # DesertStormFix reads these .wav files from the definition's own folder (mods.cpp ReadWav(dir + v)):
+                # an uploaded one elsewhere in the mod (organised: sounds\) is named by its path from there
+                hit = modlayout.find(folder, v)
+                if hit and os.path.dirname(hit) != os.path.dirname(path):
+                    v = os.path.relpath(hit, os.path.dirname(path))
             lines.append(f"{k.ljust(width)} = {v}")
-    path = os.path.join(folder, filename)
     with open(path, "w", newline="\n") as f:
         f.write("\n".join(lines) + "\n")
     return path
@@ -2643,7 +3427,7 @@ def create_weapon(s: Session, mod, fields):
     wid = str(fields.get("id", "")).strip()
     if not re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{1,40}", wid):
         raise CommandError("id: letters, digits and _ (e.g. US_WPN_HandCannon)")
-    path = _write_mod_file(_mod_folder(s, mod), wid + ".weapon", WEAPON_KEYS, fields)
+    path = _write_mod_file(s, _mod_folder(s, mod), wid + ".weapon", WEAPON_KEYS, fields)
     return {"path": path}
 
 
@@ -2658,7 +3442,7 @@ def create_skin(s: Session, mod, name, fields):
             raise CommandError(f"{k} is needed")
     if not str(fields.get("uniform name", "")).strip() and not (fields.get("first name") and fields.get("last name")):
         raise CommandError("give a uniform name (a new uniform) or a first and last name (a new recruit)")
-    path = _write_mod_file(_mod_folder(s, mod), name + ".skin", SKIN_KEYS, fields)
+    path = _write_mod_file(s, _mod_folder(s, mod), name + ".skin", SKIN_KEYS, fields)
     return {"path": path}
 
 
@@ -2685,16 +3469,28 @@ def upload_file(s: Session, mod, filename, data_base64, as_dds=False, dds_format
             raise CommandError(f"the game needs power-of-two sizes (256, 512 ...): this one is {w} x {h}")
         data = images.encode_dds(w, h, rgba, fmt=dds_format)
         name = stem + ".dds"
-    path = os.path.join(_mod_folder(s, mod), name)
+    path = _mod_out(s, _mod_folder(s, mod), name)   # dds\ / evos\ / sounds\ ... in an organised mod
     with open(path, "wb") as f:
         f.write(data)
     return {"path": path, "name": stem, "file": name, "bytes": len(data)}
 
 
-@command("Files in a mod folder.", mod="mod folder")
+@command("Files in a mod folder: relative paths, sub-folders included (an organised mod keeps them in evos\\, dds\\, "
+         "defs\\ ...).", mod="mod folder")
 def mod_files(s: Session, mod):
     folder = _mod_folder(s, mod, create=False)
-    return sorted(os.listdir(folder)) if os.path.isdir(folder) else []
+    return modlayout.files(folder) if os.path.isdir(folder) else []
+
+
+@command("The layout new mods get: organised (files in folders by type - evos\\, dds\\, defs\\, levels\\ ...) or flat "
+         "(every file in the mod's top folder). Mods that already have files keep their own layout either way.",
+         layout="organised or flat (omit to just read it)")
+def set_mod_layout(s: Session, layout=None):
+    if layout is not None:
+        if layout not in modlayout.LAYOUTS:
+            raise CommandError(f"layout: one of {', '.join(modlayout.LAYOUTS)}")
+        s.mod_layout = layout
+    return {"layout": mod_layout(s)}
 
 
 @command("The command list with descriptions and arguments (what an MCP client sees).")
@@ -2746,6 +3542,14 @@ import records  # noqa: E402  (data tables: editor/records.py)
 if getattr(records, "_registered", False):   # this file was reloaded: COMMANDS is new, register the records again
     importlib.reload(records)
 records._registered = True
+import game_missions  # noqa: E402  (the game's missions opened as readable Lua: editor/game_missions.py)
+if getattr(game_missions, "_registered", False):
+    importlib.reload(game_missions)
+game_missions._registered = True
+import forms_cmds  # noqa: E402  (records with ds1: IDs, edited field by field: editor/forms_cmds.py)
+if getattr(forms_cmds, "_registered", False):
+    importlib.reload(forms_cmds)
+forms_cmds._registered = True
 import studio  # noqa: E402  (walk map, minimap, prefabs, vehicle crews, sound audition: editor/studio.py)
 if getattr(studio, "_registered", False):
     importlib.reload(studio)
@@ -2782,3 +3586,7 @@ import workflow  # noqa: E402  (status, batch, preview, references, check_missio
 if getattr(workflow, "_registered", False):
     importlib.reload(workflow)
 workflow._registered = True
+import worldtools  # noqa: E402  (Creation-Kit-style world tools: object palette, duplicate array, replace base, path test: editor/worldtools.py)
+if getattr(worldtools, "_registered", False):
+    importlib.reload(worldtools)
+worldtools._registered = True

@@ -1,0 +1,13 @@
+# Pouch sets made only from the game's own pieces - this mod is nothing but text files.
+#
+# Game pouch pieces every mission has: UK_AMMOPOUCH01, UK_POUCHMEDIUM01, UK_BOTTLEPOUCH01 (SAS), US_HIPRPOUCH,
+# US_HIPLPOUCHES, US_HIPSATCHEL, US_CHESTTORCH (US), RU_AMMOPOUCH01, RU_BOTTLEPOUCH (Russian), IR_BOTTLEPOUCH,
+# IR_HIPHOLSTER (Iraqi). RU_HIPHOLSTER, IR_AMMOPOUCH01, AN_WRENCH and AN_CHESTGRENADE are only in missions whose
+# scene uses them - a set with one of those is left out everywhere else (the mod report says so).
+# A piece made for another spot works, but can sit a little off there - try it on the briefing screen.
+
+name       = Gunslinger
+
+hip left   = IR_HIPHOLSTER    # the Iraqi holster on both hips
+hip right  = IR_HIPHOLSTER
+belt       = UK_BOTTLEPOUCH01

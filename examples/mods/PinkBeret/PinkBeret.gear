@@ -1,0 +1,11 @@
+# A pink beret - picked on the HEADGEAR row (briefing screen, CHARACTER tab) by any soldier.
+#
+# Shows: headgear from a game model with your own texture. No modelling - the game's beret is copied under a new
+# name with PinkBeret.dds on it. Hats sit on the head's hat connector; any game hat works as the base.
+
+id       = PINK_BERET        # the new model's name: letters, digits and _ (max 35)
+slot     = head              # head, back, face or pouch: which rows offer it
+name     = Pink Beret        # shown on the row
+
+based on = IR_BERET_RED      # the game model it starts from (the red beret)
+texture  = PinkBeret         # PinkBeret.dds in this folder, the beret's own layout (same size as IR_BERET_RED)

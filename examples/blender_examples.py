@@ -1,7 +1,7 @@
 """Blender half of build_examples.py: the example models and animations, made the way a modder would in
 Blender (import, edit, File > Export), only scripted.
 
-    blender -b --factory-startup --python examples/blender_examples.py -- <work folder> <Mods folder>
+    blender -b --factory-startup --python examples/blender_examples.py -- <work folder> <Mods folder> [organised|flat]
 
 <work folder> holds the game files build_examples.py copied out of the archives.
 """
@@ -15,8 +15,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.dirname(HERE))
 import conflict_ds_tools  # noqa: E402
 
+from conflict_ds_tools import modlayout  # noqa: E402
+
 conflict_ds_tools.register()
-WORK, OUT = sys.argv[sys.argv.index("--") + 1:][:2]
+_ARGS = sys.argv[sys.argv.index("--") + 1:]
+WORK, OUT = _ARGS[:2]
+LAYOUT = _ARGS[2] if len(_ARGS) > 2 else modlayout.ORGANISED   # build_examples.py --layout
 
 
 def reset():
@@ -41,9 +45,10 @@ def select(objs):
 
 
 def target(mod, name):
+    """Where the export goes in the mod (modlayout: evos\\ / anims\\ in an organised mod, else the top folder)."""
     d = os.path.join(OUT, mod)
     os.makedirs(d, exist_ok=True)
-    return os.path.join(d, name)
+    return modlayout.path_for(d, name, layout=LAYOUT)
 
 
 def image(png, name):

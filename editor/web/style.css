@@ -22,7 +22,7 @@ header strong { color: var(--accent); margin-right: 4px; letter-spacing: .02em; 
 .menu.open .menu-btn { border-color: var(--accent); color: var(--accent); }
 .menu-list { position: absolute; left: 0; top: calc(100% + 4px); min-width: 230px; display: flex; flex-direction: column;
   padding: 4px; background: var(--panel); border: 1px solid var(--line); border-radius: 5px; box-shadow: 0 6px 18px #0008; }
-.menu-list[hidden] { display: none; }
+.menu-list[hidden], .app-only[hidden] { display: none; }
 .menu-list button { text-align: left; background: transparent; border-color: transparent; padding: 5px 10px; }
 .menu-list button:hover:not(:disabled), .menu-list button:focus-visible { background: var(--sel); border-color: var(--line); }
 .menu-list hr { border: 0; border-top: 1px solid var(--line); margin: 4px 2px; width: auto; }
@@ -68,6 +68,21 @@ label.check, dialog label.check { flex-direction: row; justify-content: flex-sta
 #library li.sel { background: var(--sel); }
 #library li small { color: var(--dim); }
 #library li.away { opacity: .6; }
+/* library sources: chips, sections, badges (game / converted / mod) */
+.lib-chips { display: flex; flex-wrap: wrap; gap: 4px; margin: 4px 0 6px; }
+.lib-chip { font-size: 11px; padding: 2px 7px; border-radius: 10px; border: 1px solid var(--line); background: transparent; color: var(--text); cursor: pointer; }
+.lib-chip.off { opacity: .45; text-decoration: line-through; }
+.lib-chip.k-game { border-color: #7fa65a; } .lib-chip.k-converted { border-color: #5a8fc4; } .lib-chip.k-mod { border-color: #d08a3c; }
+#library li.lib-sec { position: sticky; top: 0; z-index: 1; background: var(--panel); font-weight: 600; letter-spacing: .03em; margin-top: 4px; border-left: 3px solid var(--line); }
+#library li.lib-sec.k-game { border-left-color: #7fa65a; } #library li.lib-sec.k-converted { border-left-color: #5a8fc4; } #library li.lib-sec.k-mod { border-left-color: #d08a3c; }
+#library li.lib-sec .lib-arrow::before { content: '\25BE'; display: inline-block; width: 1em; }
+#library li.lib-sec.closed .lib-arrow::before { content: '\25B8'; }
+#library li.lib-sec small { margin-left: auto; color: var(--dim); font-weight: 400; }
+#library .lib-text { display: flex; align-items: baseline; gap: 5px; overflow: hidden; min-width: 0; }
+#library .lib-name { overflow: hidden; text-overflow: ellipsis; }
+#library .lib-text small { overflow: hidden; text-overflow: ellipsis; flex-shrink: 1; }
+.lib-badge { font-size: 9px; font-weight: 700; padding: 0 4px; border-radius: 3px; color: #1b1d1a; flex-shrink: 0; }
+.lib-badge.k-game { background: #7fa65a; } .lib-badge.k-converted { background: #5a8fc4; } .lib-badge.k-mod { background: #d08a3c; }
 #library li[draggable=true], #kitlist li[draggable=true] { cursor: grab; }
 #kitlist { list-style: none; margin: 0; padding: 0; overflow: auto; flex: 1; }
 #kitlist li { padding: 3px 6px; border-radius: 3px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -488,3 +503,41 @@ ol.cp-list li::before { counter-increment: cp; content: "Mission " counter(cp) "
 #ob-table .tgt a.ref { cursor: pointer; color: #ff9f80; border-bottom: 1px dotted currentColor; margin-right: 6px; white-space: nowrap; }
 #ob-table .tgt a.ref.region { color: #e0b030; }
 #ob-table .when-done { color: var(--dim); font-size: 12px; }
+
+/* World Tools (worldtools.js) */
+#world-tools { width: 340px; max-height: calc(100vh - 80px); overflow: auto; }
+#world-tools .tabs { display: flex; flex-wrap: wrap; gap: 2px; padding: 4px 6px; }
+#world-tools .tabs button.on { outline: 1px solid var(--accent, #6fd0ff); }
+#world-tools .t-body { padding: 6px 10px; display: flex; flex-direction: column; gap: 6px; }
+#world-tools .wt-page { display: flex; flex-direction: column; gap: 6px; }
+#world-tools .wt-page[hidden] { display: none; }
+#world-tools .row { display: flex; align-items: center; gap: 4px; flex-wrap: wrap; }
+#world-tools .wt-entry { border: 1px solid var(--line); border-radius: 4px; padding: 4px; display: flex; flex-direction: column; gap: 3px; }
+#world-tools .wt-kinds { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 8px; }
+#world-tools .wt-scroll { max-height: 220px; overflow: auto; }
+#world-tools .wt-table { border-collapse: collapse; font-size: 12px; width: 100%; }
+#world-tools .wt-table td, #world-tools .wt-table th { border-bottom: 1px solid var(--line); padding: 2px 4px; text-align: left; vertical-align: top; }
+#world-tools .wt-swatch { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+#world-tools .bad { color: #ff7a6a; }
+#world-tools button.on { outline: 1px solid var(--accent, #6fd0ff); }
+#world-tools .wt-legend { display: grid; grid-template-columns: 1fr; gap: 1px; font-size: 12px; }
+#script-dialog .wt-err { background: rgba(255, 80, 60, 0.28); }
+#script-dialog .wt-warn { background: rgba(255, 200, 60, 0.18); }
+
+/* Panels (panels.js): every tool panel is its own window - drag the title bar, resize from the corner, ⇥ docks it */
+.wpanel.floating { position: fixed; resize: both; overflow: auto; min-width: 220px; min-height: 60px;
+  max-width: 96vw; max-height: calc(100vh - 50px); box-shadow: 0 6px 20px #0009; }
+.wpanel.floating > .console-head { position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.wpanel > .console-head { cursor: move; user-select: none; }
+.wpanel > .console-head button, .wpanel > .console-head input, .wpanel > .console-head select, .wpanel > .console-head label { cursor: auto; }
+.wpanel .wp-dock { padding: 2px 8px; min-width: 0; }
+#console.wpanel.floating { border: 1px solid var(--line); border-radius: 6px; }
+#console.wpanel.floating #c-log { min-height: 60px; }
+/* a panel popped out into a window of its own (panels.js): it fills that window */
+body.wp-window { margin: 0; background: var(--panel); overflow: hidden; }
+.wpanel.popped { position: static !important; width: auto !important; height: 100vh !important; max-height: none !important;
+  overflow: auto; resize: none; border: 0; border-radius: 0; box-shadow: none; display: flex; flex-direction: column; }
+.wpanel.popped[hidden] { display: none !important; }
+.wpanel.popped > .console-head { cursor: default; position: sticky; top: 0; background: var(--panel); z-index: 1; }
+.wpanel.wp-leaving { opacity: 0.55; outline: 2px dashed var(--accent); }
+.wpanel .wp-pop { padding: 2px 8px; min-width: 0; }

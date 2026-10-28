@@ -1,0 +1,7 @@
+# An engineer's belt: satchel, torch and a utility pouch, nothing else.
+
+name        = Toolbelt
+
+belt left   = UK_POUCHMEDIUM01
+hip left    = US_HIPSATCHEL
+chest left  = US_CHESTTORCH

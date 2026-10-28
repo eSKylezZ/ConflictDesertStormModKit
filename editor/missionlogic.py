@@ -1,7 +1,7 @@
 """The base mission's own logic, readable: what its MissionN.dll does from start to end (editor commands).
 
 conflict_ds_tools/missionflow.py turns the player's own mission DLL into structured statements; this module renders
-them for the open level - API slots by name (editor/api_slots.json), script ids as the scene's objects, region
+them for the open level - API slots by name (editor/games/<game>/api_slots.json), script ids as the scene's objects, region
 indices as region names, objective indices / text hashes as their texts, message parameters by meaning - and groups
 them into events: the set-up before the mission, one entry per game message the DLL reacts to (killed, picked up,
 waypoint reached, timer ...) and the checks it runs every frame. It also derives:
@@ -138,21 +138,23 @@ PLAY_STATE = {0x0C4: "into play", 0x0DC: "into play (respawned)", 0x2C0: "shown"
 DEBUG_FLAG = 0x390
 STUBS = {0x8A8: 1, 0x394: 1, 0x398: 0, 0x03C: 0}   # slots that return a constant in the shipped game: folded
 DOOR_STATES = {0: "closing", 1: "opening", 2: "closed", 3: "open"}          # "debug mappings on?" - always off for players: its branches are dropped
-_SLOTS = None
+_SLOTS = {}                  # game id -> api_slots.json
 _CACHE = {}
 
 
 def slots() -> dict[int, dict]:
-    """editor/api_slots.json: {"0x0C4": {name, args: [{name, type}], returns, desc, confidence}}."""
-    global _SLOTS
-    if _SLOTS is None:
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "api_slots.json")
+    """editor/games/<game>/api_slots.json: {"0x0C4": {name, args: [{name, type}], returns, desc, confidence}}."""
+    from conflict_ds_tools import games
+    gid = games.current().id
+    if gid not in _SLOTS:
+        from commands import game_data
+        path = game_data("api_slots.json")
         try:
-            with open(path, encoding="utf-8") as f:
-                _SLOTS = {int(k, 16): v for k, v in json.load(f).items()}
+            with open(path or "", encoding="utf-8") as f:
+                _SLOTS[gid] = {int(k, 16): v for k, v in json.load(f).items()}
         except (OSError, ValueError):
-            _SLOTS = {}
-    return _SLOTS
+            _SLOTS[gid] = {}
+    return _SLOTS[gid]
 
 
 def _game_dir(s: Session):
@@ -163,9 +165,23 @@ def _game_dir(s: Session):
 
 
 def _dll_path(s: Session):
+    """The DLL whose logic the open level / mission runs: a mission DLL opened from a mod, the DLL on the open
+    mission script's --@base line (found in the mods first, like the game), else the shipped one of the level."""
+    own = getattr(s, "mission_dll", None)
+    if own:
+        return own["path"]
     game = _game_dir(s)
     if not game or not s.level:
         return None
+    if s.mission:
+        import commands
+        from conflict_ds_tools import modlayout   # the mission's script at any depth (flat or organised mod)
+        script = modlayout.find(os.path.join(game, "Mods", s.mission[0]), s.mission[1].lower() + ".lua") or ""
+        base = commands.script_base(script)
+        if base:
+            found = commands.mission_dll(s, base, s.mission[0]) if s.game_dir else None
+            if found:
+                return found["path"]
     return _find_file(game, s.level + ".DLL")
 
 
@@ -805,3 +821,65 @@ def api_functions(s: Session):
     return {"functions": [{"slot": k, "name": v.get("name"), "args": v.get("args", []), "returns": v.get("returns"),
                            "desc": v.get("desc", ""), "confidence": v.get("confidence")}
                           for k, v in sorted(slots().items())]}
+
+
+# ------------------------------------------------------------------------------------- items named by the DLL --
+# +0x54C select_item_by_name (hold an item the unit carries), +0x550 take / +0x554 drop by name: the item must be in
+# the unit's kit - a changed name (e.g. a DLL patch handing out another gun) otherwise does nothing in game. The
+# DLLs call them directly or through queue_call (+0x518: callback, a, b, delay) whose callback passes the event's
+# a / b (+0x34 / +0x38) on.
+ITEM_SLOTS = {0x54C: "hold", 0x550: "take", 0x554: "drop"}
+
+
+def _walk(stmts):
+    for st in stmts:
+        yield st
+        for k in ("then", "else", "body"):
+            yield from _walk(st.get(k) or [])
+        for c in st.get("cases", []):
+            yield from _walk(c["body"])
+
+
+def dll_item_uses(a) -> list:
+    """[{unit, item, what, at}] - (unit script id, item name) pairs the DLL passes to the by-name item slots."""
+    funcs = a["functions"]
+    relay = {}                                  # callback va -> slot it calls with (event a, event b)
+    for va, body in funcs.items():
+        for st in _walk(body):
+            if st.get("op") == "api" and st.get("slot") in ITEM_SLOTS and len(st["args"]) >= 2:
+                u, n = st["args"][0], st["args"][1]
+                if (u.get("k"), u.get("off"), n.get("k"), n.get("off")) == ("argfield", 0x34, "argfield", 0x38):
+                    relay[va] = st["slot"]
+    out = []
+    for va, body in funcs.items():
+        for st in _walk(body):
+            if st.get("op") != "api":
+                continue
+            args, slot = st["args"], st.get("slot")
+            if slot == 0x518 and len(args) >= 3 and args[0].get("k") == "code" and args[0]["a"] in relay:
+                slot, args = relay[args[0]["a"]], args[1:3]
+            elif slot not in ITEM_SLOTS or len(args) < 2:
+                continue
+            if args[0].get("k") == "int" and args[1].get("k") == "str":
+                out.append({"unit": args[0]["v"], "item": args[1]["s"], "what": ITEM_SLOTS[slot], "at": st.get("at")})
+    return out
+
+
+def dll_item_problems(s: Session) -> list:
+    """Items the mission DLL makes a unit hold / take / drop by name that aren't in that unit's kit in the scene."""
+    a, name = analysis(s)
+    if not a or s.env is None:
+        return []
+    kits = {}
+    for h in s.env.find("HLOI"):
+        if "script_id" in h.fields and "kit_count" in h.fields:
+            kits[h["script_id"]] = (h, {str(h[f"kit{k}.item"]).upper() for k in range(h["kit_count"])})
+    out = []
+    for u in dll_item_uses(a):
+        h, kit = kits.get(u["unit"], (None, None))
+        if h is None or u["item"].upper() in kit:
+            continue
+        out.append({"line": h.index + 1, "unit": u["unit"], "item": u["item"], "what": u["what"],
+                    "problem": f"{name} makes #{u['unit']} ({h['unit']}) {u['what']} {u['item']}, which isn't in its "
+                               f"kit - nothing happens in game unless the mission gives it first; add it to the kit"})
+    return out

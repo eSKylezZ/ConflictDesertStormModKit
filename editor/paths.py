@@ -49,8 +49,16 @@ def _insert_waypoint(s, wid, name, pos, wait_ms=0, nxt=-1):
     if end is None:
         raise CommandError("this scene has no waypoint section")
     x, y, z = pos
-    env.lines.insert(end, f'NEWENVWAYPT {wid} 0 "{name}" {x:.6f} {y:.6f} {z:.6f} 0.000000 0.000000 0.000000 '
-                          f'{int(wait_ms)} {int(nxt)} ')
+    v = env.version
+    if v >= 190:
+        raise CommandError("adding waypoints to Global Storm scenes is not supported yet (their layout is not mapped)")
+    # version gates as env._waypoint; the extra values are the shipped Vietnam defaults (u1 32, -1 -1 0 -65332)
+    line = f'NEWENVWAYPT {wid} {32 if v >= 107 else 0} "{name}" {x:.6f} {y:.6f} {z:.6f} 0.000000 0.000000 0.000000 '
+    line += f'{int(wait_ms)} ' + ("0.00 " if v >= 107 else "") + f'{int(nxt)} '
+    if v >= 79: line += "-1 -1 "
+    if v >= 82: line += "0 "
+    if v >= 88: line += "-65332 "
+    env.lines.insert(end, line)
     env._parse()
     return env.find("NEWENVWAYPT", id=wid)[0]
 

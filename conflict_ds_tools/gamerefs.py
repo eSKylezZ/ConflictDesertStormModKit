@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import copy
 import difflib
+import os
 import struct
 
 from .routes import NONE, Marker, RouteFile
@@ -95,3 +96,75 @@ def apply_rmd_patch(patch: str, base: RouteFile) -> RouteFile:
         m.flags, m.weight = int(f[9]), float(f[10])
         markers[i] = m
     return RouteFile(markers, base.version)
+
+
+# ---------------------------------------------------------------------------------------------- .dllpatch --
+# A changed copy of a shipped mission DLL, as byte changes against the player's own (DesertStormFix mods.cpp
+# ApplyDllPatch builds <patch stem>.DLL at start-up; every original byte must match or the patch is refused):
+#   base Mission6.dll      the shipped DLL (bare name)       base-size 90112   its size
+#   size 90112             optional output size (larger = bytes appended)
+#   @ e04f <original hex> <new hex>   (original '-' only past the base's end)
+
+def make_dll_patch(base: bytes, changed: bytes, base_name: str, gap: int = 8) -> str:
+    """Hunks merged across fewer than `gap` equal bytes."""
+    lines = [f"# {base_name} changed - built from the player's own copy by DesertStormFix. Written by the Conflict Editor.",
+             f"base {os.path.basename(base_name)}", f"base-size {len(base)}"]
+    if len(changed) != len(base):
+        lines.append(f"size {len(changed)}")
+    common = min(len(base), len(changed))
+    i = 0
+    while i < common:
+        if base[i] == changed[i]:
+            i += 1
+            continue
+        j = i + 1
+        while j < common:
+            if base[j] != changed[j]:
+                j += 1
+                continue
+            k = j
+            while k < common and k - j < gap and base[k] == changed[k]:
+                k += 1
+            if k - j >= gap or k == common:
+                break
+            j = k
+        lines.append(f"@ {i:x} {base[i:j].hex()} {changed[i:j].hex()}")
+        i = j
+    for i in range(common, len(changed), 256):
+        lines.append(f"@ {i:x} - {changed[i:i + 256].hex()}")
+    text = "\n".join(lines) + "\n"
+    assert apply_dll_patch(text, base) == changed
+    return text
+
+
+def dll_patch_base(text: str) -> str:
+    for line in text.splitlines():
+        parts = line.split("#", 1)[0].split()
+        if len(parts) == 2 and parts[0] == "base":
+            return parts[1]
+    raise ValueError("no base line")
+
+
+def apply_dll_patch(text: str, base: bytes) -> bytes:
+    fields, hunks = {}, []
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line:
+            continue
+        if line.startswith("@"):
+            _, off, orig, new = line.split()
+            hunks.append((int(off, 16), None if orig == "-" else bytes.fromhex(orig), bytes.fromhex(new)))
+        else:
+            k, v = line.split(None, 1)
+            fields[k] = v
+    if int(fields["base-size"]) != len(base):
+        raise ValueError(f"{fields.get('base')} is another version (size differs)")
+    size = int(fields.get("size", len(base)))
+    out = (bytearray(base) + bytes(max(0, size - len(base))))[:size]
+    for off, orig, new in hunks:
+        if orig is not None and (len(orig) != len(new) or base[off:off + len(orig)] != orig):
+            raise ValueError(f"{fields.get('base')} is another version (bytes at {off:x} differ)")
+        if orig is None and off < len(base):
+            raise ValueError(f"bytes at {off:x} need their original")
+        out[off:off + len(new)] = new
+    return bytes(out)

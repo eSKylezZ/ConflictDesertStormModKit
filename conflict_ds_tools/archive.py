@@ -1,7 +1,8 @@
-"""Conflict: Desert Storm .dat archives (catalog.dat, chardata.dat, frontend.dat, missionN.dat, ...).
+"""Conflict .dat archives (catalog.dat, chardata.dat, frontend.dat, missionN.dat, ...) - the same in every game.
 
 Format: directory of 12-byte entries {u32 name hash, u32 offset, u32 size} from offset 0; data from the first
-entry's offset (0x8000). Only hashes are stored: hash = LFSR over the upper-cased file name (FUN_004b9a10, see
+entry's offset (0x8000; 0xC000 in Vietnam's / Global Storm's bigger archives). Only hashes are stored: hash = LFSR
+over the file name, upper-cased in Desert Storm (FUN_004b9a10), lower-cased from Desert Storm II on (see
 evo.archive_hash). Names are recovered from a dictionary of strings found in the game's exe/DLLs/.sch files and
 in the archives themselves (mesh names inside .EVO files, texture names, text tables) combined with the
 extensions the game uses. Files whose name stays unknown are written as _<HASH>.<EXT> (EXT guessed from content).
@@ -10,50 +11,24 @@ import os
 import re
 import struct
 
-from . import images
-from .evo import archive_hash
+from . import games, images
+from .evo import archive_hash, is_ani_cg
 
 EXTS = ["DDS", "EVO", "RFX", "PNG", "TGA", "BMP", "IMG", "FAS", "SPL", "ENV", "TXT", "INI", "PSF", "SBK", "PRS",
         "PRB", "AED", "DYN", "PI2", "PAX", "PAD", "OCT", "RDA", "RMD", "QTD", "SKL", "DAT", "CSV", "FNT", "WAV", "NAV",
-        "MAP", "GZ", "TEXT", "SCH", "KEY"]
+        "MAP", "GZ", "TEXT", "SCH", "KEY",
+        # Global Storm: split scenes (.ENV index -> ART / DES / SI / SND / RDA), editor movies, key bindings, text, shaders
+        "ART", "DES", "SI", "SND", "MVS", "C4K", "LOC", "FX", "PCR", "BIK", "XML", "PHY", "LIT", "SKY"]
 
 
-def find_game_dir():
-    """Game folder from the registry (the game's own key, then Steam / GOG) or the usual install paths."""
-    cands = []
-    try:
-        import winreg
-        for root, key, val in ((winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\WOW6432Node\Pivotal Games\Conflict Desert Storm",
-                                "ExePath"),
-                               (winreg.HKEY_LOCAL_MACHINE, r"SOFTWARE\Pivotal Games\Conflict Desert Storm", "ExePath"),
-                               (winreg.HKEY_CURRENT_USER, r"Software\Valve\Steam", "SteamPath")):
-            try:
-                with winreg.OpenKey(root, key) as k:
-                    v = winreg.QueryValueEx(k, val)[0]
-                if val == "SteamPath":
-                    lib = os.path.join(v, "steamapps", "libraryfolders.vdf")
-                    paths = [v]
-                    if os.path.exists(lib):
-                        paths += re.findall(r'"path"\s+"([^"]+)"', open(lib, encoding="utf-8", errors="replace").read())
-                    cands += [os.path.join(p.replace("\\\\", "\\"), "steamapps", "common", "conflict_desert_storm")
-                              for p in paths]
-                else:
-                    cands.append(os.path.dirname(v))
-            except OSError:
-                pass
-    except ImportError:
-        pass
-    cands += [r"C:\Program Files (x86)\Steam\steamapps\common\conflict_desert_storm",
-              r"C:\GOG Games\Conflict - Desert Storm", r"C:\Program Files (x86)\GOG Galaxy\Games\Conflict - Desert Storm"]
-    for c in cands:
-        if c and os.path.exists(os.path.join(c, "chardata.dat")):
-            return os.path.normpath(c)
-    return None
+def find_game_dir(game=None):
+    """The folder of `game` (default: the current one, games.current()): see games.find_game_dir."""
+    return games.find_game_dir(game)
 
 
 def list_archives(game_dir):
-    return sorted(os.path.join(game_dir, f) for f in os.listdir(game_dir)
-                  if f.lower().endswith(".dat") and not f.lower().startswith("unins"))
+    # the game folder + PSE\Originals (DesertStormFix moves the originals there)
+    return [p for p in games.game_files(game_dir, exts=(".dat",)) if not os.path.basename(p).lower().startswith("unins")]
 
 
 class GameFiles:
@@ -64,7 +39,7 @@ class GameFiles:
         self.index = {}
         for path in list_archives(game_dir):
             with open(path, "rb") as f:
-                head = f.read(0x8000)
+                head = read_head(f)
             for h, o, s in entries_head(head):
                 self.index.setdefault(h, (path, o, s))
 
@@ -78,8 +53,20 @@ class GameFiles:
             return f.read(s)
 
 
+def read_head(f):
+    """The directory block of an open archive: everything before the first entry's data (0x8000 in DS1 / DS2,
+    0xC000 in Vietnam's / Global Storm's bigger archives)."""
+    start = f.tell()
+    first = f.read(12)
+    if len(first) < 12:
+        return first
+    size = struct.unpack_from("<I", first, 4)[0]
+    f.seek(start)
+    return f.read(max(12, min(size, 1 << 22)))
+
+
 def entries_head(head):
-    """The index of an archive from its first 0x8000 bytes."""
+    """The index of an archive from its directory block (read_head)."""
     if len(head) < 12:
         return []
     first = struct.unpack_from("<I", head, 4)[0]
@@ -139,11 +126,17 @@ def _words(data, words):
                 words.add(tok.upper())
 
 
+# catalog tables every game loads by name; seeded because a protected exe (Global Storm's) doesn't show them
+TABLE_NAMES = ("WEAPS.TXT", "INVEN.TXT", "UNITWPNS.TXT", "VEHWPNS.TXT", "VEHICLE.TXT", "UNITS.TXT", "HSTAT.TXT",
+               "VSTAT.TXT", "PROPS.TXT", "DOORS.TXT", "FEATSTAT.TXT", "MPSKINITEMS.TXT", "SWITCHES.TXT",
+               "CONNOBJS.TXT", "FNAMES.TXT", "SNAMES.TXT", "STRUCTS.TXT", "TARGETS.TXT", "TRAPS.TXT", "SCORES.TXT")
+
+
 def build_dictionary(game_dir, blobs, targets=None, progress=None):
-    """{hash: NAME.EXT} for words found in the game's binaries and in archive contents, combined with every
-    known extension; only hashes in targets are kept (all when None). progress(fraction) while working."""
-    words = set()
-    bins = [os.path.join(game_dir, f) for f in os.listdir(game_dir) if f.lower().endswith((".exe", ".dll", ".sch"))]
+    """{hash: NAME.EXT} for words found in the game's binaries and in archive contents (plus TABLE_NAMES), combined
+    with every known extension; only hashes in targets are kept (all when None). progress(fraction) while working."""
+    words = set(TABLE_NAMES)
+    bins = games.game_files(game_dir, exts=(".exe", ".dll", ".sch"))
     sources = len(bins) + len(blobs)
     for i, f in enumerate(bins):
         with open(f, "rb") as fh:
@@ -175,6 +168,16 @@ def build_dictionary(game_dir, blobs, targets=None, progress=None):
     return table
 
 
+def _do_package_name(blob, h):
+    """<NAME>.APAK of a Denied Ops package when the archive index hash agrees, else None."""
+    from . import apkg
+    name = apkg.package_name(blob)
+    if not name:
+        return None
+    full = name.upper() + apkg.PACKAGE_EXT
+    return full if apkg.name_hash(full) == h else None
+
+
 class Cancelled(Exception):
     pass
 
@@ -189,6 +192,10 @@ def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print
         if cancel and cancel():
             raise Cancelled()
 
+    game = games.use_folder(game_dir) or games.current()    # its exe decides the name hash
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, ".game"), "w", encoding="utf-8") as f:   # games.detect_extracted reads it
+        f.write(game.id)
     archives = archives or list_archives(game_dir)
     report(0.0, "Reading archives")
     datas = {}
@@ -231,6 +238,15 @@ def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print
             name = table.get(h)
             if name and (k == "BIN" or name.endswith("." + k)):   # content type must agree with the name
                 named += 1
+            elif game.id == "do" and blob[:4] == b"APKG" and _do_package_name(blob, h):
+                # Denied Ops asset package: the archive names it <NAME>.apak after the name in its own manifest
+                name = _do_package_name(blob, h)
+                named += 1
+            elif game.id == "cg" and k == "BIN" and is_ani_cg(blob):
+                # Global Storm animation: no name in the index (the hash isn't of "<NAME>.ANI"), the name is inside;
+                # written as <NAME>.ANI like the game's Animations\<name>.ani and the add-on's export
+                name = blob[:44].split(b"\0")[0].decode("latin-1").upper() + ".ANI"
+                named += 1
             else:
                 name = "_%08X.%s" % (h, k)
                 unnamed += 1
@@ -252,5 +268,9 @@ def extract(game_dir, out_dir, archives=None, png=True, progress=None, log=print
             f.write("\n".join(index) + "\n")
         summary.append((arc, named, unnamed))
         log("%s: %d named, %d unnamed" % (arc, named, unnamed))
+    if game.id == "do":       # Denied Ops: models, textures and materials are inside APKG packages
+        from . import apkg
+        c = apkg.unpack_extracted(out_dir, lambda f, t: report(0.98 + 0.02 * f, t))
+        log("asset packages: %(models)d models, %(textures)d textures, %(materials)d materials" % c)
     report(1.0, "Done: %d files" % total)
     return summary

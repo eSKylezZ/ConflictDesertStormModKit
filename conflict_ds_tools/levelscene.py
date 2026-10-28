@@ -14,6 +14,10 @@ PLGT   position x y z, radius, ...                            - point lights (ra
 SLGT   tilt, heading, 0, position x y z, inner?, outer?, range - spot lights (cone angles in degrees: likely)
 =====  =====================================================================================================
 
+Vietnam / Global Storm lights are named by env.py's layouts instead of p0..: direction ``dir.x`` / ``dir.y`` (Vietnam
+DLGT) or ``rot.x`` / ``rot.y`` (Vietnam SLGT) or ``pitch`` / ``yaw`` (Global Storm) = tilt / heading, ``pos`` (Vietnam's
+sun gizmo: ``v1``), ``radius``, cones ``cone0`` / ``cone1`` (Vietnam) or ``cone_inner`` / ``cone_outer``, ``range``.
+
 Kit pieces / referenced files: a mod's ``<name>.uses`` lines (gamerefs.py, mods.cpp BuildReferences) say which model
 file a name stands for - ``file X``, ``file A = B``, ``piece KIT_X = MODEL.EVO <index>``.
 """
@@ -24,6 +28,7 @@ import os
 import re
 
 from . import env as envmod
+from .env import ZONE_TYPES
 
 SKIP_MODELS = {"", "NULL", "NONE", "(NULL)", "DEFAULT"}
 
@@ -133,6 +138,8 @@ def light(rec):
                 "ambient": ambient}
     except (KeyError, TypeError, ValueError):
         return None
+    if "p0" not in rec.fields:
+        return _named_light(rec, base)
     if rec.kind == "PLGT":
         p = _ps(rec, 4)
         if p is None:
@@ -150,6 +157,34 @@ def light(rec):
         return dict(base, kind="SPOT", tilt=p[0], heading=p[1], pos=tuple(p[3:6]), inner=p[6], outer=p[7],
                     range=p[8])
     return None
+
+
+def _named_light(rec, base):
+    """Vietnam / Global Storm light records (env.py names their fields)."""
+    def vec(name):
+        return tuple(_f(rec, "%s.%s" % (name, c), None) for c in "xyz")
+
+    def angles():
+        for a, b in (("dir.x", "dir.y"), ("rot.x", "rot.y"), ("pitch", "yaw")):
+            if a in rec.fields:
+                return _f(rec, a, None), _f(rec, b, None)
+        return None, None
+    tilt, heading = angles()
+    pos = vec("pos") if "pos.x" in rec.fields else vec("v1")
+    if rec.kind == "PLGT":
+        out = dict(base, kind="POINT", pos=pos, radius=_f(rec, "radius", None))
+    elif rec.kind == "DLGT":
+        out = dict(base, kind="SUN", tilt=tilt, heading=heading, pos=pos)
+    elif rec.kind == "SLGT":
+        inner = _f(rec, "cone0" if "cone0" in rec.fields else "cone_inner", None)
+        outer = _f(rec, "cone1" if "cone1" in rec.fields else "cone_outer", None)
+        out = dict(base, kind="SPOT", tilt=tilt, heading=heading, pos=pos, inner=inner, outer=outer,
+                   range=_f(rec, "range", None))
+    else:
+        return None
+    if any(v is None for k, v in out.items() if k != "pos") or None in out["pos"]:
+        return None
+    return out
 
 
 def region(rec):
@@ -171,7 +206,8 @@ def sound(rec):
     try:
         return {"line": rec.index + 1, "name": str(rec["name"]), "sound": str(rec["sound"]),
                 "pos": tuple(float(c) for c in rec["pos"]), "min_distance": float(rec["min_distance"]),
-                "max_distance": float(rec["max_distance"]), "volume": float(rec["volume"]), "loop": int(rec["loop"])}
+                "max_distance": float(rec["max_distance"]), "volume": float(rec["volume"]),
+                "loop": int(rec["loop"]) if "loop" in rec.fields else 1}        # Global Storm: no loop field found
     except (KeyError, TypeError, ValueError):
         return None
 
@@ -224,11 +260,12 @@ def scene_items(env):
 
 
 def read_scene(path, finder=None):
-    """EnvFile for a .ENV, or for an editor mod's .envpatch (base scene found with finder: an evo.AssetFinder)."""
+    """EnvFile for a .ENV (Global Storm's split index: its .ART / .DES / .SND parts joined), or for an editor mod's
+    .envpatch (base scene found with finder: an evo.AssetFinder)."""
+    if not path.lower().endswith(".envpatch"):
+        return envmod.EnvFile.load(path)
     with open(path, "rb") as f:
         data = f.read()
-    if not path.lower().endswith(".envpatch"):
-        return envmod.EnvFile.read(data)
     from . import gamerefs
     text = data.decode("latin-1").replace("\r\n", "\n")
     base = gamerefs.patch_base(text)
@@ -244,7 +281,7 @@ def read_scene(path, finder=None):
 
 def extent(items, margin=3000.0):
     """((min x, min z), (max x, max z)) around everything placed, grown by margin (cm) - the editor's fallback bounds."""
-    pts = [i["pos"] for i in items.get("props", []) + items.get("objects", []) if i.get("type") != 5]
+    pts = [i["pos"] for i in items.get("props", []) + items.get("objects", []) if i.get("type") not in ZONE_TYPES]
     if not pts:
         return None
     return ((min(p[0] for p in pts) - margin, min(p[2] for p in pts) - margin),

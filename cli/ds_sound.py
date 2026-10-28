@@ -21,6 +21,12 @@ Each is the whole mix - music, effects and speech - so to change the speech, dec
 audio editor (keep the length), and save it with "psf" as Mods\<mod>\Sound\SAS\<same name>.psf (or \Delta\, or
 directly in Sound\ for both).
 
+Desert Storm II uses the same .sch format (its caches are next to "CDS II.exe"; a weapon's bank is WEAPS.TXT column
+68). DS2 has no speech streams: the squad's lines are samples in each level cache, and Data\Sound\PC_*.psf is music -
+"stream" / "psf" work on PC_FrontEndMusic.psf; the mission music files ("PSF1", interactive, in segments) are another
+layout. DesertStorm2Fix adds a mod's .sch pack to every level, swaps a level's samples from a .sch named like its cache
+(a language -1 sample replaces every language), and plays a mod's .psf / .bik by name (docs/sdk/ds2-mods.md).
+
 For DesertStormFix mods you usually don't need this: a .weapon file's "sound = <weapon>" borrows a game sound and
 "shot sound = my.wav" uses your own WAV; the plugin builds the banks. A bank pack (.sch in a mod folder) is added to
 every level's sound cache by the plugin.

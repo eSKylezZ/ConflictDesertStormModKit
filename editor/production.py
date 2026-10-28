@@ -35,6 +35,9 @@ import zipfile
 from commands import (CommandError, Session, command, _find_file, _lua_value, _mod_folder, _script_path,  # noqa: F401
                       _vec, scene_problems)
 import logic
+from conflict_ds_tools import games  # noqa: E402
+from conflict_ds_tools import modlayout  # noqa: E402
+from conflict_ds_tools.env import ZONE_TYPES
 from logic import _lua_text
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -96,7 +99,7 @@ def _read_campaign(path):
 
 
 def _write_campaign(path, name, difficulty, missions, other=()):
-    lines = ["# Custom campaign - SINGLE PLAYER > CUSTOM CAMPAIGNS (DesertStormFix). Written by the Desert Storm Editor.",
+    lines = ["# Custom campaign - SINGLE PLAYER > CUSTOM CAMPAIGNS (DesertStormFix). Written by the Conflict Editor.",
              f"name = {name}"]
     if difficulty:
         lines.append(f"difficulty = {difficulty}")
@@ -109,13 +112,17 @@ def _write_campaign(path, name, difficulty, missions, other=()):
 def _lua_missions(mods, mod):
     """Mission scripts in a mod folder: [{file, mission, title}] (title from the editor's briefing when saved there)."""
     folder = os.path.join(mods, mod)
-    out = []
-    for f in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-        if not f.lower().endswith(".lua"):
+    out, seen = [], set()
+    for rel in modlayout.files(folder) if os.path.isdir(folder) else []:
+        f = os.path.basename(rel)
+        top = rel.replace("/", os.sep).split(os.sep)[0].lower() if os.sep in rel or "/" in rel else ""
+        # any depth (flat: top folder, organised: levels\), but not the record edits / readable game-mission sources
+        if not f.lower().endswith(".lua") or top in modlayout.TOP_FOLDERS + ("mission_src",) or f.lower() in seen:
             continue
-        meta = os.path.join(folder, f[:-4].upper() + ".editor.json")
+        seen.add(f.lower())
+        meta = modlayout.find(folder, f[:-4].upper() + ".editor.json")
         title, base = "", ""
-        if os.path.exists(meta):
+        if meta:
             try:
                 m = json.load(open(meta))
                 title, base = (m.get("briefing") or {}).get("title", ""), m.get("base", "")
@@ -280,8 +287,9 @@ def _page_paths(s: Session):
     if not s.mission:
         raise CommandError("save the level as a mission first (Save as mission…) - the map belongs to its script")
     _img, page = studio._map_names(s)
-    folder = os.path.join(s.game_dir or "", "Mods", s.mission[0])
-    return folder, os.path.join(folder, page), os.path.join(folder, page[:-4] + ".clean.png")
+    from commands import _mod_path
+    folder = os.path.join(s.game_dir or "", "Mods", s.mission[0])   # the mod's copies anywhere (save_minimap's place)
+    return folder, _mod_path(s, folder, page), _mod_path(s, folder, page[:-4] + ".clean.png")
 
 
 @command("The tactical map picture to draw pins on: the clean copy (before pins were burnt in), else the saved map, "
@@ -307,6 +315,7 @@ def briefing_burn_map(s: Session, image_data_base64):
     if keep is None:
         raise CommandError("no tactical map yet - Generate Minimap and save it to the mission first")
     r = studio.save_minimap(s, image_data_base64)
+    os.makedirs(os.path.dirname(clean), exist_ok=True)
     with open(clean, "wb") as f:                    # save_minimap forgets the clean copy (a new picture): put it back
         f.write(keep)
     return {**r, "clean_copy": clean}
@@ -347,9 +356,10 @@ def music_options(s: Session):
     tracks = []
     if s.mission and s.game_dir:
         folder = os.path.join(s.game_dir, "Mods", s.mission[0])
-        for f in sorted(os.listdir(folder)) if os.path.isdir(folder) else []:
-            if f.lower().endswith(".wav"):
-                tracks.append({"file": f, "seconds": _wav_seconds(os.path.join(folder, f)),
+        for rel in modlayout.files(folder) if os.path.isdir(folder) else []:   # any depth (organised: sounds\)
+            f = os.path.basename(rel)
+            if f.lower().endswith(".wav") and modlayout.find(folder, f) == os.path.join(folder, rel):
+                tracks.append({"file": f, "seconds": _wav_seconds(os.path.join(folder, rel)),
                                "url": f"/modfile/{s.mission[0]}/{f}"})
     m = getattr(s, "music", None) or {}
     from commands import _setups
@@ -377,7 +387,7 @@ def music_set(s: Session, ambient_track="", combat_track="", calm_seconds=20):
         v = os.path.basename(str(v or "").strip())
         if v and (not v.lower().endswith(".wav") or not re.fullmatch(r"[A-Za-z0-9_\- .]{1,64}", v)):
             raise CommandError(f"{key} track: a .wav file name from the mod folder")
-        if v and s.mission and s.game_dir and not os.path.exists(os.path.join(s.game_dir, "Mods", s.mission[0], v)):
+        if v and s.mission and s.game_dir and not modlayout.find(os.path.join(s.game_dir, "Mods", s.mission[0]), v):
             raise CommandError(f"{v} isn't in Mods\\{s.mission[0]} - upload it first")
         out[key] = v
     calm = float(calm_seconds)
@@ -390,6 +400,8 @@ def music_set(s: Session, ambient_track="", combat_track="", calm_seconds=20):
 
 # ================================================================================================ spawns ====
 SQUAD = [("HERO01", "Bradley"), ("HERO04", "Foley"), ("HERO02", "Connors"), ("HERO03", "Jones")]   # squad slots 0-3
+# Desert Storm II's squad has role models (Rifleman_DF_Standard ...): found by its UNITS.TXT unit instead
+SQUAD_UNITS = ({"BRADLEY"}, {"FOLEY"}, {"RAMIREZ", "CONNORS"}, {"JONES"})
 OWNERS = {1: (0, 0, 0, 0), 2: (0, 1, 0, 1), 3: (1, 0, 2, 0), 4: (0, 1, 2, 3)}   # player index per slot (FUN_00436f70)
 FACTIONS = {"allied": "US / UK", "iraqi": "Iraqi Army"}
 
@@ -398,9 +410,9 @@ def _squad(s: Session):
     """Squad slot -> its record (the playable one: not a cutscene double)."""
     out = {}
     for r in _need_level(s).find("HLOI"):
-        model = str(r.get("model", "")).upper()
+        model, unit = str(r.get("model", "")).upper(), str(r.get("unit", "")).upper()
         for slot, (prefix, _name) in enumerate(SQUAD):
-            if model.startswith(prefix) and slot not in out and not (int(r.get("flags", 0)) & 0x20000):
+            if (model.startswith(prefix) or unit in SQUAD_UNITS[slot]) and slot not in out                     and not (int(r.get("flags", 0)) & 0x20000):
                 out[slot] = r
     return out
 
@@ -677,7 +689,7 @@ def measure(env, folder, s: Session | None = None):
         if r.kind not in ("ENVI", "HLOI") or not r.fields or "model" not in r.fields:
             continue
         model = str(r["model"]).upper()
-        if r.kind == "ENVI" and r.get("type") == 5:
+        if r.kind == "ENVI" and r.get("type") in r.file.zone_types():
             objects["world_pieces"] += 1
             p = _resolve(folder, model)
             if p and p not in world_files:
@@ -732,7 +744,7 @@ def _shipped_path(s: Session):
 
 def shipped_maxima(s: Session, refresh=False):
     """The largest shipped single-player level by each measure (measured once, cached in the data folder)."""
-    from commands import EnvFile, _setups
+    from commands import EnvFile, _setups, list_levels, level_folder
     path = _shipped_path(s)
     if not refresh and os.path.exists(path):
         try:
@@ -740,8 +752,9 @@ def shipped_maxima(s: Session, refresh=False):
         except (OSError, ValueError):
             pass
     per = {}
-    for level in sorted(_setups()):
-        folder = os.path.join(s.data_dir, level.lower())
+    levels = [lv for lv in sorted(_setups()) if os.path.isdir(level_folder(s, lv))]
+    for level in levels or list_levels(s):      # Global Storm: level_setups.json is still Vietnam's
+        folder = level_folder(s, level)
         env_path = _find_file(folder, level + ".ENV") if os.path.isdir(folder) else None
         if env_path:
             m = measure(EnvFile.load(env_path), folder)
@@ -832,12 +845,41 @@ def _game_copy(s: Session, path):
     return None
 
 
+def _shipped_dlls(s: Session):
+    """The game folder's mission DLLs: lower-case name -> path."""
+    from conflict_ds_tools import games
+    game = s.game_dir or ""
+    return {os.path.basename(p).lower(): p for p in games.game_files(game, exts=(".dll",),   # (+ PSE/Originals)
+                                                                    prefixes=("mission", "training", "mp_", "frontend", "outro"))}
+
+
+def dll_patch_for(s: Session, path):
+    """A mod DLL made from one of the game's mission DLLs -> (.dllpatch text, base name); a DLL of its own -> None.
+    Same name = a changed copy; another name = a renamed copy when the byte patch against some shipped DLL is smaller
+    than the DLL itself (the code is mostly the game's, which can't be shared)."""
+    from conflict_ds_tools import gamerefs
+    data = open(path, "rb").read()
+    shipped = _shipped_dlls(s)
+    own = shipped.get(os.path.basename(path).lower())
+    candidates = [own] if own else list(shipped.values())
+    best = None
+    for base_path in candidates:
+        base = open(base_path, "rb").read()
+        if not own and abs(len(base) - len(data)) > len(data) // 4:
+            continue
+        text = gamerefs.make_dll_patch(base, data, os.path.basename(base_path))
+        if own or len(text) < len(data):
+            if best is None or len(text) < len(best[0]):
+                best = (text, os.path.basename(base_path))
+    return best
+
+
 def _uses_refs(folder):
     """Files a mod's .uses lists (built from the player's install at start-up)."""
     out = set()
-    for f in os.listdir(folder):
-        if f.lower().endswith(".uses"):
-            for line in open(os.path.join(folder, f), errors="replace"):
+    for rel in modlayout.files(folder):          # any depth (organised: levels\)
+        if rel.lower().endswith(".uses"):
+            for line in open(os.path.join(folder, rel), errors="replace"):
                 m = re.match(r"\s*(file|piece)\s+(\S+)", line)
                 if m:
                     out.add(m.group(2).upper())
@@ -849,8 +891,9 @@ def _check_missions(s: Session, mod):
     from commands import Session as _S
     out, summaries = [], []
     folder = os.path.join(_mods_dir(s), mod)
-    for f in sorted(os.listdir(folder)):
-        if not f.upper().endswith(".EDITOR.JSON"):
+    for rel in modlayout.files(folder):          # flat: top folder, organised: levels\
+        f = os.path.basename(rel)
+        if not f.upper().endswith(".EDITOR.JSON") or modlayout.find(folder, f) != os.path.join(folder, rel):
             continue
         name = f[:-len(".editor.json")].upper()
         t = _S(s.data_dir, s.game_dir)
@@ -861,11 +904,11 @@ def _check_missions(s: Session, mod):
             continue
         for p in scene_problems(t):
             out.append((name, f"line {p['line']}: {p['problem']}"))
-        meta = json.load(open(os.path.join(folder, f)))
+        meta = json.load(open(os.path.join(folder, rel)))
         summaries.append({"mission": name, "base": meta.get("base", ""), "briefing": meta.get("briefing") or {},
                           "objectives": [o.get("title", "") for o in meta.get("objectives") or []],
                           "players": len(_squad(t)) or 1,
-                          "script": os.path.exists(os.path.join(folder, name.lower() + ".lua"))})
+                          "script": bool(modlayout.find(folder, name.lower() + ".lua"))})
     return out, summaries
 
 
@@ -873,16 +916,16 @@ def _readme(mod, version, creator, campaign, summaries, files, plugin):
     title = (campaign or {}).get("name") or mod
     L = [title, "=" * len(title), "",
          f"Version {version}" + (f" - by {creator}" if creator else ""),
-         f"A mission mod for Conflict: Desert Storm (PC), made with the Desert Storm Editor.", ""]
+         f"A mission mod for {games.current().title} (PC), made with the Conflict Editor.", ""]
     if campaign and campaign.get("difficulty"):
         L += [f"Difficulty: {campaign['difficulty']}", ""]
     L += ["REQUIREMENTS", "------------",
-          "- Conflict: Desert Storm for PC (Steam or GOG).",
-          f"- DesertStormFix {plugin} or newer (dinput8.dll in the game folder) - it runs the Lua missions and builds",
+          f"- {games.current().title} for PC.",
+          f"- {games.current().plugin} {plugin} or newer (dinput8.dll in the game folder) - it runs the Lua missions and builds",
           "  the game files this mod uses from your own install. No game files are included in this package.", "",
           "INSTALL", "-------",
-          "1. Open the game folder (the one with DesertStorm.exe).",
-          f"2. Extract this archive there, so you get Mods\\{mod}\\ next to DesertStorm.exe.",
+          f"1. Open the game folder (the one with {games.current().exes[0]}).",
+          f"2. Extract this archive there, so you get Mods\\{mod}\\ next to {games.current().exes[0]}.",
           "3. Start the game. The mod is on by default (main menu > MODS lists it; a folder name starting with _",
           "   switches it off).", "",
           "PLAY", "----"]
@@ -894,7 +937,7 @@ def _readme(mod, version, creator, campaign, summaries, files, plugin):
             L.append(f"  {i}. {titles.get(m.lower()) or re.sub(r'(?i)[.]lua$', '', m)}")
     else:
         L.append("The missions are Lua levels: add them to a campaign (campaign.txt) or start one directly with")
-        L.append("  DesertStorm.exe +level <mission>.lua")
+        L.append(f"  {games.current().exes[0]} +level <mission>.lua")
     L.append("")
     if summaries:
         L += ["MISSIONS", "--------"]
@@ -917,7 +960,7 @@ def _readme(mod, version, creator, campaign, summaries, files, plugin):
             L.append(f"  Squad: {m['players']} soldier(s) - split-screen co-op for up to {m['players']} player(s).")
             L.append("")
     L += ["FILES", "-----"] + [f"  Mods\\{mod}\\{f.replace('/', chr(92))}" for f in files] + ["",
-          "Conflict: Desert Storm is (c) SCi / Pivotal Games. This mod contains only its author's own work; files it",
+          f"{games.current().title} is (c) SCi / Pivotal Games. This mod contains only its author's own work; files it",
           "needs from the game are taken from your installation at start-up (the .uses / .envpatch / .rmdpatch files).",
           ""]
     return "\r\n".join(L)
@@ -953,7 +996,7 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
         raise CommandError("fix these first - they crash the game: " +
                            "; ".join(f"{m}: {p}" for m, p in problems[:5]))
     refs = _uses_refs(folder)
-    files, left_out, copies, replaces = [], [], [], []
+    files, left_out, copies, replaces, dll_patches = [], [], [], [], []
     for dirpath, dirs, names in os.walk(folder):
         dirs[:] = [d for d in dirs if not d.startswith((".", "__"))]
         for f in sorted(names):
@@ -963,8 +1006,23 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
             if low in JUNK or low.endswith(("~", ".bak", ".tmp")):
                 left_out.append({"file": rel, "why": "clutter"})
                 continue
+            if low.endswith(".dll") and os.path.relpath(dirpath, folder).lower() in (".", "levels"):   # flat / organised
+                patch = dll_patch_for(s, p)
+                if patch is None:                # a mission of its own: shipped as it is
+                    files.append(rel)
+                else:                            # the game's code: as byte changes against the player's copy
+                    dll_patches.append((os.path.splitext(rel)[0] + ".dllpatch", patch[0]))
+                    left_out.append({"file": rel, "why": f"made from the game's {patch[1]} - packed as "
+                                                         f"{os.path.splitext(rel)[0]}.dllpatch (built from the "
+                                                         "player's own copy)"})
+                continue
             if low.endswith(NEVER):
                 left_out.append({"file": rel, "why": "archives / programs / saves are never packaged"})
+                continue
+            import game_missions
+            if game_missions.is_game_mission_file(p):
+                left_out.append({"file": rel, "why": "a game mission as Lua - made from your own copy of the game, "
+                                                     "can't be shared as it is"})
                 continue
             if low.endswith(SOURCE_SUFFIXES) and not include_sources:
                 left_out.append({"file": rel, "why": "editor source (include_sources packs it)"})
@@ -990,11 +1048,12 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
     if os.path.exists(cpath):
         c = _read_campaign(cpath)
         campaign = {"name": c["name"] or mod, "difficulty": c["difficulty"], "missions": c["missions"]}
-        missing = [m for m in c["missions"] if m.lower() not in {f.lower() for f in files}]
+        missing = [m for m in c["missions"] if m.lower() not in {f.rsplit("/", 1)[-1].lower() for f in files}]
         if missing:
             left_out.append({"file": "campaign.txt", "why": "warning - missions not in this mod (the player needs "
                                                             "them from another mod): " + ", ".join(missing)})
-    readme = _readme(mod, version, creator, campaign, summaries, files, _plugin_version())
+    readme = _readme(mod, version, creator, campaign, summaries, files + [r for r, _ in dll_patches],
+                     _plugin_version())
     os.makedirs(RELEASE_DIR, exist_ok=True)
     safe = re.sub(r"[^A-Za-z0-9_.\-]", "_", mod)
     out = os.path.join(RELEASE_DIR, f"{safe}-v{version}.zip")
@@ -1003,6 +1062,10 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
         z.writestr("README.txt", readme)
         for rel in files:
             z.write(os.path.join(folder, rel.replace("/", os.sep)), f"Mods/{mod}/{rel}")
+        written = {r.lower() for r in files}
+        for rel, text in dll_patches:
+            if rel.lower() not in written:       # a .dllpatch already in the mod is packed as a file
+                z.writestr(f"Mods/{mod}/{rel}", text)
     with zipfile.ZipFile(tmp) as z:                  # read back: every entry intact
         bad = z.testzip()
         if bad:
@@ -1012,6 +1075,24 @@ def export_mod_zip(s: Session, mod, version="1.0", creator="", include_sources=F
     return {"zip": out, "bytes": os.path.getsize(out), "files": listed, "left_out": left_out,
             "replaces_game_files": replaces, "missions": [m["mission"] for m in summaries],
             "url": f"/download/{os.path.basename(out)}", "readme": readme}
+
+
+@command("Write a mod's DLL made from one of the game's mission DLLs as <name>.dllpatch next to it (byte changes - "
+         "what Export Mod Package ships instead of the DLL). The DLL stays (a real DLL in a mod wins over the patch).",
+         mutates=False, mod="mod folder", dll="the DLL's file name")
+def make_dll_patch(s: Session, mod, dll):
+    folder = _mod_folder(s, mod, create=False)
+    path = modlayout.find(folder, os.path.basename(dll))    # any depth (flat or organised mod)
+    if not path or not os.path.isfile(path):
+        raise CommandError(f"no {dll} in Mods\\{mod}")
+    patch = dll_patch_for(s, path)
+    if patch is None:
+        raise CommandError(f"{dll} isn't made from one of the game's DLLs - it is shipped as it is")
+    stem = os.path.splitext(path)[0]
+    out = modlayout.find(folder, os.path.basename(stem) + ".dllpatch") or stem + ".dllpatch"   # next to the DLL
+    with open(out, "w", newline="\n") as f:
+        f.write(patch[0])
+    return {"patch": out, "base": patch[1], "hunks": sum(1 for l in patch[0].splitlines() if l.startswith("@"))}
 
 
 @command("Move the files of a mod that are exact copies of game files (what export_mod_zip refuses - e.g. a Save as mod "

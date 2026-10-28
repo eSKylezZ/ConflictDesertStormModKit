@@ -1,0 +1,3350 @@
+{
+ "MISSION01": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    152,
+    "Help_me_front_dead.prs"
+   ]
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Digging.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "standing_reading_clipboard.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Sitting_idle_smoking.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    165,
+    "Sitting_Idle_No_Object.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    166,
+    "Lean_Tree_Idle_Smoking.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    171,
+    "Sitting_at_desk_writing.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    172,
+    "Fix_Vehicle_Prone.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    173,
+    "Vehicle_Driver_Chatting.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    174,
+    "Stand_Talkin01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    175,
+    "Master_Sargeant.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    176,
+    "Medic_Healing_M01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    178,
+    "Standing_Drinking_Coffee_Talking.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    179,
+    "Stand_Talkin01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    180,
+    "Stand_Listening.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    181,
+    "Fixing_front_of_truck.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    182,
+    "Sat_TalkingA.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    183,
+    "Stand_Idle_Military_Police.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    184,
+    "Press_Ups.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    186,
+    "Sat_TalkingB.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    187,
+    "Grunt01_Arguing_with_Grunt02.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    188,
+    "Grunt02_Arguing_with_Grunt01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    189,
+    "Radio_operator_messing_with_radio.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    190,
+    "Radio_operator_sending_message.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    191,
+    "Clean_Rifle_Sitting_A.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    192,
+    "Clean_Rifle_Sitting_B.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    193,
+    "Sat_Talkin_Lookin_Up_Rifle.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    194,
+    "Sleeping_on_Back_A.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    195,
+    "Sleeping_on_Back_B.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    196,
+    "standing_drinking_coffee.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    197,
+    "Wave_Attention.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission01.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mortar.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Interface.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    2836128679,
+    3491740530
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M01Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission01.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M01.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     16566.0,
+     -620.0,
+     -16956.0
+    ],
+    [
+     -17434.0,
+     -620.0,
+     17044.0
+    ]
+   ]
+  },
+  {
+   "slot": 596,
+   "args": [
+    5,
+    11,
+    40,
+    null,
+    1
+   ],
+   "unresolved": true
+  }
+ ],
+ "MISSION02": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 148,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 152,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Villager_Mixing_Rice_In_Basket.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    165,
+    "Cower_Traumatised.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    166,
+    "Lean_Tree_Idle_Smoking.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    167,
+    "Surrender.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    168,
+    "Surrender_Idle.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    177,
+    "Kneeling_Idle_Pistol.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    178,
+    "Headman_Smoking_Pipe.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    273,
+    "Trap_Door_Open.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission02.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Siminov.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Interface.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    3491740530,
+    2180525035
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M02Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission02.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M02.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     17373.0,
+     -249.0,
+     -2193.0
+    ],
+    [
+     -24635.0,
+     -249.0,
+     39814.0
+    ]
+   ]
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    9,
+    49,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    7,
+    50,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    5,
+    53,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    7,
+    51,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    5,
+    52,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    9,
+    3,
+    54,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2776,
+   "args": []
+  },
+  {
+   "slot": 2476,
+   "args": [
+    2
+   ]
+  },
+  {
+   "slot": 1768,
+   "args": [
+    193,
+    0
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    3
+   ]
+  },
+  {
+   "slot": 1288,
+   "args": [
+    193,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2476,
+   "args": [
+    4
+   ]
+  },
+  {
+   "slot": 1616,
+   "args": [
+    79,
+    0
+   ]
+  },
+  {
+   "slot": 1616,
+   "args": [
+    77,
+    0
+   ]
+  },
+  {
+   "slot": 1616,
+   "args": [
+    76,
+    0
+   ]
+  },
+  {
+   "slot": 1616,
+   "args": [
+    78,
+    0
+   ]
+  },
+  {
+   "slot": 2204,
+   "args": [
+    76
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    75
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    248
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    251
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    250
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    252
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    246
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    253
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    5
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    79,
+    29
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    77,
+    31
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    76,
+    30
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    78,
+    28
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    6
+   ]
+  },
+  {
+   "slot": 1288,
+   "args": [
+    113,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2476,
+   "args": [
+    7
+   ]
+  },
+  {
+   "slot": 1288,
+   "args": [
+    76,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2476,
+   "args": [
+    8
+   ]
+  },
+  {
+   "slot": 1324,
+   "args": [
+    101,
+    1
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    9
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    79,
+    33
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    77,
+    35
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    76,
+    34
+   ]
+  },
+  {
+   "slot": 1168,
+   "args": [
+    78,
+    32
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    10
+   ]
+  },
+  {
+   "slot": 1316,
+   "args": [
+    76,
+    1120403456
+   ]
+  },
+  {
+   "slot": 2476,
+   "args": [
+    14
+   ]
+  }
+ ],
+ "MISSION03": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Kneel_Using_Radio.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "Wave_Attention.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Explosion_Knock_Over.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission03.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Interface.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mortar.sbk"
+   ]
+  },
+  {
+   "slot": 2832,
+   "args": [
+    2
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    2180525035,
+    3969226520
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M03Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission03.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M03.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     16566.0,
+     -620.0,
+     -16956.0
+    ],
+    [
+     -17434.0,
+     -620.0,
+     17044.0
+    ]
+   ]
+  }
+ ],
+ "MISSION05": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 148,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    238,
+    "Ringing_Alarm.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Radio_operator_sending_message.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "Radio_operator_sitting_idle.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Radio_operator_messing_with_radio.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission05.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 208,
+   "args": [
+    "thunder.sbk"
+   ]
+  },
+  {
+   "slot": 368,
+   "args": []
+  },
+  {
+   "slot": 648,
+   "args": [
+    null,
+    2565
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    4
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    3178366849,
+    3295043412
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M05Strs.loc"
+   ]
+  },
+  {
+   "slot": 2844,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission05.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M05.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     17695.0,
+     475.0,
+     -8258.0
+    ],
+    [
+     -14764.0,
+     475.0,
+     24201.0
+    ]
+   ]
+  },
+  {
+   "slot": 596,
+   "args": [
+    5,
+    10,
+    36,
+    37,
+    1
+   ]
+  },
+  {
+   "slot": 2508,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 968,
+   "args": [
+    0,
+    2
+   ]
+  },
+  {
+   "slot": 636,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 192,
+   "args": [
+    81,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    82,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    83,
+    3
+   ]
+  },
+  {
+   "slot": 616,
+   "args": [
+    100
+   ]
+  },
+  {
+   "slot": 804,
+   "args": [
+    111,
+    24,
+    25,
+    1
+   ]
+  },
+  {
+   "slot": 804,
+   "args": [
+    112,
+    12,
+    11,
+    1
+   ]
+  },
+  {
+   "slot": 804,
+   "args": [
+    113,
+    1,
+    2,
+    1
+   ]
+  },
+  {
+   "slot": 804,
+   "args": [
+    110,
+    459,
+    55,
+    1
+   ]
+  },
+  {
+   "slot": 804,
+   "args": [
+    109,
+    69,
+    68,
+    1
+   ]
+  },
+  {
+   "slot": 780,
+   "args": [
+    5,
+    1
+   ]
+  },
+  {
+   "slot": 780,
+   "args": [
+    4,
+    1
+   ]
+  },
+  {
+   "slot": 1152,
+   "args": [
+    null,
+    121
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 1152,
+   "args": [
+    null,
+    120
+   ],
+   "unresolved": true
+  }
+ ],
+ "MISSION06": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission06.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Thunder.sbk"
+   ]
+  },
+  {
+   "slot": 368,
+   "args": []
+  },
+  {
+   "slot": 648,
+   "args": [
+    null,
+    2565
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    5
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    3295043412,
+    2508312525
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M06Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission06.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M06.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     28269.0,
+     -3198.0,
+     4909.0
+    ],
+    [
+     -11672.0,
+     -3198.0,
+     45369.0
+    ]
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2187"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2198"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_LOWER3110"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2188"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2219"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2819"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2218"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_M05_CANOPY2631"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2137"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2136"
+   ]
+  },
+  {
+   "slot": 476,
+   "args": [
+    "MPD_CANOPY_08_UNDER2820"
+   ]
+  }
+ ],
+ "MISSION07": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 152,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    266,
+    "PBR_Captain_Fix_01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    267,
+    "PBR_Captain_Fix_03.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    268,
+    "PBR_Captain_Fix_04.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    269,
+    "PBR_Captain_Fix_05.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    270,
+    "PBR_50cal_Gunner_Wounded.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    271,
+    "PBR_M60_Gunner_Wounded.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    272,
+    "PBR_Turret_Gunner_Wounded.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission07.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    6
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    2508312525,
+    1926267181
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M07Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission07.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M07.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     21446.0,
+     -4590.0,
+     -22799.0
+    ],
+    [
+     -21448.0,
+     -4590.0,
+     20163.0
+    ]
+   ]
+  },
+  {
+   "slot": 496,
+   "args": [
+    1096810496
+   ]
+  },
+  {
+   "slot": 520,
+   "args": [
+    1099825152
+   ]
+  },
+  {
+   "slot": 504,
+   "args": [
+    1114636288
+   ]
+  }
+ ],
+ "MISSION08": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Villager_Mixing_Rice_in_Basket.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "Headman_Smoking_Pipe.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Headman_talkin.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    165,
+    "Villager_Idle_Hands_Empty.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    166,
+    "Villager_Idle_Looking_Alert.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    167,
+    "HDione_Looking_for_VC_Tracks.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    168,
+    "Villager_Puts_Crossbow_at_Feet.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    169,
+    "Kidnapped_Villagers_Bound_Hand_Feet.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    170,
+    "Kidnapped_Villagers_Freed_Stand.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    171,
+    "Villager_Breaking_Grain.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    172,
+    "Villager_Puts_Crossbow_at_Feet.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    173,
+    "Rant_Standing.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    174,
+    "Villager_Mixing_Rice_Talking.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    175,
+    "Stand_Talkin01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    176,
+    "HDione_Crouched_Cover.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    177,
+    "upright_unlock_door_UB.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    178,
+    "Cut_Free_Prisoners.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    179,
+    "Stand_Move_Fwd.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission08.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    7
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    1926267181,
+    590811572
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M08Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission08.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M08.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     15080.0,
+     -707.0,
+     -13950.0
+    ],
+    [
+     -15180.0,
+     -707.0,
+     16309.0
+    ]
+   ]
+  },
+  {
+   "slot": 608,
+   "args": []
+  },
+  {
+   "slot": 596,
+   "args": [
+    4,
+    1,
+    66,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    9,
+    3,
+    67,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    2,
+    70,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    3,
+    71,
+    null,
+    0
+   ],
+   "unresolved": true
+  }
+ ],
+ "MISSION09": [
+  {
+   "slot": 60,
+   "args": [
+    null,
+    null,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission09.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    8
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    590811572,
+    3169110448
+   ]
+  },
+  {
+   "slot": 2844,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M09Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission09.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M09.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     9598.0,
+     -640.0,
+     -13462.0
+    ],
+    [
+     -10314.0,
+     -640.0,
+     6450.0
+    ]
+   ]
+  },
+  {
+   "slot": 2256,
+   "args": [
+    104,
+    1050253722
+   ]
+  },
+  {
+   "slot": 2324,
+   "args": [
+    104
+   ]
+  },
+  {
+   "slot": 40,
+   "args": []
+  },
+  {
+   "slot": 968,
+   "args": [
+    0,
+    2
+   ]
+  },
+  {
+   "slot": 972,
+   "args": [
+    1,
+    0
+   ]
+  },
+  {
+   "slot": 972,
+   "args": [
+    1,
+    2
+   ]
+  },
+  {
+   "slot": 972,
+   "args": [
+    0,
+    1
+   ]
+  },
+  {
+   "slot": 972,
+   "args": [
+    2,
+    1
+   ]
+  },
+  {
+   "slot": 692,
+   "args": [
+    174
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Wave_Attention.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "Radio_operator_sitting_idle.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Radio_operator_sending_message.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    165,
+    "kneeling_plantc4.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    166,
+    "US_Survivor_A_Dead_Left.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    167,
+    "US_Survivor_A_Middle.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    168,
+    "stand_idle_pistol.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    279,
+    "Issuing_Orders_UB.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    169,
+    "Sat_TalkingB.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    170,
+    "Sat_Gesture_Over_Shoulder.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    171,
+    "Stand_Move_Fwd.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    172,
+    "Clean_Rifle_Sitting_A.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    173,
+    "Clean_Rifle_Sitting_B.prs"
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    81,
+    6
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    85,
+    4
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    83,
+    6
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    82,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    84,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    86,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    87,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    88,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    89,
+    6
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    90,
+    6
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    91,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    92,
+    3
+   ]
+  },
+  {
+   "slot": 196,
+   "args": [
+    87,
+    1
+   ]
+  },
+  {
+   "slot": 200,
+   "args": [
+    87,
+    279
+   ]
+  },
+  {
+   "slot": 204,
+   "args": [
+    85,
+    255
+   ]
+  },
+  {
+   "slot": 632,
+   "args": [
+    1065353216
+   ]
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    1,
+    29,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    1,
+    30,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    1,
+    31,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    1,
+    2,
+    32,
+    null,
+    0
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 1096,
+   "args": [
+    137
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    197
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    199
+   ]
+  },
+  {
+   "slot": 1096,
+   "args": [
+    198
+   ]
+  }
+ ],
+ "MISSION11": [
+  {
+   "slot": 40,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission11.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "Wave_Attention.prs"
+   ]
+  },
+  {
+   "slot": 2832,
+   "args": [
+    10
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    3976419625,
+    2484535804
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M11Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission11.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M11.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     21775.0,
+     -1916.0,
+     -16521.0
+    ],
+    [
+     -17166.0,
+     -1916.0,
+     22464.0
+    ]
+   ]
+  },
+  {
+   "slot": 608,
+   "args": []
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    7,
+    47,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    5,
+    48,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    7,
+    49,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    6,
+    5,
+    50,
+    null,
+    1
+   ],
+   "unresolved": true
+  }
+ ],
+ "MISSION12": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 104,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    162,
+    "stand_idle_pistol.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    163,
+    "Stand_Talkin01.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    164,
+    "Kneeling_Idle_Pistol.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    279,
+    "Issuing_Orders_UB.prs"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission12.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    11
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    2484535804,
+    3320877413
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M12Strs.loc"
+   ]
+  },
+  {
+   "slot": 2844,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission12.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M12.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     5274.0,
+     -423.0,
+     -5778.0
+    ],
+    [
+     -19527.0,
+     -423.0,
+     19077.0
+    ]
+   ]
+  }
+ ],
+ "MISSION13": [
+  {
+   "slot": 60,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 56,
+   "args": [
+    165,
+    "ringing_alarm.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    166,
+    "Rant_Standing.prs"
+   ]
+  },
+  {
+   "slot": 56,
+   "args": [
+    167,
+    "Stand_Listening.prs"
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    84,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    85,
+    3
+   ]
+  },
+  {
+   "slot": 192,
+   "args": [
+    86,
+    3
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission13.sbk"
+   ]
+  },
+  {
+   "slot": 208,
+   "args": [
+    "HawkMissile.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 356,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M13Strs.loc"
+   ]
+  },
+  {
+   "slot": 2832,
+   "args": [
+    12
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    3320877413,
+    2828873110
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission13.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M13.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     42961.0,
+     -2498.0,
+     -22027.0
+    ],
+    [
+     -23152.0,
+     -2498.0,
+     44196.0
+    ]
+   ]
+  },
+  {
+   "slot": 188,
+   "args": [
+    105,
+    [
+     0.0,
+     180.0,
+     0.0
+    ],
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 188,
+   "args": [
+    28,
+    [
+     44196.0,
+     42961.0,
+     -2498.0
+    ],
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 188,
+   "args": [
+    24,
+    null,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 188,
+   "args": [
+    33,
+    null,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 188,
+   "args": [
+    21,
+    null,
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 596,
+   "args": [
+    5,
+    13,
+    12,
+    null,
+    1
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 528,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 1324,
+   "args": [
+    3,
+    0
+   ]
+  },
+  {
+   "slot": 1324,
+   "args": [
+    1,
+    0
+   ]
+  },
+  {
+   "slot": 1324,
+   "args": [
+    2,
+    0
+   ]
+  },
+  {
+   "slot": 1324,
+   "args": [
+    0,
+    0
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    3
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    2
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 1116,
+   "args": [
+    104,
+    0
+   ]
+  },
+  {
+   "slot": 2508,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 1520,
+   "args": [
+    1,
+    0
+   ]
+  },
+  {
+   "slot": 1520,
+   "args": [
+    2,
+    0
+   ]
+  },
+  {
+   "slot": 968,
+   "args": [
+    0,
+    2
+   ]
+  },
+  {
+   "slot": 2244,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2324,
+   "args": [
+    104
+   ]
+  },
+  {
+   "slot": 2348,
+   "args": [
+    104,
+    1056964608
+   ]
+  },
+  {
+   "slot": 740,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 884,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 1656,
+   "args": [
+    0,
+    1
+   ]
+  },
+  {
+   "slot": 1656,
+   "args": [
+    1,
+    1
+   ]
+  },
+  {
+   "slot": 1656,
+   "args": [
+    2,
+    1
+   ]
+  },
+  {
+   "slot": 1656,
+   "args": [
+    3,
+    1
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    3
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    2
+   ]
+  },
+  {
+   "slot": 2052,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 960,
+   "args": [
+    1,
+    0
+   ]
+  },
+  {
+   "slot": 960,
+   "args": [
+    2,
+    0
+   ]
+  },
+  {
+   "slot": 404,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 392,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 384,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 408,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 412,
+   "args": [
+    104
+   ]
+  },
+  {
+   "slot": 380,
+   "args": [
+    1
+   ]
+  },
+  {
+   "slot": 376,
+   "args": [
+    1
+   ]
+  }
+ ],
+ "MISSION14": [
+  {
+   "slot": 60,
+   "args": []
+  },
+  {
+   "slot": 64,
+   "args": []
+  },
+  {
+   "slot": 68,
+   "args": []
+  },
+  {
+   "slot": 72,
+   "args": []
+  },
+  {
+   "slot": 80,
+   "args": []
+  },
+  {
+   "slot": 84,
+   "args": []
+  },
+  {
+   "slot": 88,
+   "args": []
+  },
+  {
+   "slot": 92,
+   "args": []
+  },
+  {
+   "slot": 96,
+   "args": []
+  },
+  {
+   "slot": 108,
+   "args": []
+  },
+  {
+   "slot": 112,
+   "args": []
+  },
+  {
+   "slot": 116,
+   "args": []
+  },
+  {
+   "slot": 124,
+   "args": []
+  },
+  {
+   "slot": 128,
+   "args": []
+  },
+  {
+   "slot": 104,
+   "args": []
+  },
+  {
+   "slot": 208,
+   "args": [
+    "Mission14.sbk"
+   ]
+  },
+  {
+   "slot": 360,
+   "args": [
+    null
+   ],
+   "unresolved": true
+  },
+  {
+   "slot": 2832,
+   "args": [
+    13
+   ]
+  },
+  {
+   "slot": 2836,
+   "args": [
+    2828873110,
+    2828873110
+   ]
+  },
+  {
+   "slot": 2432,
+   "args": [
+    "M14Strs.loc"
+   ]
+  },
+  {
+   "slot": 416,
+   "args": [
+    "Mission14.env"
+   ]
+  },
+  {
+   "slot": 2420,
+   "args": [
+    "MPD_M14.img"
+   ]
+  },
+  {
+   "slot": 2424,
+   "args": [
+    0
+   ]
+  },
+  {
+   "slot": 2428,
+   "args": [
+    [
+     12473.0,
+     -2286.0,
+     -11852.0
+    ],
+    [
+     -12020.0,
+     -2286.0,
+     13041.0
+    ]
+   ]
+  }
+ ]
+}

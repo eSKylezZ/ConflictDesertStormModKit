@@ -48,13 +48,76 @@ SURFACES = [
     "River Bed", "Blocking River Bed", "Forest Floor", "Blocking Forest Floor", "Player Barrier", "Enemy Barrier",
     "Non Controlled Barrier", "Stairs", "Blocking Stairs",
 ]
+# Desert Storm II's Default.spl: DS1's 51 rows unchanged, then these (same file in all 14 DS2 level archives)
+SURFACES_DS2 = [
+    "Snow", "Blocking Snow", "Soft Mud", "Blocking Soft Mud", "Tree Canopy", "Blocking Tree Canopy", "Gravel",
+    "Plastic", "Rubber", "Blocking Gravel", "Blocking Plastic", "Blocking Rubber",
+]
+# Later games only append rows (every game's table is the one before it plus these): The Great Escape = DS2's 63
+# (all 18 level archives), Vietnam 65 (14), Global Storm 76 (16)
+SURFACES_CV = ["Ignored by Exporter", "Steaming Pipe"]
+SURFACES_CG = [
+    "Vehicle Barrier", "Blocking Air Duct", "Air Duct", "Blocking Brick", "Blocking Plaster", "Brick", "Plaster",
+    "Blocking Electronics", "Electronics", "Blocking Foliage", "Foliage",
+]
+ALL_SURFACES = SURFACES + SURFACES_DS2 + SURFACES_CV + SURFACES_CG
+SURFACE_COUNTS = {"ds1": len(SURFACES), "ds2": 63, "ge": 63, "cv": 65, "cg": 76}
+
+
+def surfaces(game_id="ds1"):
+    """Default.spl row names of a game (ds1: 51 rows, ds2 / ge: 63, cv: 65, cg: 76)."""
+    return ALL_SURFACES[:SURFACE_COUNTS.get(game_id, len(SURFACES))]
+
+
+# for models moved to a game whose Default.spl lacks a row: the nearest row it has (by footstep sound / feel and the
+# same blocking behaviour); every game has DS1's 51 rows, so the chain always ends there
+SURFACE_FALLBACK = {
+    "Snow": "Sand", "Blocking Snow": "Blocking Sand", "Soft Mud": "River Bed", "Blocking Soft Mud": "Blocking River Bed",
+    "Tree Canopy": "Hedge", "Blocking Tree Canopy": "Blocking Hedge", "Gravel": "Baked Earth",
+    "Blocking Gravel": "Blocking Baked Earth", "Plastic": "Wood", "Blocking Plastic": "Blocking Wood",
+    "Rubber": "Cloth", "Blocking Rubber": "Blocking Cloth",
+    "Ignored by Exporter": "Render Only", "Steaming Pipe": "Metal",
+    "Vehicle Barrier": "Blocking Invisible", "Blocking Air Duct": "Blocking Metal", "Air Duct": "Metal",
+    "Blocking Brick": "Blocking Concrete", "Blocking Plaster": "Blocking Concrete", "Brick": "Concrete",
+    "Plaster": "Concrete", "Blocking Electronics": "Blocking Metal", "Electronics": "Metal",
+    "Blocking Foliage": "Blocking Hedge", "Foliage": "Hedge",
+}
+
+
+def convert_surface(surface, game_id):
+    """(surface row for `game_id`, the row's name before or None if unchanged): a row the game's Default.spl
+    doesn't have becomes its fallback (SURFACE_FALLBACK); the flag bits above 0x3FF are dropped then."""
+    index = surface & 0x3FF
+    count = SURFACE_COUNTS.get(game_id, len(SURFACES))
+    if index < count:
+        return surface, None
+    name = surface_name(index)
+    target = name
+    while surface_index(target) >= count:
+        target = SURFACE_FALLBACK.get(target)
+        if target is None:
+            return 0, name                     # unknown row: Default
+    return surface_index(target), name
+
+
+def first_game_with(index):
+    """The first game (id) whose Default.spl has row `index`, or None."""
+    for gid in ("ds1", "ds2", "cv", "cg"):
+        if index < SURFACE_COUNTS[gid]:
+            return gid
+    return None
+
+
+def surface_name(index):
+    return ALL_SURFACES[index] if 0 <= index < len(ALL_SURFACES) else str(index)
 
 EPS = 0.01          # cm: points this close to a plane count as on it
 MAX_VERTS = 32      # largest merged polygon (the game's own go up to 37)
 
 
 def surface_index(name):
-    """Surface row for a name (case and spaces / underscores ignored); a number string is taken as it is."""
+    """Surface row for a name (case and spaces / underscores ignored; the later games' extra rows included - the
+    writer refuses rows the template's game doesn't have); a number string is taken as it is."""
     if isinstance(name, int):
         return name
     s = str(name).strip()
@@ -62,7 +125,7 @@ def surface_index(name):
         return int(s)
     key = s.lower().replace("_", " ").replace("-", " ")
     key = " ".join(key.split())
-    for i, n in enumerate(SURFACES):
+    for i, n in enumerate(ALL_SURFACES):
         if n.lower() == key:
             return i
     raise ValueError("unknown surface %r" % name)
@@ -229,16 +292,26 @@ def chunk(tree_bytes, u=0):
 
 # ---- building ----
 def _convex(verts, normal):
+    """Every turn goes the same way round the normal, none turns back on itself, and the turns add up to one full
+    turn. The side test alone let through outlines that double back along a sliver (a spike: a turn of ~180 degrees
+    with a tiny cross product) or wind round twice - seen when merging the game's own split polygons back up, where
+    the merged polygon covered other ground than its triangles."""
     k = len(verts)
+    total = 0.0
     for i in range(k):
         a, b, c = verts[i], verts[(i + 1) % k], verts[(i + 2) % k]
         u, w = _sub(b, a), _sub(c, b)
         lu, lw = math.sqrt(_dot(u, u)), math.sqrt(_dot(w, w))
         if lu < 1e-6 or lw < 1e-6:
             return False
-        if _dot(_cross(u, w), normal) < -1e-4 * lu * lw:
+        s = _dot(_cross(u, w), normal)
+        if s < -1e-4 * lu * lw:
             return False
-    return True
+        turn = math.atan2(s, _dot(u, w))
+        if not -1e-3 < turn < math.pi - 1e-3:
+            return False
+        total += turn
+    return abs(total - 2 * math.pi) < 1e-3 * k
 
 
 def _drop_collinear(idx, pos, normal):

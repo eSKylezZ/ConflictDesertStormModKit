@@ -1,5 +1,21 @@
 """Blender side of the Conflict: Desert Storm tools (File > Import > Conflict: Desert Storm ...).
 
+Desert Storm and Desert Storm II: models import and export (the game follows the model file: EOBJ 0x2F / 0x35),
+.prb animations import and export (DS2's tracks bind to the skeleton by object name hash), collision surfaces include
+DS2's extra Default.spl rows (Snow, Gravel ... - refused on a DS1 model).
+The Great Escape: models and .prb animations import and export like DS2's (EOBJ 0x34; its own header offsets and
+40-byte animation keys - evo_write._Layout / write_prb_ds2).
+Into a Mod Folder writes <game>/Mods/<Mod> for every game but Denied Ops: each plugin (DesertStormFix,
+GreatEscapeFix, DesertStorm2Fix, VietnamFix, GlobalStormFix) serves Mods files by name over the archives. A new model
+name gets a starter .weapon where the plugin reads them (DS1, DS2, The Great Escape; .skin: DS1); in Vietnam / Global
+Storm a new name is used only once a game file refers to it - Replace the Game's Model changes the original. Test in
+Game starts DS1 straight into a level (+level), the others at their launcher / front end.
+Vietnam and Global Storm (EOBJ 0x40 / 0x49): models, characters, level scenes and archives import (+ Vietnam's
+animations, Global Storm's .ani animations); export writes static models (weapons, props, vehicle parts, level
+pieces), their collision and points, character skins of one or several parts (one skin object per material,
+evo_write.rebuild_cv), Vietnam .prb animations (evo_write.write_prb_cv), Global Storm .ani animations
+(evo_write.write_ani_cg) and shadow meshes added to static models.
+
 - .evo import: props, vehicles (node hierarchy + the tracks, wheels and guns the game attaches), world pieces,
   cloth (frames as shape keys), characters (armature, skin weights, optionally all their animations).
 - .prb import: animations onto a character armature made by the .evo import; .prb export: the armature's action
@@ -16,14 +32,15 @@
 - 3D View sidebar (N) > Desert Storm: surfaces (assign, pick, show), helpers, points, skin weight check, roads from
   curves, model statistics against the game's limits, one-click re-export into the active mod.
 - Level scenes (.ENV / an editor mod's .envpatch): world pieces, props, kit pieces, objects as collection instances of
-  each model, lights, trigger regions and ambient sounds (File > Import > Conflict: Desert Storm Scene).
+  each model, lights, trigger regions and ambient sounds (File > Import > Conflict: Desert Storm Scene (.env)).
 - Tactical minimap bake (top-down orthographic render -> GW<name>.img + GW<name>0.png in the active mod).
 - Asset Browser library: every extracted model as an editable .blend, marked as an asset in a catalog.
 - Weapons: Aim Camera down the sights (#PT_REAR_SIGHT / #PT_FRONT_SIGHT, Blender only), Snap to Hand (grip check).
 - Vehicles: turret / gun pivots at the game's mount points with rotation limits; uniforms preview for squad soldiers;
-  Test in Game (export into the mod, start DesertStorm.exe +level <level>).
+  Test in Game (export into the mod, start the game with +level <level>).
 Materials: base texture, the .RFX normal map (DirectX green flipped), backface culling like the game.
 """
+import collections
 import math
 import os
 import re
@@ -37,7 +54,57 @@ from bpy.props import (BoolProperty, CollectionProperty, EnumProperty, FloatProp
 from bpy_extras.io_utils import ExportHelper, ImportHelper
 from mathutils import Color, Matrix, Vector
 
-from . import archive, assetlib, bsp, evo, evo_write, gcaudio, images, kits, levelscene, minimap, roads
+from . import (archive, assetlib, bsp, evo, evo_write, games, gcaudio, images, kits, levelscene, minimap,
+               modlayout, porting, roads, sceneexport)
+from .crossgame import character_skin_parts, cross_repose, head_connector_offsets, split_skin  # noqa: F401
+from .env import ZONE_TYPES
+
+# One add-on per game (scripts/build_zip.py --game <id>): the zip carries addon_game.py with the game it is for and a
+# prefix for everything Blender registers by name (operator ids, the sidebar panel, Scene properties), so the game
+# add-ons and the all-games add-on (conflict_ds_tools, no addon_game.py: old ids, every game) install side by side.
+try:
+    from .addon_game import GAME, PREFIX
+except ImportError:
+    GAME, PREFIX = None, None
+
+
+def sp(name):
+    """Name of one of this add-on's Scene properties ("surface" -> ds_surface, cds1_surface ...)."""
+    return "%s_%s" % (PREFIX or "ds", name)
+
+
+class _SceneProps:
+    """props(scene).surface reads / writes this add-on's Scene property (sp("surface"))."""
+    __slots__ = ("_scene",)
+
+    def __init__(self, scene):
+        object.__setattr__(self, "_scene", scene)
+
+    def __getattr__(self, name):
+        return getattr(self._scene, sp(name))
+
+    def __setattr__(self, name, value):
+        setattr(self._scene, sp(name), value)
+
+
+props = _SceneProps
+
+
+def op_id(idname):
+    """This add-on's id for an operator: import_scene.evo -> import_scene.cds1_evo, object.ds_x -> object.cds1_x."""
+    if not PREFIX:
+        return idname
+    cat, name = idname.split(".", 1)
+    if name.startswith(PREFIX + "_"):
+        return idname
+    return "%s.%s_%s" % (cat, PREFIX, name[3:] if name.startswith("ds_") else name)
+
+
+def run_op(cls, *args, **kw):
+    """Call one of this add-on's operators (bpy.ops.<its id>)."""
+    cat, name = cls.bl_idname.split(".", 1)
+    return getattr(getattr(bpy.ops, cat), name)(*args, **kw)
+
 
 HELPER_COLLECTION = "helpers"
 SIGHT_ROLES = ("REAR_SIGHT", "FRONT_SIGHT")      # Blender-only helpers for the Aim Camera (not written to the game)
@@ -154,7 +221,7 @@ def get_material(name, path, cull, normal=None):
 
 def surface_material(index):
     """Material for a collision surface (Default.spl row): "Surface: <name>", a colour per surface."""
-    name = "Surface: " + (bsp.SURFACES[index] if 0 <= index < len(bsp.SURFACES) else str(index))
+    name = "Surface: " + bsp.surface_name(index)
     mat = bpy.data.materials.get(name)
     if mat:
         return mat
@@ -495,7 +562,7 @@ class EvoImporter:
                 cname = src if src.upper().startswith("#BSP_") else "#BSP_" + (so.node.name or scene.name)
                 cob = bpy.data.objects.new(cname, build_collision_mesh(cname, tree, k))
                 self.helpers.objects.link(cob)
-                cob.display_type = "SOLID" if getattr(bpy.context.scene, "ds_show_surfaces", False) else "WIRE"
+                cob.display_type = "SOLID" if getattr(bpy.context.scene, sp("show_surfaces"), False) else "WIRE"
                 cob["evo_role"] = "collision"
                 cob["evo_collision_of"] = so.node.name
                 cob["evo_object_index"] = so.index
@@ -673,6 +740,182 @@ class EvoImporter:
 
 # ------------------------------------------------------------------------------------------------- operators --
 
+# ------------------------------------------------------------------------------------------ game profiles --
+# File > Import / Export have one entry per game (Conflict: Desert Storm (.evo), Conflict: Desert Storm II (.evo) ...);
+# the entry passes game= to the operator, which makes it the current game: imports start in its extracted folder,
+# exports use its game folder and active mod, and a model or animation of the other game is refused on export. The
+# sidebar's Export to Mod / Test in Game use the game of the last import / export. Each game keeps its own folders and
+# mod (add-on preferences, so every .blend shares them).
+PROFILES = (("ds1", "Desert Storm", "Conflict: Desert Storm (2002)"),
+            ("ge", "Great Escape", "The Great Escape (2003)"),
+            ("ds2", "Desert Storm II", "Conflict: Desert Storm II (2003)"),
+            ("cv", "Vietnam", "Conflict: Vietnam (2004)"),
+            ("cg", "Global Storm", "Conflict: Global Storm (2005)"),
+            ("do", "Denied Ops", "Conflict: Denied Ops (2008)"))
+MENU_NAMES = {"ds1": "Conflict: Desert Storm", "ge": "The Great Escape", "ds2": "Conflict: Desert Storm II",
+              "cv": "Conflict: Vietnam", "cg": "Conflict: Global Storm",
+              "do": "Conflict: Denied Ops"}                                         # File > Import / Export entries
+MODEL_GAMES = {0x2F: "ds1", 0x35: "ds2", 0x34: "ge", 0x40: "cv", 0x49: "cg", 0x54: "do"}   # EOBJ version -> game
+# Denied Ops (its own add-on only): models (the EOBJ 0x54 streams apkg.py unpacks from the level archives' packages,
+# textured through their materials), characters on C5_SKELETON, level scenes and archives import; nothing is written
+# yet (models go back inside APKG packages - not built), so it has no export entries and no export tools.
+# what each game gets: models / scenes / archives import for all five; writing models (evo_write's layouts) and
+# animations (.prb written: DS1 by object order, DS2 / The Great Escape by name hash) only for these. Vietnam's .prb
+# (keys relative to rest) and Global Storm's .ani (the unnamed STATE_* / OVERLAY_* .BIN files, posed through the
+# skeleton's .SKL) import.
+WRITE_GAMES = ("ds1", "ge", "ds2", "cv", "cg")   # Vietnam / Global Storm: static models, collision, points so far
+ANIM_IMPORT_GAMES = ("ds1", "ge", "ds2", "cv", "cg")
+MOD_GAMES = ("ds1", "ge", "ds2", "cv", "cg")   # a plugin serves <game>\Mods by file name (all but Denied Ops)
+STARTER_GAMES = ("ds1", "ge", "ds2")       # plugins that read .weapon files (.skin: DS1 - starter_file's HEROES)
+TEST_GAMES = MOD_GAMES                     # Test in Game: DS1 +level, the others start at the launcher / front end
+ANIM_GAMES = ("ds1", "ge", "ds2", "cv", "cg")
+# a game add-on: its own game only; the all-games add-on: the five it always had (Denied Ops has its own add-on)
+MENU_PROFILES = tuple(p for p in PROFILES if (p[0] == GAME if GAME else p[0] != "do"))
+SCENE_WRITE_GAMES = ("ds1", "ge", "ds2", "cv", "cg")   # Scene (.env) export
+
+
+def prefs():
+    """The add-on's preferences, or None (not registered, e.g. the command-line tools)."""
+    try:
+        return bpy.context.preferences.addons[__package__].preferences
+    except (KeyError, AttributeError):
+        return None
+
+
+def profile():
+    """The game picked in the profile (a game add-on: always its game); also made games.current() (archive name
+    hashing, folder lookups)."""
+    p = prefs()
+    game = games.GAMES[GAME] if GAME else games.GAMES[p.game] if p else games.current()
+    if games.current() is not game:
+        games.set_current(game)
+    return game
+
+
+def profile_value(field, game=None):
+    p = prefs()
+    return getattr(p, "%s_%s" % ((game or profile()).id, field)) if p else ""
+
+
+def extract_dir(game=None):
+    """The game's extraction folder: its profile's, else Documents\\Conflict <game> extracted."""
+    game = game or profile()
+    d = profile_value("extract_dir", game)
+    if d:
+        return bpy.path.abspath(d)
+    return DEFAULT_EXTRACT_DIR if game.id == "ds1" else os.path.join(
+        os.path.expanduser("~"), "Documents", "Conflict %s extracted" % game.short)
+
+
+def model_game(path):
+    """The game an .evo is from (by its EOBJ version), or None if it can't be read."""
+    try:
+        with open(path, "rb") as f:
+            head = f.read(8)
+    except OSError:
+        return None
+    if len(head) < 8 or head[:4] != b"EOBJ":
+        return None
+    return games.GAMES.get(MODEL_GAMES.get(int.from_bytes(head[4:8], "little") & 0xFFFF))
+
+
+def wrong_game(game, what):
+    """Message for a model / animation that isn't the current game's ("" when it is)."""
+    if game is None or game is profile():
+        return ""
+    in_menus = any(p[0] == game.id for p in MENU_PROFILES)       # Denied Ops isn't in the all-games add-on's menus
+    where = ("File > Import / Export > %s" % MENU_NAMES.get(game.id, game.title)) if in_menus else \
+        ("the %s add-on" % game.title)
+    return "%s is a %s %s, not a %s one - use %s, or base it on a %s %s" % (
+        what[0], game.short, what[1], profile().short, where, profile().short, what[1])
+
+
+def _profile_update(self, context):
+    profile()
+
+
+def _profile_get(field):
+    return lambda self: profile_value(field)
+
+
+def _profile_set(field):
+    def set_(self, value):
+        p = prefs()
+        if p:
+            setattr(p, "%s_%s" % (profile().id, field), value)
+    return set_
+
+
+def _prefs_props():
+    out = {"game": EnumProperty(name="Game", items=[(g, short, title) for g, short, title in PROFILES],
+                                default=GAME or "ds1", update=_profile_update,
+                                description="The game of the last import / export (the sidebar's Export to Mod "
+                                            "and Test in Game use it)"),
+           "mod_layout": EnumProperty(name="New Mods", default=modlayout.ORGANISED,
+                                      items=((modlayout.ORGANISED, "Organised",
+                                              "Files in folders by type: evos, dds, anims, sounds, tables, defs, "
+                                              "levels"),
+                                             (modlayout.FLAT, "Flat", "Every file in the mod's top folder (the "
+                                                                      "layout of mods made before 1.9)")),
+                                      description="How a new mod's files are laid out. A mod that already has files "
+                                                  "keeps its layout, and a file it has is rewritten where it is - "
+                                                  "the games find a mod's files in any folder")}
+    for gid, short, _ in MENU_PROFILES:
+        out[gid + "_game_dir"] = StringProperty(name="Game Folder", default="", subtype="DIR_PATH",
+                                                description="%s's folder (with its exe); empty = found from the "
+                                                            "registry / Steam" % short)
+        out[gid + "_extract_dir"] = StringProperty(name="Extracted Folder", default="", subtype="DIR_PATH",
+                                                   description="Where %s's archives are extracted (empty = "
+                                                               "Documents\\Conflict ... extracted)" % short)
+        out[gid + "_active_mod"] = StringProperty(name="Active Mod", default="",
+                                                  description="%s's mod folder under <game>\\Mods" % short)
+    return out
+
+
+def mod_layout():
+    """The preference New Mods (organised unless set to flat; organised without preferences)."""
+    p = prefs()
+    return getattr(p, "mod_layout", modlayout.ORGANISED) if p else modlayout.ORGANISED
+
+
+def mod_path(mod_dir, name):
+    """Where a file of a mod is written (conflict_ds_tools.modlayout: existing file in place, flat mods stay flat)."""
+    return modlayout.path_for(mod_dir, name, layout=mod_layout())
+
+
+def _prefs_draw(self, context):
+    lay = self.layout
+    lay.prop(self, "mod_layout")
+    for gid, short, _ in MENU_PROFILES:
+        box = lay.box()
+        box.label(text=short)
+        for f in ("game_dir", "extract_dir", "active_mod"):
+            box.prop(self, "%s_%s" % (gid, f))
+
+
+DS_PT_preferences = type("DS_PT_preferences" + ("_" + PREFIX if PREFIX else ""), (bpy.types.AddonPreferences,),
+                         {"bl_idname": __package__, "__annotations__": _prefs_props(), "draw": _prefs_draw})
+
+
+def game_prop():
+    """The game an import / export is for: set by its File menu entry (one per game), not shown in the dialog."""
+    return EnumProperty(name="Game", items=[(g, short, title) for g, short, title in PROFILES], default=GAME or "ds1",
+                        options={"HIDDEN", "SKIP_SAVE"},
+                        description="The game this import / export is for (File > Import / Export has an entry per "
+                                    "game); not set = the game of the last import / export")
+
+
+def apply_game(op):
+    """The game the operator was started for (its menu entry's / a script's game="ds2") becomes the current one."""
+    p = prefs()
+    if op.properties.is_property_set("game"):
+        if p and p.game != op.game:
+            p.game = op.game
+        elif p is None:
+            games.set_current(op.game)          # no add-on preferences (registered from a script): the game alone
+    profile()
+
+
 class IMPORT_SCENE_OT_evo(bpy.types.Operator, ImportHelper):
     """Import Conflict: Desert Storm .EVO meshes"""
     bl_idname = "import_scene.evo"
@@ -684,13 +927,14 @@ class IMPORT_SCENE_OT_evo(bpy.types.Operator, ImportHelper):
     files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
     directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
 
+    game: game_prop()
     scale: FloatProperty(name="Scale", default=0.01, min=1e-5, max=100.0,
                          description="Game units are centimetres; 0.01 imports in metres")
     armature: BoolProperty(name="Armature", default=True,
                            description="Characters: build the biped skeleton and bind the skin to it")
     animations: EnumProperty(name="Animations", default="NONE",
                              items=(("NONE", "None", "Bind pose only (import animations later with "
-                                                     "File > Import > Conflict: Desert Storm Animation)"),
+                                                     "File > Import > Conflict: Desert Storm Animation (.prb))"),
                                     ("ALL", "All Compatible", "Every .prb animation found next to the model and "
                                                               "in its sibling folders that fits the skeleton, "
                                                               "one action each")),
@@ -720,7 +964,20 @@ class IMPORT_SCENE_OT_evo(bpy.types.Operator, ImportHelper):
     OPTIONS = ("scale", "armature", "animations", "vehicle_parts", "normal_maps", "helpers", "frames", "colours",
                "cull", "skin")
 
+    def invoke(self, context, event):
+        apply_game(self)
+        start = extract_dir()                               # the profile's game (sidebar > Desert Storm > Game)
+        if os.path.isdir(start) and not (self.filepath and os.path.isdir(os.path.dirname(self.filepath))
+                                         and games.detect_extracted(self.extracted_root(self.filepath)) is profile()):
+            self.filepath = start + os.sep
+        return ImportHelper.invoke(self, context, event)
+
+    @staticmethod
+    def extracted_root(path):
+        return os.path.dirname(os.path.dirname(os.path.abspath(path)))
+
     def execute(self, context):
+        apply_game(self)
         opts = {n: getattr(self, n) for n in self.OPTIONS}
         opts["texture_dir"] = bpy.path.abspath(self.texture_dir) if self.texture_dir else ""
         paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] or [self.filepath]
@@ -736,6 +993,9 @@ class IMPORT_SCENE_OT_evo(bpy.types.Operator, ImportHelper):
                 continue
             done += 1
             msg = list(imp.notes)
+            wrong = wrong_game(model_game(path), (os.path.basename(path), "model"))
+            if wrong:
+                msg.append(wrong.replace(" - use File > Import / Export >", " - export it with File > Export >"))
             if imp.missing:
                 msg.append("textures not found: " + ", ".join(sorted(imp.missing)))
             if msg:
@@ -750,6 +1010,43 @@ class IMPORT_SCENE_OT_evo(bpy.types.Operator, ImportHelper):
             lay.prop(self, p)
 
 
+# an animation of another game is posed through that game's skeleton (found next to the animation file) and
+# retargeted onto the armature by bone name (evo.retarget) - the games' Biped rigs share their bone names
+ANIM_SKELETONS = {"ds1": "HERO01_ARMSTRONG", "ds2": "534_POLY_SOLDIER", "ge": "GEN_GER_SOLDIER",
+                  "cv": "MPD_US_MOTOWN", "cg": "C04_500_POLY"}
+
+
+def anim_game(anim):
+    """The game an animation's file layout belongs to (Animation.game / raw key size)."""
+    if anim.game == "ds2":
+        return games.GAMES["ge"] if anim.raw.get("key") == 40 else games.GAMES["ds2"]
+    return games.GAMES.get(anim.game)
+
+
+def cross_game_animation(path, anim, scene, scene_game):
+    """(retargeted Animation, note) when `anim` (read from `path`) is another game's than `scene_game` and that game's
+    skeleton is found next to the file; (None, why) when it should be but can't; (anim, None) when it's the same
+    game's."""
+    agame = anim_game(anim)
+    if agame is None or scene_game is None or agame is scene_game:
+        return anim, None
+    name = ANIM_SKELETONS.get(agame.id)
+    sk = evo.AssetFinder(path).find(name, (".evo",)) if name else None
+    if not sk:
+        return None, "%s is a %s animation - its skeleton (%s) isn't in the extracted folders next to it" % (
+            anim.name, agame.short, name)
+    try:
+        source = evo.load(sk)
+    except (evo.EvoError, OSError) as e:
+        return None, "%s: can't read %s's skeleton %s (%s)" % (anim.name, agame.short, os.path.basename(sk), e)
+    if not evo.compatible(source, anim):
+        return None, "%s doesn't fit %s's soldier skeleton" % (anim.name, agame.short)
+    out = evo.retarget(anim, source, scene)
+    if out is None:
+        return None, "%s: no bone of %s's skeleton matches this armature" % (anim.name, agame.short)
+    return out, "%s retargeted from %s" % (anim.name, agame.short)
+
+
 class IMPORT_ANIM_OT_prb(bpy.types.Operator, ImportHelper):
     """Import Conflict: Desert Storm .prb animations onto the active character armature"""
     bl_idname = "import_anim.evo_prb"
@@ -757,9 +1054,18 @@ class IMPORT_ANIM_OT_prb(bpy.types.Operator, ImportHelper):
     bl_options = {"REGISTER", "UNDO"}
 
     filename_ext = ".prb"
-    filter_glob: StringProperty(default="*.prb;*.PRB;_*.BIN;_*.bin", options={"HIDDEN"})
+    # Global Storm's are .ani (<NAME>.ANI from the extraction / a mod, _HASH.BIN from an older extraction)
+    filter_glob: StringProperty(default="*.prb;*.PRB;*.ani;*.ANI;_*.BIN;_*.bin", options={"HIDDEN"})
     files: CollectionProperty(type=bpy.types.OperatorFileListElement, options={"HIDDEN", "SKIP_SAVE"})
     directory: StringProperty(subtype="DIR_PATH", options={"HIDDEN", "SKIP_SAVE"})
+
+    game: game_prop()
+
+    def invoke(self, context, event):
+        apply_game(self)
+        if self.game == "cg":
+            self.filter_glob = "*.ani;*.ANI;_*.BIN;_*.bin"
+        return ImportHelper.invoke(self, context, event)
 
     @classmethod
     def poll(cls, context):
@@ -767,6 +1073,7 @@ class IMPORT_ANIM_OT_prb(bpy.types.Operator, ImportHelper):
         return ob is not None and ob.type == "ARMATURE" and "evo_path" in ob
 
     def execute(self, context):
+        apply_game(self)
         arm = context.active_object
         try:
             scene = evo.load(arm["evo_path"])
@@ -775,19 +1082,27 @@ class IMPORT_ANIM_OT_prb(bpy.types.Operator, ImportHelper):
             return {"CANCELLED"}
         k = arm.get("evo_scale", 0.01)
         paths = [os.path.join(self.directory, f.name) for f in self.files if f.name] or [self.filepath]
-        done, skipped = 0, []
+        done, skipped, retargeted = 0, [], []
         for path in paths:
             try:
                 anim = evo.read_prb(path)
             except (evo.EvoError, OSError) as e:
                 skipped.append("%s (%s)" % (os.path.basename(path), e))
                 continue
+            anim, why = cross_game_animation(path, anim, scene, model_game(arm["evo_path"]))
+            if anim is None:
+                skipped.append(why)
+                continue
+            if why:
+                retargeted.append(why)
             if not evo.compatible(scene, anim):
                 skipped.append("%s (%d tracks, the model has %d objects)" % (anim.name, len(anim.tracks),
                                                                               len(scene.objects)))
                 continue
             apply_animation(arm, scene, anim, k, assign=True)
             done += 1
+        if retargeted:
+            self.report({"INFO"}, "; ".join(retargeted))
         if skipped:
             self.report({"WARNING"}, "skipped: " + ", ".join(skipped))
         return {"FINISHED"} if done else {"CANCELLED"}
@@ -798,8 +1113,9 @@ class IMPORT_SCENE_OT_ds_extract(bpy.types.Operator):
     bl_idname = "import_scene.ds_extract"
     bl_label = "Extract Game Archives"
 
+    game: game_prop()
     game_dir: StringProperty(name="Game Folder", subtype="DIR_PATH",
-                             description="Folder with DesertStorm.exe and the .dat archives")
+                             description="Folder with the game's exe and the .dat archives")
     out_dir: StringProperty(name="Output Folder", subtype="DIR_PATH",
                             description="Where to write one folder per archive")
     png: BoolProperty(name="PNG Copies", default=False,
@@ -814,10 +1130,9 @@ class IMPORT_SCENE_OT_ds_extract(bpy.types.Operator):
                                            "level): thousands of large models")
 
     def invoke(self, context, event):
-        if not self.game_dir:
-            self.game_dir = archive.find_game_dir() or ""
-        if not self.out_dir:
-            self.out_dir = os.path.join(os.path.expanduser("~"), "Documents", "Conflict Desert Storm extracted")
+        apply_game(self)
+        self.game_dir = game_dir_of(context.scene)        # the profile's game
+        self.out_dir = extract_dir()
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def draw(self, context):
@@ -834,6 +1149,7 @@ class IMPORT_SCENE_OT_ds_extract(bpy.types.Operator):
         return _job.get("thread") is None or not _job["thread"].is_alive()
 
     def execute(self, context):
+        apply_game(self)
         game = bpy.path.abspath(self.game_dir)
         out = bpy.path.abspath(self.out_dir)
         if not os.path.isdir(game) or not archive.list_archives(game):
@@ -947,7 +1263,7 @@ for the PC into a mod (one sound cache per level)"""
         if not os.path.isfile(image):
             self.report({"ERROR"}, "Pick a GameCube disc image (.iso / .gcm / .ciso)")
             return {"CANCELLED"}
-        if not os.path.isfile(os.path.join(game, "DesertStorm.exe")):
+        if games.detect(game) is not games.GAMES["ds1"]:       # the GameCube disc is Desert Storm's
             self.report({"ERROR"}, "No DesertStorm.exe in the PC Game Folder (%s)" % game)
             return {"CANCELLED"}
         mod = self.mod_name.strip() or gcaudio.MOD_NAME
@@ -1007,6 +1323,72 @@ for the PC into a mod (one sound cache per level)"""
         return {"FINISHED"}
 
 
+class IMPORT_SCENE_OT_ds_port(bpy.types.Operator, ImportHelper):
+    """Port models, weapons, soldiers and animations from another Conflict game into a Desert Storm mod, following a
+recipe file (docs/PORTING_PLAN.md) - converted from your own copies of both games, no game files are shipped"""
+    bl_idname = "import_scene.ds_port"
+    bl_label = "Port Between Games"
+
+    filter_glob: StringProperty(default="*.port;*.txt", options={"HIDDEN"})
+    source_dir: StringProperty(name="Source Game Folder", subtype="DIR_PATH",
+                               description="The other game's folder or a folder extracted from it (empty = the "
+                                           "recipe's 'source =' line, else the installed game)")
+    game_dir: StringProperty(name="Desert Storm Folder", subtype="DIR_PATH",
+                             description="Folder with DesertStorm.exe: the mod goes to its Mods folder")
+
+    def invoke(self, context, event):
+        if not self.game_dir:
+            self.game_dir = game_dir_of(context.scene) or archive.find_game_dir() or ""
+        return ImportHelper.invoke(self, context, event)
+
+    def draw(self, context):
+        lay = self.layout
+        lay.label(text="A porting recipe (.port): name, from, model / weapon / unit / character / animation lines")
+        lay.prop(self, "source_dir")
+        lay.prop(self, "game_dir")
+
+    def execute(self, context):
+        path = bpy.path.abspath(self.filepath)
+        game = bpy.path.abspath(self.game_dir).rstrip("\\/")
+        if not os.path.isfile(path):
+            self.report({"ERROR"}, "Pick a recipe file")
+            return {"CANCELLED"}
+        if games.detect(game) is not games.GAMES["ds1"]:
+            self.report({"ERROR"}, "No DesertStorm.exe in the Desert Storm Folder (%s)" % game)
+            return {"CANCELLED"}
+        try:
+            with open(path, encoding="utf-8-sig") as f:
+                recipe = porting.read_recipe(f.read())
+        except (OSError, porting.PortError) as e:
+            self.report({"ERROR"}, "Recipe: %s" % e)
+            return {"CANCELLED"}
+        source = bpy.path.abspath(self.source_dir).rstrip("\\/") if self.source_dir else None
+        wm = context.window_manager
+        wm.progress_begin(0, max(1, len(recipe.items)))
+        steps = [0]
+
+        def log(line):                                      # one call per recipe line
+            steps[0] += 1
+            wm.progress_update(steps[0])
+            print("Port:", line)
+
+        # runs here, not on a thread: the porter switches the archive name rule (games.set_current) while it reads
+        try:
+            report = porting.run(recipe, os.path.join(game, "Mods"), source, game, log=log)
+        except (porting.PortError, evo.EvoError, OSError) as e:
+            self.report({"ERROR"}, "Port failed: %s" % e)
+            return {"CANCELLED"}
+        finally:
+            wm.progress_end()
+        text = bpy.data.texts.get("port-report.txt") or bpy.data.texts.new("port-report.txt")
+        text.from_string("\n".join(report) + "\n")
+        fails = sum(1 for line in report if line.startswith("[fail]"))
+        msg = "%s -> %s (%s; the full report is in the Text Editor as port-report.txt) - switch it on in the " \
+              "game's MODS menu" % (recipe.name, os.path.join(game, "Mods", recipe.name), report[-1])
+        self.report({"WARNING"} if fails else {"INFO"}, msg)
+        return {"FINISHED"}
+
+
 _gc_job = {}
 
 
@@ -1026,11 +1408,14 @@ def editable_models(out, level_pieces):
             if not level_pieces:
                 try:
                     with open(path, "rb") as f:
-                        head = f.read(144)
+                        head = f.read(0x4000)
                 except OSError:
                     continue
-                if len(head) == 144 and int.from_bytes(head[140:144], "little") == 5:
-                    continue
+                try:
+                    if evo.is_world_piece(evo.read_node(evo.Reader(head, 0))):
+                        continue
+                except Exception:           # a header longer than the bytes read, or unreadable: keep it
+                    pass
             seen.add(stem.upper())
             out_list.append((archive_dir, stem, path))
     return out_list
@@ -1040,34 +1425,44 @@ EDITABLE_OPTS = {"scale": 0.01, "armature": True, "animations": "NONE", "vehicle
                  "helpers": True, "frames": True, "colours": True, "cull": True, "skin": "", "texture_dir": ""}
 
 
+def library_title():
+    """The asset library / catalog tree name of the profile's game (Desert Storm's stays "Conflict Desert Storm")."""
+    game = profile()
+    return assetlib.DS1_TITLE if game.id == "ds1" else game.title.replace(":", "")
+
+
 def mark_asset(coll, cat, tags=()):
     """Mark a model's collection as an Asset Browser asset in catalog `cat` (assetlib.CATALOGS)."""
     coll.asset_mark()
     data = coll.asset_data
-    data.catalog_id = assetlib.catalog_id(cat)
+    data.catalog_id = assetlib.catalog_id(cat, library_title())
     for t in (cat,) + tuple(tags):
         if t and t not in data.tags:
             data.tags.new(t)
     src = coll.get("evo_source", "")
     if src:
-        data.description = "Conflict: Desert Storm model %s" % os.path.basename(src)
+        data.description = "%s model %s" % (profile().title, os.path.basename(src))
 
 
 class Classifier:
     """Catalog per model for an extraction (assetlib.category): the WEAPS / VEHICLE tables and .DYN files once."""
 
     def __init__(self, out):
+        profile()                   # the add-on's game current: unnamed tables are found by its name hashing
         dirs = [os.path.join(out, d) for d in sorted(os.listdir(out))
                 if not d.startswith("_") and os.path.isdir(os.path.join(out, d))]
         self.finder = evo.AssetFinder(None, dirs)
-        self.weapons = assetlib.table_models(evo._table(self.finder, "WEAPS"), 1)
-        rows = evo._table(self.finder, "VEHICLE")
-        self.vehicles = assetlib.table_models(rows, 1) | assetlib.table_models(rows, 2)
+        # model names in any column (category() only asks about real model stems): the games keep the model in
+        # different columns (DS1 WEAPS 1, Global Storm 2)
+        self.weapons = assetlib.table_models(evo._table(self.finder, "WEAPS"))
+        self.vehicles = assetlib.table_models(evo._table(self.finder, "VEHICLE"))
 
     def __call__(self, scene, stem):
         first = scene.objects[0].node if scene.objects else None
-        return assetlib.category(stem, first.type if first else 0, bool(scene.skinned), self.weapons, self.vehicles,
-                                 self.finder.find(stem, (".dyn",)) is not None)
+        node_type = 5 if first is not None and evo.is_world_piece(first) else (first.type if first else 0)
+        return assetlib.category(stem, node_type, bool(scene.skinned), self.weapons, self.vehicles,
+                                 self.finder.find(stem, (".dyn",)) is not None,
+                                 by_name=not self.weapons and not self.vehicles)
 
 
 def save_editable(context, path, target, classify=None, tags=()):
@@ -1121,7 +1516,7 @@ def finish_library(job):
     lib = os.path.join(job["out"], "_blend")
     if not os.path.isdir(lib):
         return None
-    assetlib.merge_catalog_file(os.path.join(lib, "blender_assets.cats.txt"))
+    assetlib.merge_catalog_file(os.path.join(lib, "blender_assets.cats.txt"), title=library_title())
     if not job.get("register"):
         return None
     libs = bpy.context.preferences.filepaths.asset_libraries
@@ -1129,13 +1524,13 @@ def finish_library(job):
         return "already an asset library"
     try:
         if hasattr(libs, "new"):
-            libs.new(name="Conflict Desert Storm", directory=lib)
+            libs.new(name=library_title(), directory=lib)
         else:
             bpy.ops.preferences.asset_library_add(directory=lib)
-            libs[-1].name = "Conflict Desert Storm"
+            libs[-1].name = library_title()
     except (RuntimeError, TypeError, AttributeError):
         return "add %s in Preferences > File Paths > Asset Libraries" % lib
-    return "added as asset library \"Conflict Desert Storm\" (save the Preferences to keep it)"
+    return "added as asset library \"%s\" (save the Preferences to keep it)" % library_title()
 
 
 _status_job = [None]        # the job the status bar shows (extraction or asset library)
@@ -1183,7 +1578,10 @@ def texture_of(mat):
         for n in mat.node_tree.nodes:
             if n.type == "TEX_IMAGE" and n.image and n.outputs[0].is_linked:
                 path = n.image.filepath or n.image.name
-                return os.path.splitext(os.path.basename(bpy.path.abspath(path)) or n.image.name)[0]
+                stem = os.path.splitext(os.path.basename(bpy.path.abspath(path)) or n.image.name)[0]
+                if not (re.fullmatch(r"_[0-9A-Fa-f]{8}", stem) and mat.name.startswith("EVO ")):
+                    return stem
+                break       # extracted without its name (_<HASH>.DDS): the import's material keeps the real one
     name = mat.name
     if name.startswith("EVO "):
         name = name[4:]
@@ -1267,7 +1665,13 @@ def mesh_parts(context, ob, to_local, k):
 
 def skin_part(context, ob, arm, k):
     """evo_write.SkinPart for a character mesh bound to an armature: rest pose, model space, weights from the vertex
-    groups (named after the bones, as the importer makes them)."""
+    groups (named after the bones, as the importer makes them). All its materials in one part."""
+    return skin_groups(context, ob, arm, k, by_material=False)[0][1]
+
+
+def skin_groups(context, ob, arm, k, by_material=True):
+    """[(texture name, evo_write.SkinPart)] for a character mesh bound to an armature (rest pose, model space,
+    weights from the vertex groups): one per material when by_material, else one for the whole mesh."""
     rest = arm.data.pose_position if arm else None
     if arm:
         arm.data.pose_position = "REST"
@@ -1286,8 +1690,13 @@ def skin_part(context, ob, arm, k):
         mirrored = rot.determinant() < 0
         groups = {g.index: g.name for g in ob.vertex_groups}
         src = ob.data                               # vertex groups live on the original mesh
-        verts, pos, nrm, uvs, weights, tris = {}, [], [], [], [], []
+        out = {}                                    # material slot (or 0) -> per-part buffers
         for tri in me.loop_triangles:
+            slot = tri.material_index if by_material else 0
+            d = out.get(slot)
+            if d is None:
+                d = out[slot] = {"verts": {}, "p": [], "n": [], "uv": [], "w": [], "t": []}
+            verts = d["verts"]
             idx = []
             for li in tri.loops:
                 vi = me.loops[li].vertex_index
@@ -1295,23 +1704,43 @@ def skin_part(context, ob, arm, k):
                 u = tuple(uv[li].uv) if uv else (0.0, 0.0)
                 key = (vi, round(u[0], 5), round(u[1], 5), round(n[0], 3), round(n[1], 3), round(n[2], 3))
                 if key not in verts:
-                    verts[key] = len(pos)
-                    pos.append(to_game_point(to_model @ me.vertices[vi].co, k))
+                    verts[key] = len(d["p"])
+                    d["p"].append(to_game_point(to_model @ me.vertices[vi].co, k))
                     gn = Vector(to_game_dir(rot @ n))
                     if gn.length > 0:
                         gn.normalize()
-                    nrm.append(tuple(gn))
-                    uvs.append((u[0], 1.0 - u[1]))
+                    d["n"].append(tuple(gn))
+                    d["uv"].append((u[0], 1.0 - u[1]))
                     vw = src.vertices[vi].groups if vi < len(src.vertices) else []
-                    weights.append([(groups[g.group], g.weight) for g in vw if g.group in groups and g.weight > 0])
+                    d["w"].append([(groups[g.group], g.weight) for g in vw if g.group in groups and g.weight > 0])
                 idx.append(verts[key])
-            tris.append(tuple(idx) if mirrored else (idx[0], idx[2], idx[1]))     # see mesh_parts
-        return evo_write.SkinPart(pos, nrm, uvs, tris, weights)
+            d["t"].append(tuple(idx) if mirrored else (idx[0], idx[2], idx[1]))     # see mesh_parts
+        result = []
+        for slot in sorted(out):
+            d = out[slot]
+            mat = ob.material_slots[slot].material if by_material and slot < len(ob.material_slots) else None
+            texture = texture_of(mat) if mat is not None else "Default"
+            result.append((texture, evo_write.SkinPart(d["p"], d["n"], d["uv"], d["t"], d["w"])))
+        return result or [("Default", evo_write.SkinPart([], [], [], [], []))]
     finally:
         eob.to_mesh_clear()
         if arm:
             arm.data.pose_position = rest
             context.view_layer.update()
+
+
+def skin_report(parts, ds2):
+    # ds2: the extra parts are objects of their own (Desert Storm II, The Great Escape), not hosted on DS1 bones
+    """Export note for a character's skin parts (None for the plain one-part skin)."""
+    if len(parts) == 1 and parts[0].texture is None:
+        return None
+    textures = ", ".join("%s (%d vertices)" % (p.texture or "the model's own", len(p.positions)) for p in parts)
+    note = "skin: %d part(s) - %s" % (len(parts), textures)
+    if len(parts) > 1:
+        note += ("; squad soldiers still wear their uniform texture on every part (the game's run-time skin) - "
+                 "own textures show on characters without one" if not ds2 else
+                 "; a soldier given a run-time skin texture wears it on every part")
+    return note
 
 
 def armature_of(ob):
@@ -1409,12 +1838,18 @@ HEROES = {"HERO01_ARMSTRONG": ("Bradley", "HERO01_UK_01"), "HERO02_RAMIREZ": ("C
           "HERO03_JONES": ("Jones", "HERO03_UK_01"), "HERO04_FOLEY": ("Foley", "HERO04_UK_01")}
 
 
-def check_export(scene, parts, collision, obs, game_textures, compare_size=True):
+def check_export(scene, parts, collision, obs, game_textures, compare_size=True, game="ds1"):
     """(errors, warnings) for an export about to be written: what the writer or the game would trip over.
-    compare_size: warn when a part is far bigger / smaller than the original's (off for the generic prop)."""
+    compare_size: warn when a part is far bigger / smaller than the original's (off for the generic prop);
+    game: the model's game id (its Default.spl length; texture limits are only tested in Desert Storm)."""
     errors, warnings = [], []
+    rows = bsp.SURFACE_COUNTS.get(game, len(bsp.SURFACES))
+    wrong = sorted({s & 0x3FF for tris in (collision or {}).values() for _t, s in tris if not 0 <= s & 0x3FF < rows})
+    if wrong:
+        errors.append("surface %s isn't in this %s model's Default.spl (rows 0-%d)"
+                      % (", ".join(bsp.surface_name(s) for s in wrong), games.GAMES[game].short, rows - 1))
     for node, ps in parts.items():                     # keys: object indices
-        if not isinstance(ps, list):
+        if not isinstance(ps, list) or any(isinstance(p, evo_write.SkinPart) for p in ps):
             continue                                    # character skins: the writer checks those
         for p in evo_write.merge(ps):
             label = "%s / %s" % (scene.objects[node].name, p.texture)
@@ -1449,9 +1884,17 @@ def check_export(scene, parts, collision, obs, game_textures, compare_size=True)
             if img is None:
                 warnings.append("%s: material %s has no image and %s isn't a game texture - it will show "
                                 "untextured" % (ob.name, slot.material.name if slot.material else "-", tex))
-            elif img.size[0] > 1024 or img.size[1] > 1024:
-                warnings.append("%s is %d x %d - textures over 1024 can run the game out of texture memory"
+            elif img.size[0] > 2048 or img.size[1] > 2048:
+                warnings.append("%s is %d x %d - textures over 2048 can run the game out of memory"
                                 % (img.name, img.size[0], img.size[1]))
+            elif (img.size[0] > 1024 or img.size[1] > 1024) and game != "ds1":
+                warnings.append("%s is %d x %d - textures over 1024 are untested in %s; keep them "
+                                "DXT-compressed" % (img.name, img.size[0], img.size[1], games.GAMES[game].short))
+            elif img.size[0] > 1024 or img.size[1] > 1024:
+                # the original game reads every texture file into a 1 MB buffer: bigger files fail ("Out of
+                # memory") - DesertStormFix 3.2+ sizes it to the largest mod file (2048 DXT5 tested in game)
+                warnings.append("%s is %d x %d - textures over 1024 need DesertStormFix 3.2+ (the plain game can't "
+                                "load them); keep them DXT-compressed" % (img.name, img.size[0], img.size[1]))
     for node, tris in (collision or {}).items():
         if len(tris) > 3000:
             warnings.append("collision of %s has %d triangles - keep collision simple (boxes, big faces)"
@@ -1473,18 +1916,25 @@ def weapons_with_model(template, model):
     return out
 
 
+def mod_plugin(game_id):
+    """The plugin that serves a game's Mods folder, as its report file names it (Mods/<plugin>-report.txt)."""
+    return {"cg": "GlobalStormFix"}.get(game_id, games.GAMES[game_id].plugin)
+
+
 def starter_file(folder, name, template):
-    """Write a starter .weapon / .skin for a new model exported into a mod folder (never overwrites).
+    """Write a starter .weapon / .skin for a new model exported into mod folder `folder` (never overwrites; placed
+    by the mod's layout).
     Returns a note or None."""
     stem = os.path.splitext(os.path.basename(template))[0].upper()
     if stem in HEROES:
         soldier, texture = HEROES[stem]
-        path = os.path.join(folder, name + ".skin")
-        if os.path.exists(path):
+        if modlayout.find(folder, name + ".skin"):
             return None
+        path = mod_path(folder, name + ".skin")
         with open(path, "w", encoding="latin-1") as f:
             f.write("# A uniform with its own body (made in Blender from %s).\n"
-                    "# Copy %s.dds from the extracted chardata folder into this folder as %s_SKIN.dds and repaint it:\n"
+                    "# Copy %s.dds from the extracted chardata folder into this mod as %s_SKIN.dds (its dds folder;\n"
+                    "# any folder of the mod works) and repaint it:\n"
                     "# the body goes with that texture, so other uniforms keep the normal body.\n\n"
                     "uniform      = SAS\n"
                     "uniform name = SAS (%s)\n"
@@ -1494,9 +1944,9 @@ def starter_file(folder, name, template):
         return "wrote %s.skin (needs %s_SKIN.dds)" % (name, name)
     ids = weapons_with_model(template, stem)
     if ids:
-        path = os.path.join(folder, name + ".weapon")
-        if os.path.exists(path):
+        if modlayout.find(folder, name + ".weapon"):
             return None
+        path = mod_path(folder, name + ".weapon")
         with open(path, "w", encoding="latin-1") as f:
             f.write("# A new weapon with the model %s.evo (made in Blender from %s).\n\n"
                     "id           = %s_%s\n"
@@ -1513,12 +1963,24 @@ def base_name(name):
 
 
 GENERIC_TEMPLATE = "BH_BODGEPLATE"      # one static object, own-mesh collision (as terrain.py / roads.py use it)
+# the same kind of model per game: one static object (flags 0x30), its own mesh as collision, two triangles
+# (The Great Escape: "104", a plain textured quad of levels 10 / 12 / 13 - every one-object prop there is a level
+# picture or sign; Vietnam: the 3 m invisible blocker of 12 levels; Global Storm: INVISPOLY of 16 levels - both
+# flags 0x30, collision THIS, untextured, like BH_BODGEPLATE)
+GENERIC_TEMPLATES = {"ds1": GENERIC_TEMPLATE, "ge": "104", "ds2": "WALLMAP", "cv": "MPD_INVISBLOCKING3M",
+                     "cg": "INVISPOLY"}
+# a character converted from another game lands on this body unless Based On names one of the game's characters
+# (DS1: Bradley's body - squad soldiers wear the run-time uniform; DS2: the generic soldier)
+GENERIC_CHARACTERS = {"ds1": "HERO01_ARMSTRONG", "ds2": "534_POLY_SOLDIER", "cv": "MPD_US_MOTOWN",
+                      "cg": "C04_500_POLY"}
 DEFAULT_EXTRACT_DIR = os.path.join(os.path.expanduser("~"), "Documents", "Conflict Desert Storm extracted")
+
+
 
 
 def extracted_roots():
     """Extraction folders known in this session: the default one and the roots of the models imported."""
-    roots = [DEFAULT_EXTRACT_DIR]
+    roots = [extract_dir()]
     for coll in bpy.data.collections:
         src = coll.get("evo_source")
         if src:
@@ -1534,39 +1996,70 @@ def is_game_image(img, roots):
     return any(path.startswith(r + os.sep) for r in roots)
 
 
-def generic_template(game_dir=""):
-    """(path, where) of the generic prop template: from extracted folders (the default extraction folder, folders
-    models were imported from), else read out of the player's own game archives into a cache file. (None, why) if
-    neither is there. Nothing of the game ships with the add-on."""
+def generic_template(game_dir="", character=False):
+    """(path, where) of the generic prop template (character: the generic character body, GENERIC_CHARACTERS) of the
+    game in game_dir (else the current game): from extracted folders of that game (the default extraction folder,
+    folders models were imported from), else read out of the player's own game archives into a cache file. (None,
+    why) if neither is there. Nothing of the game ships with the add-on."""
+    gdir = bpy.path.abspath(game_dir) if game_dir else ""
+    game = games.detect(gdir) if gdir else None
+    game = games.set_current(game) if game else games.current()       # the archives hash names by the game's rule
+    name = (GENERIC_CHARACTERS if character else GENERIC_TEMPLATES).get(game.id)
+    if name is None:
+        return None, "there is no generic %s for %s - base the model on one of its game models" % (
+            "character" if character else "prop", game.short)
     dirs = []
     for root in extracted_roots():
+        if games.detect_extracted(root) not in (None, game):
+            continue                                  # another game's extraction
         try:
             dirs += [os.path.join(root, d) for d in sorted(os.listdir(root))
                      if not d.startswith("_") and os.path.isdir(os.path.join(root, d))]
         except OSError:
             pass
-    hit = evo.AssetFinder(None, dirs).find(GENERIC_TEMPLATE, (".evo",)) if dirs else None
+    hit = evo.AssetFinder(None, dirs).find(name, (".evo",)) if dirs else None
     if hit:
         return hit, "extracted"
-    cache = os.path.join(tempfile.gettempdir(), "conflict_ds_tools", GENERIC_TEMPLATE + ".EVO")
+    cache = os.path.join(tempfile.gettempdir(), "conflict_ds_tools", name + ".EVO")    # names differ per game
+    if not gdir or not os.path.isdir(gdir):
+        gdir = archive.find_game_dir(game) or ""
+    if character and game.id in ("cv", "cg") and gdir:
+        # Vietnam / Global Storm bodies are skinned to a skeleton file of their own: it goes next to the body
+        try:
+            gf = archive.GameFiles(gdir)
+            # (+ Global Storm's .SKL bone lists, which its animations bind to)
+            for sk in [f for e in evo.SKELETON_FILES for f in (e, os.path.splitext(e)[0] + ".SKL")]:
+                dst = os.path.join(os.path.dirname(cache), sk)
+                if not os.path.isfile(dst):
+                    sk_data = gf.get(sk)
+                    if sk_data:
+                        os.makedirs(os.path.dirname(dst), exist_ok=True)
+                        with open(dst, "wb") as f:
+                            f.write(sk_data)
+        except OSError:
+            pass
     if os.path.isfile(cache):
         return cache, "cache"
-    gdir = bpy.path.abspath(game_dir) if game_dir else ""
-    if not gdir or not os.path.isdir(gdir):
-        gdir = archive.find_game_dir() or ""
     if not gdir:
-        return None, "no extracted folder has %s.EVO and the game wasn't found - set Game Folder or extract the " \
-                     "archives (File > Import > Conflict: Desert Storm Archives)" % GENERIC_TEMPLATE
+        return None, "no extracted folder has %s.EVO and %s wasn't found - set Game Folder or extract the " \
+                     "archives (File > Import > Conflict: Desert Storm Archives (extract))" % (name, game.short)
     try:
-        data = archive.GameFiles(gdir).get(GENERIC_TEMPLATE + ".EVO")
+        data = archive.GameFiles(gdir).get(name + ".EVO")
     except OSError as e:
         return None, "can't read the game archives in %s: %s" % (gdir, e)
     if not data:
-        return None, "%s.EVO isn't in the archives in %s" % (GENERIC_TEMPLATE, gdir)
+        return None, "%s.EVO isn't in the archives in %s" % (name, gdir)
     os.makedirs(os.path.dirname(cache), exist_ok=True)
     with open(cache, "wb") as f:
         f.write(data)
     return cache, "game archives"
+
+
+# collision surfaces: Desert Storm's Default.spl rows, then the rows each later game appended (the writer refuses rows
+# the model's game doesn't have)
+_FROM = {"ds2": " (Desert Storm II, The Great Escape and later)", "cv": " (Vietnam and later)", "cg": " (Global Storm)"}
+SURFACE_ITEMS = [(str(i), n, "Default.spl row %d" % i + _FROM.get(bsp.first_game_with(i), ""))
+                 for i, n in enumerate(bsp.ALL_SURFACES)]
 
 
 LAST_EXPORT = "ds_last_export"          # scene ID property: the export options the quick export repeats
@@ -1579,6 +2072,7 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
     bl_label = "Export EVO"
     bl_options = {"REGISTER"}
 
+    game: game_prop()
     filename_ext = ".evo"
     filter_glob: StringProperty(default="*.evo;*.EVO", options={"HIDDEN"})
     base: EnumProperty(name="Based On", default="MODEL",
@@ -1586,8 +2080,12 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                                                       "were imported from); with neither, the generic prop"),
                               ("GENERIC", "Auto / Generic Prop", "A brand-new static prop: one part, collision from "
                                                                  "#BSP_ objects or else its own mesh (template "
-                                                                 + GENERIC_TEMPLATE + ", found in the extracted "
-                                                                 "folders or the game's archives)")),
+                                                                 + GENERIC_TEMPLATE + ", Desert Storm II: "
+                                                                 + GENERIC_TEMPLATES["ds2"] + ", The Great Escape: "
+                                                                 + GENERIC_TEMPLATES["ge"] + ", Vietnam: "
+                                                                 + GENERIC_TEMPLATES["cv"] + ", Global Storm: "
+                                                                 + GENERIC_TEMPLATES["cg"] + ", found in the "
+                                                                 "extracted folders or the game's archives)")),
                        description="What the new model is built on")
     template: StringProperty(name="Model File", subtype="FILE_PATH",
                              description="The game model this one replaces (.evo from the extracted folders): its "
@@ -1605,7 +2103,7 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                ("NONE", "None", "Nothing collides")),
         description="What soldiers, bullets and vehicles hit")
     surface: EnumProperty(name="Default Surface", default="4",
-                          items=[(str(i), n, "Default.spl row %d" % i) for i, n in enumerate(bsp.SURFACES)],
+                          items=SURFACE_ITEMS,
                           description="Surface for collision faces whose material isn't a surface (\"Surface: Metal\" "
                                       "or just \"Metal\"): footstep sounds and bullet-hit effects. Every surface "
                                       "stops soldiers except the barrier for the other side; computer soldiers "
@@ -1617,7 +2115,7 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                          description="Write the model (and its new textures) into <game>\\Mods\\<Mod> instead of the "
                                      "file picked here; the picked file's name is the model's name")
     game_dir: StringProperty(name="Game Folder", subtype="DIR_PATH",
-                             description="Folder with DesertStorm.exe (found from the registry - check it if you have "
+                             description="Folder with the game's exe (found from the registry - check it if you have "
                                          "the game twice, e.g. Steam and GOG)")
     mod_name: StringProperty(name="Mod", default="MyMod",
                              description="Mod folder name under <game>\\Mods (a _ in front = switched off)")
@@ -1659,7 +2157,7 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                 tris, unknown = collision_tris(context, ob, game_matrix_inverse(owner.world), k, default)
                 if unknown:
                     notes.append("%s: materials %s aren't surfaces - used %s" % (
-                        ob.name, ", ".join(sorted(unknown)), bsp.SURFACES[default]))
+                        ob.name, ", ".join(sorted(unknown)), bsp.surface_name(default)))
                 collision.setdefault(owner.index, []).extend(tris)
                 used.add(ob.name)
         elif self.collision == "MESH" or (self.collision == "HELPERS" and self._generic):
@@ -1680,7 +2178,7 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
             surfaces = sorted({s for tris in collision.values() for _t, s in tris})
             notes.append("collision %d triangles on %s, surfaces %s" % (
                 sum(len(t) for t in collision.values()), ", ".join(scene.objects[n].name for n in collision),
-                ", ".join(bsp.SURFACES[s] for s in surfaces)))
+                ", ".join(bsp.surface_name(s & 0x3FF) for s in surfaces)))
         shadows = {}
         self.add_shadow = None
         targets = [so for so in scene.objects if so.role == "shadow"]
@@ -1723,53 +2221,150 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
         last["save_textures"] = int(last["save_textures"])
         last["replace_game"] = int(last["replace_game"])
         scn[LAST_EXPORT] = last
-        scn.ds_last_exported_model = name
+        props(scn).last_exported_model = name
         if self.to_mod:
-            scn.ds_active_mod = self.mod_name.strip().strip("\\/")
+            props(scn).active_mod = self.mod_name.strip().strip("\\/")
 
     def invoke(self, context, event):
         obs = context.selected_objects or context.view_layer.objects
         if not self.template:
             self.template = self.source_of(obs)
-        if not self.template and context.scene.ds_generic_prop:
+        if not self.template and props(context.scene).generic_prop:
             self.base = "GENERIC"
-        if context.scene.ds_active_mod and self.mod_name == "MyMod":
-            self.mod_name = context.scene.ds_active_mod
-        if not self.game_dir:
-            self.game_dir = archive.find_game_dir() or ""
+        if props(context.scene).active_mod:                     # the profile's game's active mod
+            self.mod_name = props(context.scene).active_mod
+        apply_game(self)
+        self.game_dir = game_dir_of(context.scene)        # the profile's game (sidebar > Desert Storm > Game)
         return ExportHelper.invoke(self, context, event)
 
     def execute(self, context):
+        apply_game(self)
         obs = [o for o in (context.selected_objects if self.selected_only else context.view_layer.objects)
                if o.type == "MESH"]
         if self.base == "GENERIC":
             template = ""
         else:
             template = bpy.path.abspath(self.template) if self.template else self.source_of(obs)
+        # objects imported from another game's model (or Based On another game's model): converted - built on this
+        # game's generic prop as one static part (cross_game_parts), surfaces / textures adapted below
+        # (also when Based On is one of this game's models - e.g. to replace it - the objects' own game decides)
+        cross = None
+        tgame = model_game(template) if template and os.path.isfile(template) else None
+        if tgame is not None and tgame is not profile():
+            cross = (tgame, template)
+            template = ""
+        src = bpy.path.abspath(self.source_of(obs) or "")
+        src_game = model_game(src) if src and os.path.isfile(src) else None
+        if src_game is not None and src_game is not profile():
+            cross = (src_game, src)
         self._generic = not template                 # nothing to go on: a brand-new prop
         generic_note = None
+        cross_character = bool(cross) and any(armature_of(o) for o in obs)
         if self._generic:
-            template, where = generic_template(self.game_dir)
+            template, where = generic_template(self.game_dir, character=cross_character)
             if not template:
                 self.report({"ERROR"}, "Generic prop: " + where)
                 return {"CANCELLED"}
-            generic_note = "generic prop (%s from the %s)" % (GENERIC_TEMPLATE, where)
+            generic_note = "generic prop (%s from the %s)" % (os.path.splitext(os.path.basename(template))[0], where)
+            if cross:
+                generic_note = "converted from %s (%s) onto the %s generic %s %s" % (
+                    os.path.basename(cross[1]), cross[0].short, profile().short,
+                    "character" if cross_character else "prop", os.path.splitext(os.path.basename(template))[0])
         elif not os.path.isfile(template):
             self.report({"ERROR"}, "Based On: %s doesn't exist - pick the game model this one is based on, or "
                                    "Auto / Generic Prop" % template)
             return {"CANCELLED"}
+        elif cross:
+            generic_note = "converted from %s (%s) onto %s" % (os.path.basename(cross[1]), cross[0].short,
+                                                               os.path.basename(template))
         if not obs:
             self.report({"ERROR"}, "No mesh objects to export")
             return {"CANCELLED"}
         k = self.scale
         helper_obs = [o for o in obs if helper_kind(o)]
         obs = [o for o in obs if not helper_kind(o)]
+        cross_dropped = []
+        cross_rest = {}                 # source file -> (rest pose by bone name, parent by bone name)
+        if cross:
+            # every selected object against the model it was imported from: a character may come in pieces (Global
+            # Storm keeps heads apart - C04_MILITARY_UNIFORM + C04_HEAVY_HEAD), each with its own objects and rest pose
+            by_source = {}
+            for o in obs:
+                path = bpy.path.abspath(self.source_of([o]) or "") or cross[1]
+                by_source.setdefault(path if os.path.isfile(path) else cross[1], []).append(o)
+            for path, sobs in by_source.items():
+                try:
+                    src_scene = evo.load(path)
+                except (evo.EvoError, OSError) as e:
+                    self.report({"ERROR"}, "can't read %s: %s" % (path, e))
+                    return {"CANCELLED"}
+                roles = {so.index: so.role for so in src_scene.objects}
+                if cross_character:
+                    # the source skeleton's rest pose (game space, by bone name): the skin is moved from it onto the
+                    # target's (cross_repose) - the games' Biped rigs share their bone names
+                    cross_rest[path] = ({so.name.upper(): so.world for so in src_scene.objects if so.name},
+                                        {so.name.upper(): src_scene.objects[so.parent].name.upper()
+                                         for so in src_scene.objects if so.name and so.parent is not None})
+                    # untextured marker meshes of the source's objects (ROOT_OBJECT's triangle) aren't body geometry
+                    untextured = {so.index for so in src_scene.objects if so.role != "skin" and
+                                  all((t or "default").lower() == "default" for _h, t in so.node.textures)}
+                    cross_dropped += [o.name for o in sobs if o.get("evo_node") in untextured]
+                # the source's connector / hit-region / bone marker meshes aren't geometry (attached parts such as
+                # wheels have no evo_node and stay)
+                cross_dropped += [o.name for o in sobs if o.get("evo_node") is not None
+                                  and roles.get(o["evo_node"]) not in ("mesh", None)]
+            obs = [o for o in obs if o.name not in cross_dropped]
+            if cross_character and cross[0].id == "cg" and len(by_source) == 1 and \
+                    not os.path.basename(cross[1]).upper().endswith("_HEAD.EVO"):
+                skin_note_head = ("Global Storm keeps heads apart from bodies: import the head model too (e.g. "
+                                  "C04_RIFLEMAN_HEAD) and select both to export a soldier with his head")
+            else:
+                skin_note_head = None
+        else:
+            skin_note_head = None
         point_obs = [o for o in (context.selected_objects if self.selected_only else context.view_layer.objects)
                      if o.get("evo_point_role") or base_name(o.name).upper().startswith("#PT_")]
+        cross_helpers_note = None
+        if cross_character and (helper_obs or point_obs):
+            # a converted body keeps the target body's own hit regions / collision / points: the source's per-bone
+            # helpers would land on the bones that carry extra skin parts (DS1) and aren't the target's anyway
+            cross_helpers_note = "the %s character's %d helper object(s) not used - the body keeps %s's hit regions" % (
+                cross[0].short, len(helper_obs) + len(point_obs), os.path.splitext(os.path.basename(template))[0])
+            helper_obs, point_obs = [], []
         data = open(template, "rb").read()
         scene = evo.Scene(evo.read(data))
+        # Vietnam / Global Storm characters: the body file holds only the skin - work on it with its skeleton
+        # attached (bone names, rest pose) and hand the skeleton file to the writer; the scene's object numbers are
+        # the file's shifted by the skeleton's object count
+        skeleton_bytes, file_offset = None, 0
+        if scene.nodes[0].version & 0xFFFF in evo_write.CV_VERSIONS and any(n.kind == 2 for n in scene.nodes):
+            attached = evo.load(template)
+            if getattr(attached, "skeleton_path", None):
+                file_offset = len(attached.objects) - len(scene.objects)
+                skeleton_bytes = open(attached.skeleton_path, "rb").read()
+                scene = attached
+        mgame = MODEL_GAMES.get(scene.nodes[0].version & 0xFFFF)          # the model's game decides the layout
+        if mgame not in WRITE_GAMES:
+            self.report({"ERROR"}, "%s is a %s model - writing models is supported for %s so far" % (
+                os.path.basename(template), games.GAMES[mgame].short if mgame else "unknown",
+                ", ".join(games.GAMES[g].short for g in WRITE_GAMES)))
+            return {"CANCELLED"}
+        ds2 = mgame != "ds1"           # DS2 / The Great Escape: extra skin parts become objects of their own
+        wrong = wrong_game(games.GAMES.get(mgame), (os.path.basename(template), "model"))
+        if wrong:
+            self.report({"ERROR"}, wrong)
+            return {"CANCELLED"}
+        if self.to_mod and mgame not in MOD_GAMES:
+            self.report({"ERROR"}, "%s has no plugin that loads a Mods folder yet - untick Into a Mod Folder and "
+                                   "export to a file" % games.GAMES[mgame].short)
+            return {"CANCELLED"}
         targets = [so for so in scene.objects if so.node.kind in (0, 3) and so.node.meshes and so.role == "mesh"]
         skins = [so for so in scene.objects if so.role == "skin"]
+        if len(skins) > 1:
+            # an exported multi-part character (no game model has two skin objects): its extra parts would stay
+            self.report({"ERROR"}, "%s already has %d skin parts - base the export on the game's own model (Based On)"
+                        % (os.path.basename(template), len(skins)))
+            return {"CANCELLED"}
         if skins:
             targets = []                                    # characters: the skin is what gets replaced
         by_name = {}
@@ -1777,10 +2372,15 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
             by_name.setdefault(base_name(ob.name).upper(), []).append(ob)
         parts = {}
         used = set()
+        skin_notes = []
+        key_offsets = {}                # cross-game heads: hat / face connectors refitted
         for so in targets:
             match = by_name.get(so.name.upper(), [])
             if len(targets) == 1:
-                match = obs                                 # one-part model: every selected mesh is that part
+                # one-part model: every selected mesh is that part - except the model's other objects (Desert Storm
+                # II's connectors carry small marker meshes the import brings in)
+                others = {o.name.upper() for o in scene.objects if o.index != so.index and o.name}
+                match = [o for o in obs if base_name(o.name).upper() not in others]
             if not match:
                 continue
             to_local = game_matrix_inverse(so.world)
@@ -1793,18 +2393,89 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
         for so in skins:
             match = by_name.get(so.name.upper(), [])
             if not match and len(skins) == 1:
-                match = [o for o in obs if armature_of(o)] or obs
+                others = {o.name.upper() for o in scene.objects if o.index != so.index and o.name}
+                obs_ = [o for o in obs if base_name(o.name).upper() not in others]   # not the model's marker meshes
+                match = [o for o in obs_ if armature_of(o)] or obs_
             if not match:
                 continue
-            if len(match) > 1:
-                self.report({"ERROR"}, "Join the character's meshes into one object (%s)" % ", ".join(o.name for o in match))
+            # one skin part per material (several meshes / materials -> several skin objects, each with its own
+            # texture; over 65535 vertices -> split): see character_skin_parts / evo_write.rebuild
+            groups = []
+            group_source = []
+            heads = {p for p in cross_rest if os.path.basename(p).upper().endswith("_HEAD.EVO")}
+            for ob in match:
+                rigid = not ob.vertex_groups and ob.parent_type == "BONE" and ob.parent_bone
+                if cross and rigid and heads and bpy.path.abspath(self.source_of([ob]) or "") not in heads:
+                    # a head model of its own brings its eyes and teeth: the body's are left out (as the porter)
+                    skin_notes.append("%s left out - the head model has its own" % ob.name)
+                    used.add(ob.name)
+                    continue
+                parts_of_ob = skin_groups(context, ob, armature_of(ob), k)
+                if cross and rigid:
+                    # a rigid part hung on a bone (DS2's eyes, eyelids, teeth): all its weight on that bone
+                    for _tex, sp in parts_of_ob:
+                        sp.weights = [[(ob.parent_bone, 1.0)] for _ in sp.positions]
+                groups += parts_of_ob
+                path = bpy.path.abspath(self.source_of([ob]) or "") if cross else ""
+                group_source += [path if path in cross_rest else cross[1] if cross else ""] * len(parts_of_ob)
+                used.add(ob.name)
+            if cross and cross_rest:
+                target_rest = {o.name.upper(): o.world for o in scene.objects if o.name}
+                moved = {}
+                for (_tex, sp), path in zip(groups, group_source):
+                    rest, parents = cross_rest.get(path) or next(iter(cross_rest.values()))
+                    moved.update(cross_repose(sp, rest, target_rest, parents))
+                if moved:
+                    skin_notes.append("bones the %s skeleton doesn't have (weight moved to): %s" % (
+                        profile().short, ", ".join("%s -> %s" % kv for kv in sorted(moved.items()))))
+            own = next((t for _h, t in so.node.textures if t and t.lower() != "default"), "")
+            skin_parts = character_skin_parts(groups, own)
+            if not skin_parts:
+                self.report({"ERROR"}, "%s has no triangles" % ", ".join(o.name for o in match))
                 return {"CANCELLED"}
-            parts[so.index] = skin_part(context, match[0], armature_of(match[0]), k)
-            used.add(match[0].name)
+            parts[so.index] = skin_parts[0] if len(skin_parts) == 1 else skin_parts
+            if cross and mgame not in ("cv", "cg"):
+                # the body's hat / face connectors onto the converted head (hats, glasses sit on it, not over it)
+                fit = head_connector_offsets(scene, skin_parts)
+                if fit:
+                    key_offsets.update(fit)
+                    skin_notes.append("head gear points moved to the new head: %s" % ", ".join(
+                        "%s %+.1f cm" % (scene.objects[i].name, max(d, key=abs)) for i, d in sorted(fit.items())))
+            skin_notes.append(skin_report(skin_parts, ds2))
         notes = [generic_note] if generic_note else []
+        if cross_helpers_note:
+            notes.append(cross_helpers_note)
+        if skin_note_head and skins:
+            notes.append(skin_note_head)
+        notes += [n for n in skin_notes if n]
         collision, shadows = self.helpers(context, scene, helper_obs, parts, k, notes, used)
         if shadows is None:
             return {"CANCELLED"}
+        if cross:
+            if cross_dropped:
+                notes.append("left out %d marker object(s) of the %s model (connectors / hit regions)"
+                             % (len(cross_dropped), cross[0].short))
+            converted = {}
+            for node, tris in (collision or {}).items():
+                mapped = []
+                for t, surface in tris:
+                    new, old = bsp.convert_surface(surface, mgame)
+                    if old:
+                        converted[old] = bsp.surface_name(new)
+                    mapped.append((t, new))
+                collision[node] = mapped
+            if converted:
+                notes.append("surfaces %s has no row for: %s" % (profile().short, ", ".join(
+                    "%s -> %s" % kv for kv in sorted(converted.items()))))
+            # the other game's textures go into the mod under a prefixed name: a file named like one of this game's
+            # textures would replace that texture everywhere in the game
+            prefix = cross[0].id.upper() + "_"
+            for ps in list(parts.values()) + list(shadows.values()) + [self.add_shadow or []]:
+                for p in (ps if isinstance(ps, list) else [ps]):
+                    if isinstance(p, evo_write.Part) and p.texture.lower() not in ("default", "untextured", ""):
+                        p.texture = (prefix + p.texture)[:63]
+                    elif isinstance(p, evo_write.SkinPart) and p.texture:
+                        p.texture = (prefix + p.texture)[:63]
         parts.update(shadows)
         if not parts and collision is None and not point_obs and not self.add_shadow:
             self.report({"ERROR"}, "No object matches a part of %s (%s)" % (
@@ -1840,12 +2511,14 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                          % ", ".join(posed))
         game = {name.lower() for n in scene.nodes for _h, name in n.textures}
         roots = extracted_roots()       # images from the extracted folders are game textures the game already has
+        if cross:                       # ... of this game only
+            roots = [r for r in roots if games.detect_extracted(r) in (None, profile())]
         from_game = {texture_of(s.material).lower(): texture_of(s.material) for o in obs if o.name in used
                      for s in o.material_slots if is_game_image(image_of(s.material), roots)}
         from_game = {k: v for k, v in from_game.items() if k not in game}
         game |= set(from_game)
         errors, problems = check_export(scene, parts, collision, [o for o in obs if o.name in used], game,
-                                        compare_size=not self._generic)
+                                        compare_size=not self._generic, game=mgame)
         if errors:
             self.report({"ERROR"}, "; ".join(errors))
             return {"CANCELLED"}
@@ -1858,8 +2531,13 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
         filepath = self.filepath
         if self.to_mod:
             gdir = bpy.path.abspath(self.game_dir) if self.game_dir else ""
-            if not gdir or not os.path.isfile(os.path.join(gdir, "DesertStorm.exe")):
-                self.report({"ERROR"}, "Game Folder must be the folder with DesertStorm.exe")
+            if not gdir or not games.use_folder(gdir):
+                self.report({"ERROR"}, "Game Folder must be the folder with the game's exe (%s)"
+                            % " / ".join(e for g in games.GAMES.values() for e in g.exes[:1]))
+                return {"CANCELLED"}
+            if games.current().id != mgame:
+                self.report({"ERROR"}, "%s is a %s model, but Game Folder is %s's - pick that game's folder" % (
+                    os.path.basename(template), games.GAMES[mgame].short, games.current().short))
                 return {"CANCELLED"}
             mod = self.mod_name.strip().strip("\\/") or "MyMod"
             if any(c in mod for c in '<>:"/\\|?*'):
@@ -1867,22 +2545,40 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                 return {"CANCELLED"}
             if self.replace_game:
                 name = os.path.splitext(os.path.basename(template))[0]
-            folder = os.path.join(gdir, "Mods", mod)
-            os.makedirs(folder, exist_ok=True)
-            filepath = os.path.join(folder, name + ".evo")
+            mod_dir = os.path.join(gdir, "Mods", mod)
+            filepath = mod_path(mod_dir, name + ".evo")
         try:
+            if file_offset:
+                def to_file(d):
+                    return None if d is None else {(k - file_offset if isinstance(k, int) else k): v
+                                                   for k, v in d.items() if not isinstance(k, int) or k >= file_offset}
+                parts, collision, points = to_file(parts), to_file(collision), to_file(points)
+                key_offsets = to_file(key_offsets)
             out = evo_write.rebuild(data, parts, model_name=name, warnings=notes, collision=collision, points=points,
-                                    add_shadow=self.add_shadow)
+                                    add_shadow=self.add_shadow, skeleton=skeleton_bytes,
+                                    key_offsets=key_offsets or None)
         except evo.EvoError as e:
             self.report({"ERROR"}, str(e))
             return {"CANCELLED"}
         with open(filepath, "wb") as f:
             f.write(out)
         self.remember(context, name)
-        if self.to_mod and not self.replace_game:
-            note = starter_file(os.path.dirname(filepath), name, template)
-            if note:
-                notes.append(note)
+        starter = None
+        if self.to_mod and not self.replace_game and mgame in STARTER_GAMES:
+            starter = starter_file(mod_dir, name, template)   # the plugin's .weapon (DS1 also .skin)
+            if starter:
+                notes.append(starter)
+        if self.to_mod and mgame != "ds1":
+            # the other plugins' Mods folders replace files by name: a new name is only used when something refers
+            # to it (a starter .weapon, a table row) - Replace the Game's Model changes the game's own
+            plugin = mod_plugin(mgame)
+            served = ("%s.log in the game folder (dev builds) lists" % plugin if mgame == "cv" else   # no report
+                      "Mods/%s-report.txt lists" % plugin)
+            notes.append("written for %s's Mods folder (files replace the game's by name; %s what it served)"
+                         % (plugin, served) if self.replace_game or starter else
+                         "written for %s's Mods folder - %s uses a model by its file name, so a new name shows "
+                         "nowhere until a game file refers to it (tick Replace the Game's Model to change the "
+                         "original)" % (plugin, games.GAMES[mgame].short))
         if self.save_textures:
             saved = {}                                      # lower-case name -> file name
             folder = os.path.dirname(filepath)
@@ -1892,10 +2588,13 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
                 for slot in ob.material_slots:
                     img = image_of(slot.material)
                     tex = texture_of(slot.material)
+                    if cross and tex.lower() not in ("default", "untextured", ""):
+                        tex = (cross[0].id.upper() + "_" + tex)[:63]
                     if img is None or tex.lower() in game or tex.lower() == "default" or tex.lower() in saved:
                         continue
                     saved[tex.lower()] = tex + ".dds"
-                    problem = save_dds(img, os.path.join(folder, tex + ".dds"))
+                    problem = save_dds(img, mod_path(mod_dir, tex + ".dds") if self.to_mod else
+                                       os.path.join(folder, tex + ".dds"))
                     if problem:
                         notes.append(problem)
             if saved:
@@ -1903,9 +2602,11 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
             if from_game:
                 notes.append("not saved (images from the extracted game folders - the game has them): "
                              + ", ".join(sorted(from_game.values())))
-        skipped = [o.name for o in obs + helper_obs if o.name not in used]
+        # the model's own marker meshes (Desert Storm II's connectors carry small ones) aren't parts to report
+        markers = {so.name.upper() for so in scene.objects if so.role in ("connector", "hitbox") and so.name}
+        skipped = [o.name for o in obs + helper_obs if o.name not in used and base_name(o.name).upper() not in markers]
         textures = sorted({p.texture for n, ps in parts.items() if isinstance(ps, list) and n not in shadows
-                           for p in ps}) or ["(character skin)"]
+                           for p in ps if isinstance(p, evo_write.Part)}) or ["(character skin)"]
         msg = "Wrote %s: %d part(s), textures %s" % (filepath if self.to_mod else os.path.basename(filepath), len(parts),
                                                      ", ".join(textures))
         if skipped:
@@ -1913,7 +2614,9 @@ class EXPORT_SCENE_OT_evo(bpy.types.Operator, ExportHelper):
         if notes:
             msg += "; " + "; ".join(notes)
         warn = skipped or any(not n.startswith(("saved ", "collision ", "shadow ", "wrote ", "points ", "generic prop ",
-                                                "no #BSP_ object", "not saved (images", "not written (sight"))
+                                                "converted from ", "left out ",
+                                                "no #BSP_ object", "not saved (images", "not written (sight",
+                                                "written for %s's Mods folder (files" % mod_plugin(mgame)))
                               for n in notes)
         self.report({"WARNING"} if warn else {"INFO"}, msg)
         return {"FINISHED"}
@@ -1924,12 +2627,75 @@ def action_of(arm):
     return ad.action if ad else None
 
 
+def prb_ds2_tracks(scene, template, bone_ids, tracks, frames):
+    """(keys per track, hashes, flags) of a Desert Storm II animation from the per-object keys sampled off the
+    armature. With a game animation as template: its tracks in its order and with its flags - objects of this model
+    get the new keys, tracks for objects this body doesn't have (the game binds by hash: another body's connector) keep
+    the template's keys, resampled to the new length. Without one: the bones (skin bones and their parents, file
+    order) plus the connectors hanging on them - like the game's own (534_POLY_SOLDIER: 29 of its 40 objects;
+    ROOT_OBJECT, the eyes and hit regions have none)."""
+    if template is not None and template.hashes is not None:
+        by_hash = {o.node.hash: o.index for o in scene.objects}
+        if any(h in by_hash for h in template.hashes):
+            out = []
+            for t, h in enumerate(template.hashes):
+                if h in by_hash:
+                    out.append(tracks[by_hash[h]])
+                else:
+                    old = template.tracks[t]
+                    out.append(old if len(old) == 1 else
+                               [old[min(len(old) - 1, int(round(f * (len(old) - 1) / max(1, frames - 1))))]
+                                for f in range(frames)])
+            return out, list(template.hashes), list(template.track_flags)
+    root = next((o.index for o in scene.objects if o.parent is None and o.name.upper() == "ROOT_OBJECT"), None)
+    sel = [o.index for o in scene.objects if o.index != root and
+           (o.index in bone_ids or (o.role == "connector" and o.parent in bone_ids))]
+    return ([tracks[i] for i in sel], [scene.objects[i].node.hash for i in sel],
+            [evo_write.prb_track_flags(scene.objects[i].name) for i in sel])
+
+
+def prb_cv_tracks(scene, template, bone_ids, tracks, frames):
+    """(rest-relative deltas per track, hashes, flags) of a Vietnam animation from the per-object keys sampled off the
+    armature (evo_write.cv_deltas; flag 4 where a bone leaves its rest position). With a Vietnam game animation as
+    template: its tracks in its order and flags - this model's objects get the new keys, tracks for objects it doesn't
+    have keep the template's deltas, resampled to the new length. Without one: what the game's own animations carry
+    (all 257 that fit MPD_US_MOTOWN): ROOT_OBJECT (the walk's travel - 256 of them), the body bones and the connectors
+    on them; never the face (jaw, eyes, teeth, mouth, eyebrow, eyelid bones)."""
+    face = ("JAW", "EYE", "TEETH", "MOUTH", "BROW", "LID")
+    def resample(old):
+        return old if len(old) == 1 else [old[min(len(old) - 1, int(round(f * (len(old) - 1) / max(1, frames - 1))))]
+                                          for f in range(frames)]
+
+    if template is not None and template.game == "cv" and template.deltas is not None:
+        by_hash = {o.node.hash: o.index for o in scene.objects}
+        mine = [t for t, h in enumerate(template.hashes) if h in by_hash]
+        if mine:
+            conv, bits = evo_write.cv_deltas(scene, [(by_hash[template.hashes[t]], tracks[by_hash[template.hashes[t]]])
+                                                     for t in mine])
+            new = dict(zip(mine, zip(conv, bits)))
+            deltas, flags = [], list(template.track_flags)
+            for t in range(len(template.hashes)):
+                if t in new:
+                    deltas.append(new[t][0])
+                    flags[t] = (flags[t] & ~4) | new[t][1]
+                else:
+                    deltas.append(resample(template.deltas[t]))
+            return deltas, list(template.hashes), flags
+    sel = [o.index for o in scene.objects if not any(w in (o.name or "").upper() for w in face) and
+           (o.index in bone_ids or (o.role == "connector" and o.parent in bone_ids) or
+            (o.parent is None and (o.name or "").upper() == "ROOT_OBJECT"))]
+    conv, bits = evo_write.cv_deltas(scene, [(i, tracks[i]) for i in sel])
+    return (conv, [scene.objects[i].node.hash for i in sel],
+            [evo_write.prb_track_flags(scene.objects[i].name) | b for i, b in zip(sel, bits)])
+
+
 class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
     """Write the armature's current action as a Conflict: Desert Storm animation (.prb)"""
     bl_idname = "export_anim.evo_prb"
     bl_label = "Export PRB Animation"
     bl_options = {"REGISTER"}
 
+    game: game_prop()
     filename_ext = ".prb"
     filter_glob: StringProperty(default="*.prb;*.PRB", options={"HIDDEN"})
     fps: FloatProperty(name="Keys per Second", default=15.0, min=1.0, max=60.0,
@@ -1949,15 +2715,29 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
         return ob is not None and ob.type == "ARMATURE" and ob.get("evo_path") and action_of(ob) is not None
 
     def invoke(self, context, event):
+        apply_game(self)
         act = action_of(context.active_object)
         if act is not None:
             if act.get("evo_fps"):
                 self.fps = float(act["evo_fps"])
             if not self.filepath or os.path.basename(self.filepath) in ("", "untitled.prb"):
-                self.filepath = act.name + ".prb"
+                self.filepath = act.name + (".ani" if self.game == "cg" else ".prb")
+        if self.game == "cg":
+            self.filter_glob = "*.ani;*.ANI"
         return ExportHelper.invoke(self, context, event)
 
+    def check(self, context):
+        # ExportHelper.check would add .prb to a Global Storm "<name>.ani" (all-games add-on: one class, five games)
+        ext = ".ani" if self.game == "cg" else ".prb"
+        path = bpy.path.ensure_ext(os.path.splitext(self.filepath)[0] if self.filepath.lower().endswith(
+            (".prb", ".ani")) else self.filepath, ext) if self.filepath else self.filepath
+        if path != self.filepath:
+            self.filepath = path
+            return True
+        return False
+
     def execute(self, context):
+        apply_game(self)
         arm = context.active_object
         act = action_of(arm)
         k = arm.get("evo_scale", 0.01)
@@ -1965,6 +2745,10 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
             scene = evo.load(arm["evo_path"])
         except (evo.EvoError, OSError) as e:
             self.report({"ERROR"}, "Can't read the character's model %s: %s" % (arm["evo_path"], e))
+            return {"CANCELLED"}
+        wrong = wrong_game(model_game(arm["evo_path"]), (arm.name, "skeleton"))
+        if wrong:
+            self.report({"ERROR"}, wrong)
             return {"CANCELLED"}
         bones = arm.data.bones
         bone_ids = [i for i in sorted(scene.bone_ids) if scene.objects[i].name in bones]
@@ -1984,7 +2768,8 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
         if tpath and os.path.isfile(tpath):
             try:
                 tdata = open(tpath, "rb").read()
-                template = (evo.read_prb(tdata), evo_write.prb_events(tdata))
+                # a Global Storm .ani has no footstep events (its template gives the root motion and the name)
+                template = (evo.read_prb(tdata), None if evo.is_ani_cg(tdata) else evo_write.prb_events(tdata))
             except evo.EvoError:
                 template = None
         scn = context.scene
@@ -2010,8 +2795,10 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
                     else:
                         parent = world_of(so.parent, depth + 1) if so.parent is not None and depth < 256 else Matrix.Identity(4)
                         local = Matrix([list(r) for r in so.local])
-                        if template and evo.compatible(scene, template[0]):
-                            local = Matrix([list(r) for r in template[0].local(i, min(f, template[0].frames - 1))])
+                        ti = template[0].tracks_for(scene)[i] if template and evo.compatible(scene, template[0]) \
+                            else None
+                        if ti is not None:
+                            local = Matrix([list(r) for r in template[0].local(ti, min(f, template[0].frames - 1))])
                         world[i] = parent @ local
                     return world[i]
 
@@ -2027,12 +2814,49 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
         marked, unknown = marker_events(act, start, scene_fps, self.fps) if self.markers else ([], [])
         if marked:
             events, nevents = evo_write.pack_events([e for e in marked if e[1] < frames])
-            out = evo_write.write_prb(tracks, self.fps, points, events, nevents)
-        elif template:
+            args = (events, nevents)
+        elif template and template[1]:
             events, nevents, flag, tframes = template[1]
-            out = evo_write.write_prb(tracks, self.fps, points, events, nevents, flag, tframes)
+            args = (events, nevents, flag, tframes)
         else:
-            out = evo_write.write_prb(tracks, self.fps, points)
+            args = ()
+        agame = MODEL_GAMES.get(scene.nodes[0].version & 0xFFFF)
+        if agame not in ANIM_GAMES:
+            self.report({"ERROR"}, "%s animations can't be written yet" % games.GAMES[agame].short if agame else
+                        "the armature's model is from an unknown game")
+            return {"CANCELLED"}
+        root_from = ""
+        if agame == "cg":
+            # Global Storm: tracks per .SKL bone (cg_tracks: the skeleton file's local rotations / position offsets);
+            # the game loads Animations\<name>.ani by the name inside, so a game animation of the same name keeps
+            # its name and its root motion (30 Hz samples)
+            try:
+                rot, pos, const = evo_write.cg_tracks(scene, tracks)
+            except evo.EvoError as e:
+                self.report({"ERROR"}, str(e))
+                return {"CANCELLED"}
+            tcg = template[0].cg if template and template[0].cg is not None else None
+            if tcg is not None:
+                root_from = os.path.basename(tpath)
+            out = evo_write.write_ani_cg(tcg["name_raw"] if tcg else act.name, (frames - 1) / self.fps if frames > 1
+                                         else (tcg["duration"] if tcg else 0.0), rot, pos, const,
+                                         tcg["root"] if tcg else (), rot_frames=frames)
+            if self.filepath.lower().endswith(".prb"):
+                self.filepath = self.filepath[:-4] + ".ani"
+        elif agame == "cv":
+            # Vietnam: by name hash like DS2, keys relative to each bone's rest rotation (rotation vectors, positions
+            # only for tracks that move a bone off its rest position)
+            deltas, hashes, flags = prb_cv_tracks(scene, template[0] if template else None, bone_ids, tracks, frames)
+            out = evo_write.write_prb_cv(deltas, self.fps, points, hashes, flags, *args)
+        elif agame in evo_write.PRB_BY_HASH:
+            # Desert Storm II / The Great Escape: tracks by object name hash, for the objects the game's animations of
+            # this skeleton carry (the template's, else the bones and connectors), in that order; The Great Escape's
+            # keys keep a scale (40 bytes)
+            keys, hashes, flags = prb_ds2_tracks(scene, template[0] if template else None, bone_ids, tracks, frames)
+            out = evo_write.write_prb_ds2(keys, self.fps, points, hashes, flags, *args,
+                                          key_size=40 if agame == "ge" else 28)
+        else:
+            out = evo_write.write_prb(tracks, self.fps, points, *args)
         with open(self.filepath, "wb") as f:
             f.write(out)
         msg = "Wrote %s: %d frames at %g per second" % (os.path.basename(self.filepath), frames, self.fps)
@@ -2040,7 +2864,9 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
             msg += ", %d event(s) from the timeline markers" % nevents
             if nevents < len(marked):
                 msg += " (%d after the last frame left out)" % (len(marked) - nevents)
-        elif template:
+        elif root_from:
+            msg += ", name and root motion from %s" % root_from
+        elif template and template[1]:
             msg += ", footsteps from %s" % os.path.basename(tpath)
         if unknown:
             msg += "; markers that aren't events (use FS_LEFT, FS_RIGHT, FS_LEFT_25, EVENT_2 ...): " + ", ".join(unknown)
@@ -2049,22 +2875,36 @@ class EXPORT_ANIM_OT_prb(bpy.types.Operator, ExportHelper):
 
 
 def menu_func_export(self, context):
-    self.layout.operator(EXPORT_SCENE_OT_evo.bl_idname, text="Conflict: Desert Storm (.evo)")
-    self.layout.operator(EXPORT_ANIM_OT_prb.bl_idname, text="Conflict: Desert Storm Animation (.prb)")
+    for gid, short, _ in MENU_PROFILES:                     # one entry per game: the entry decides the layout checks
+        menu = MENU_NAMES[gid]
+        if gid in WRITE_GAMES:
+            self.layout.operator(EXPORT_SCENE_OT_evo.bl_idname, text="%s (.evo)" % menu).game = gid
+        if gid in SCENE_WRITE_GAMES:
+            self.layout.operator(EXPORT_SCENE_OT_ds_env.bl_idname, text="%s Scene (.env)" % menu).game = gid
+        if gid in ANIM_GAMES:
+            self.layout.operator(EXPORT_ANIM_OT_prb.bl_idname,
+                                 text="%s Animation (%s)" % (menu, ".ani" if gid == "cg" else ".prb")).game = gid
 
 
 def menu_func_import(self, context):
-    self.layout.operator(IMPORT_SCENE_OT_evo.bl_idname, text="Conflict: Desert Storm (.evo)")
-    self.layout.operator(IMPORT_ANIM_OT_prb.bl_idname, text="Conflict: Desert Storm Animation (.prb)")
-    self.layout.operator(IMPORT_SCENE_OT_ds_env.bl_idname, text="Conflict: Desert Storm Scene (.env)")
-    self.layout.operator(IMPORT_SCENE_OT_ds_extract.bl_idname, text="Conflict: Desert Storm Archives (extract)")
-    self.layout.operator(IMPORT_SCENE_OT_ds_gc_audio.bl_idname, text="Conflict: Desert Storm GameCube Audio (.iso)")
+    for gid, short, _ in MENU_PROFILES:                     # one entry per game: folders / mod are that game's
+        lay = self.layout
+        menu = MENU_NAMES[gid]
+        lay.operator(IMPORT_SCENE_OT_evo.bl_idname, text="%s (.evo)" % menu).game = gid
+        if gid in ANIM_IMPORT_GAMES:
+            lay.operator(IMPORT_ANIM_OT_prb.bl_idname,
+                         text="%s Animation (%s)" % (menu, ".ani" if gid == "cg" else ".prb")).game = gid
+        lay.operator(IMPORT_SCENE_OT_ds_env.bl_idname, text="%s Scene (.env)" % menu).game = gid
+        lay.operator(IMPORT_SCENE_OT_ds_extract.bl_idname, text="%s Archives (extract)" % menu).game = gid
+    if GAME in (None, "ds1"):                               # both into Desert Storm (the GameCube disc is its own)
+        self.layout.operator(IMPORT_SCENE_OT_ds_gc_audio.bl_idname,
+                             text="Conflict: Desert Storm GameCube Audio (.iso)")
+        self.layout.operator(IMPORT_SCENE_OT_ds_port.bl_idname,
+                             text="Conflict: Desert Storm - Port From Another Game (recipe)" if GAME else
+                             "Conflict: Port Between Games (recipe)")
 
 
 # ----------------------------------------------------------------------------------------------- side panel --
-SURFACE_ITEMS = [(str(i), n, "Default.spl row %d" % i) for i, n in enumerate(bsp.SURFACES)]
-
-
 def _helper_target(context, ob):
     """Collection for a new helper: the model's 'helpers' collection if it has one, else the object's own."""
     for coll in ob.users_collection:
@@ -2098,7 +2938,7 @@ class OBJECT_OT_ds_assign_surface(bpy.types.Operator):
         return context.active_object is not None and context.active_object.type == "MESH"
 
     def execute(self, context):
-        index = int(context.scene.ds_surface)
+        index = int(props(context.scene).surface)
         edit = context.mode == "EDIT_MESH"
         if edit:
             bpy.ops.object.mode_set(mode="OBJECT")
@@ -2112,7 +2952,7 @@ class OBJECT_OT_ds_assign_surface(bpy.types.Operator):
             done += len(faces) if faces is not None else len(ob.data.polygons)
         if edit:
             bpy.ops.object.mode_set(mode="EDIT")
-        self.report({"INFO"}, "%s on %d faces" % (bsp.SURFACES[index], done))
+        self.report({"INFO"}, "%s on %d faces" % (bsp.surface_name(index), done))
         return {"FINISHED"}
 
 
@@ -2164,12 +3004,12 @@ class OBJECT_OT_ds_make_collision(bpy.types.Operator):
         _helper_target(context, src).objects.link(ob)
         ob.parent = src
         ob.matrix_parent_inverse = Matrix.Identity(4)
-        ob.display_type = "SOLID" if self.kind == "COLLISION" and context.scene.ds_show_surfaces else "WIRE"
+        ob.display_type = "SOLID" if self.kind == "COLLISION" and props(context.scene).show_surfaces else "WIRE"
         if self.kind == "COLLISION":
             ob["evo_role"] = "collision"
-            _set_surface(ob, int(context.scene.ds_surface))
+            _set_surface(ob, int(props(context.scene).surface))
         self.report({"INFO"}, "%s: %d faces%s" % (name, len(me.polygons),
-                                                   ", " + bsp.SURFACES[int(context.scene.ds_surface)]
+                                                   ", " + bsp.surface_name(int(props(context.scene).surface))
                                                    if self.kind == "COLLISION" else ""))
         return {"FINISHED"}
 
@@ -2201,7 +3041,7 @@ class OBJECT_OT_ds_add_point(bpy.types.Operator):
 
 def show_surfaces(scene, context=None):
     """Collision objects drawn solid in their surface colours (Show Collision Surfaces) or as wireframes."""
-    on = scene.ds_show_surfaces
+    on = props(scene).show_surfaces
     for ob in scene.objects:
         if ob.type == "MESH" and helper_kind(ob) == "collision":
             ob.display_type = "SOLID" if on else "WIRE"
@@ -2238,11 +3078,11 @@ class OBJECT_OT_ds_pick_surface(bpy.types.Operator):
             self.report({"ERROR"}, "The face has no material - it gets the export's Default Surface")
             return {"CANCELLED"}
         index, known = surface_of(mat, 0)
-        if not known or not 0 <= index < len(bsp.SURFACES):
+        if not known or not 0 <= index < len(bsp.ALL_SURFACES):
             self.report({"ERROR"}, "%s isn't a surface material (\"Surface: Metal\" or a surface name)" % mat.name)
             return {"CANCELLED"}
-        context.scene.ds_surface = str(index)
-        self.report({"INFO"}, "Surface: " + bsp.SURFACES[index])
+        props(context.scene).surface = str(index)
+        self.report({"INFO"}, "Surface: " + bsp.surface_name(index))
         return {"FINISHED"}
 
 
@@ -2340,7 +3180,7 @@ class OBJECT_OT_ds_quick_export(bpy.types.Operator):
 
     @classmethod
     def poll(cls, context):
-        return context.scene.ds_active_mod.strip() != "" and \
+        return props(context.scene).active_mod.strip() != "" and \
             any(o.type == "MESH" for o in context.selected_objects)
 
     def execute(self, context):
@@ -2349,18 +3189,18 @@ class OBJECT_OT_ds_quick_export(bpy.types.Operator):
             bpy.ops.object.mode_set(mode="OBJECT")
         last = scn.get(LAST_EXPORT)
         last = last.to_dict() if hasattr(last, "to_dict") else dict(last or {})
-        name = scn.ds_last_exported_model.strip() or base_name(context.active_object.name
+        name = props(scn).last_exported_model.strip() or base_name(context.active_object.name
                                                                 if context.active_object else "MODEL")
-        game_dir = (bpy.path.abspath(scn.ds_game_dir) if scn.ds_game_dir else "") or last.get("game_dir") or             archive.find_game_dir() or ""
+        game_dir = game_dir_of(scn)                          # the profile's game
         opts = dict(filepath=os.path.join(bpy.path.abspath(game_dir) or tempfile.gettempdir(), name + ".evo"),
-                    to_mod=True, mod_name=scn.ds_active_mod.strip(), game_dir=game_dir, selected_only=True,
+                    to_mod=True, mod_name=props(scn).active_mod.strip(), game_dir=game_dir, selected_only=True,
                     check_only=False,
-                    base="GENERIC" if scn.ds_generic_prop else str(last.get("base", "MODEL")),
+                    base="GENERIC" if props(scn).generic_prop else str(last.get("base", "MODEL")),
                     template=str(last.get("template", "")), scale=float(last.get("scale", 0.01)),
                     collision=str(last.get("collision", "HELPERS")), surface=str(last.get("surface", "4")),
                     save_textures=bool(last.get("save_textures", True)),
                     replace_game=bool(last.get("replace_game", False)))
-        return bpy.ops.export_scene.evo("EXEC_DEFAULT", **opts)
+        return run_op(EXPORT_SCENE_OT_evo, "EXEC_DEFAULT", **opts)
 
 
 def curve_points(ob, spacing):
@@ -2480,14 +3320,14 @@ class OBJECT_OT_ds_generate_road(bpy.types.Operator):
         col.parent = ob
         col["evo_role"] = "collision"
         _set_surface(col, int(self.surface))
-        col.display_type = "SOLID" if context.scene.ds_show_surfaces else "WIRE"
+        col.display_type = "SOLID" if props(context.scene).show_surfaces else "WIRE"
         for o in context.selected_objects:
             o.select_set(False)
         ob.select_set(True)
         col.select_set(True)
         context.view_layer.objects.active = ob
-        context.scene.ds_last_exported_model = name
-        context.scene.ds_generic_prop = True
+        props(context.scene).last_exported_model = name
+        props(context.scene).generic_prop = True
         length = sum((b - a).length for a, b in zip(pts, pts[1:]))
         self.report({"INFO"}, "%s: %d triangles over %.1f, collision %s - export with Based On: Auto / Generic Prop "
                               "(the model's origin is the world origin)" % (name, len(faces), length, surface))
@@ -2497,9 +3337,12 @@ class OBJECT_OT_ds_generate_road(bpy.types.Operator):
 # ------------------------------------------------------------------------------------------- level scenes --
 
 def game_dir_of(scene):
-    """The game folder: the scene's Game Folder, else the registry's. "" when neither has DesertStorm.exe."""
-    for d in (bpy.path.abspath(scene.ds_game_dir) if scene.ds_game_dir else "", archive.find_game_dir() or ""):
-        if d and os.path.isfile(os.path.join(d, "DesertStorm.exe")):
+    """The profile's game folder: its Game Folder, else the registry's / Steam's. "" when neither has that game's exe.
+    The profile's game is the current one (games.current())."""
+    game = profile()
+    own = props(scene).game_dir
+    for d in (bpy.path.abspath(own) if own else "", archive.find_game_dir(game) or ""):
+        if d and games.detect(d) is game:
             return d
     return ""
 
@@ -2563,7 +3406,7 @@ class SceneImporter:
             if self.o["objects"]:
                 groups.append(("objects", "Objects", items["objects"]))
             todo = [it for _k, _n, lst in groups for it in lst
-                    if self.o["zones"] or it.get("type") != 5]
+                    if self.o["zones"] or it.get("type") not in ZONE_TYPES]
             wm = self.context.window_manager
             wm.progress_begin(0, max(1, len(todo)))
             done = 0
@@ -2571,7 +3414,7 @@ class SceneImporter:
                 coll = bpy.data.collections.new(cname)
                 root.children.link(coll)
                 for it in lst:
-                    if it.get("type") == 5 and not self.o["zones"]:
+                    if it.get("type") in ZONE_TYPES and not self.o["zones"]:
                         continue
                     self.place(coll, it)
                     done += 1
@@ -2596,6 +3439,7 @@ class SceneImporter:
                     self.sound(coll, it)
         finally:
             _exclude(self.context.view_layer, self.lib)        # the originals sit at the origin: instances only
+        root["ds_lines"] = sorted({int(ob["ds_line"]) for ob in root.all_objects if "ds_line" in ob})
         n = {k: len(v) for k, v in items.items()}
         self.notes.insert(0, "%d props, %d objects, %d lights, %d regions, %d sounds; %d models"
                           % (n["props"], n["objects"], n["lights"], n["regions"], n["sounds"],
@@ -2758,6 +3602,8 @@ class IMPORT_SCENE_OT_ds_env(bpy.types.Operator, ImportHelper):
     bl_label = "Import Scene"
     bl_options = {"REGISTER", "UNDO"}
 
+    game: game_prop()
+
     filename_ext = ".env"
     filter_glob: StringProperty(default="*.env;*.ENV;*.envpatch;*.ENVPATCH", options={"HIDDEN"})
     scale: FloatProperty(name="Scale", default=0.01, min=1e-5, max=100.0,
@@ -2780,6 +3626,7 @@ class IMPORT_SCENE_OT_ds_env(bpy.types.Operator, ImportHelper):
                                             "sibling folders and the extracted archives are always searched)")
 
     def execute(self, context):
+        apply_game(self)
         if context.object and context.object.mode != "OBJECT":
             bpy.ops.object.mode_set(mode="OBJECT")
         opts = {n: getattr(self, n) for n in ("scale", "zones", "objects", "lights", "regions", "sounds",
@@ -2797,6 +3644,157 @@ class IMPORT_SCENE_OT_ds_env(bpy.types.Operator, ImportHelper):
         if imp.missing_textures:
             msg.append("%d textures not found" % len(imp.missing_textures))
         self.report({"WARNING"} if imp.missing_models else {"INFO"}, "; ".join(msg))
+        return {"FINISHED"}
+
+
+# ---------------------------------------------------------------------------------------------- scene export --
+
+def to_game_matrix(m, k):
+    """Game-space 4x4 (rows, cm) of a Blender world matrix - the inverse of conv_matrix."""
+    out = [[0.0] * 4 for _ in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+    for i, (a, s) in enumerate(AXES):
+        for j, (b, t) in enumerate(AXES):
+            out[a][b] = m[i][j] * s * t
+        out[a][3] = m[i][3] * s / k
+    return out
+
+
+def _model_name(name):
+    return re.sub(r"[^A-Z0-9_]", "_", base_name(name).upper())[:31] or "NEW_PROP"
+
+
+class EXPORT_SCENE_OT_ds_env(bpy.types.Operator, ExportHelper):
+    """Write the imported level scene back with your changes: props and objects moved, turned, scaled, deleted or
+duplicated; new props for new meshes (written as models with their textures next to the scene) and for added model
+instances; lights, sounds and regions at their new places. Everything else in the scene stays as it was"""
+    bl_idname = "export_scene.ds_env"
+    bl_label = "Export Scene"
+    bl_options = {"REGISTER"}
+
+    game: game_prop()
+    filename_ext = ".env"
+    filter_glob: StringProperty(default="*.env;*.ENV", options={"HIDDEN"})
+    new_models: BoolProperty(name="Export New Meshes as Models", default=True,
+                             description="Meshes that aren't from the scene become models (.evo, their textures as "
+                                         ".dds) next to the scene file, each placed as a new prop")
+    collision: EnumProperty(name="New Models Collide", default="MESH",
+                            items=(("MESH", "With Their Own Mesh", "Soldiers, bullets and vehicles hit them"),
+                                   ("NONE", "Not at All", "Decoration only")),
+                            description="Collision of the models made from new meshes")
+
+    @classmethod
+    def poll(cls, context):
+        return level_root(context) is not None
+
+    def invoke(self, context, event):
+        root = level_root(context)
+        if root is not None and not self.filepath:
+            self.filepath = os.path.join(os.path.dirname(root.get("ds_env_path", "")), root["ds_level"] + ".ENV")
+        return ExportHelper.invoke(self, context, event)
+
+    def execute(self, context):
+        apply_game(self)
+        root = level_root(context)
+        if root is None or not os.path.isfile(root.get("ds_env_path", "")):
+            self.report({"ERROR"}, "Import the level scene first (File > Import > ... Scene (.env)): the export "
+                                   "writes your changes into it")
+            return {"CANCELLED"}
+        if context.object and context.object.mode != "OBJECT":
+            bpy.ops.object.mode_set(mode="OBJECT")
+        k = float(root.get("evo_scale", 0.01))
+        env = levelscene.read_scene(root["ds_env_path"], evo.AssetFinder(root["ds_env_path"], archive_dirs()))
+        lib = next((c for c in root.children if c.name.endswith(" models")), None)
+        lib_objs = set(lib.all_objects) if lib else set()
+        lib_names = {c.name for c in lib.children} if lib else set()
+        by_line, news, insts = {}, [], []
+        for ob in root.all_objects:
+            if ob in lib_objs:
+                continue
+            if "ds_line" in ob:
+                by_line.setdefault(int(ob["ds_line"]), []).append(ob)
+            elif ob.type == "MESH" and ob.parent is None:
+                news.append(ob)
+            elif ob.type == "EMPTY" and ob.instance_type == "COLLECTION" and ob.instance_collection is not None \
+                    and ob.instance_collection.name in lib_names:
+                insts.append(ob)
+        moves, copies, aims = {}, [], {}
+        for line, obs in by_line.items():
+            # the object without a .001 suffix is the record itself, the others are duplicates (Shift+D)
+            obs.sort(key=lambda o: (re.search(r"\.\d{3}$", o.name) is not None, o.name))
+            first, rest = obs[0], obs[1:]
+            kind = first.get("ds_kind", "")
+            t = to_game_matrix(first.matrix_world, k)
+            if kind in ("ENVI", "HLOI"):
+                moves[line] = t
+                copies += [(line, to_game_matrix(o.matrix_world, k)) for o in rest]
+            elif kind == "REGN" and first.get("ds_region_shape") != "SPHERE":
+                # a box is drawn at record position + rotated centre: take the centre back off
+                rec = env.record_at(line)
+                rot = tuple(float(c) for c in rec["rot"]) if "rot.x" in rec.fields else (0.0, 0.0, 0.0)
+                item = levelscene.region(rec)
+                r = levelscene.rotation(rot)
+                c = item["centre"] if item else (0.0, 0.0, 0.0)
+                pos = [t[i][3] - sum(r[i][j] * c[j] for j in range(3)) for i in range(3)]
+                moves[line] = [[1, 0, 0, pos[0]], [0, 1, 0, pos[1]], [0, 0, 1, pos[2]], [0, 0, 0, 1]]
+            elif kind in ("REGN", "ENVSND", "DLGT", "PLGT", "SLGT"):
+                moves[line] = t
+                if kind in ("DLGT", "SLGT"):
+                    d = first.matrix_world.to_3x3() @ Vector((0.0, 0.0, -1.0))     # a Blender light shines along -Z
+                    g = [0.0, 0.0, 0.0]
+                    for i, (a, s) in enumerate(AXES):
+                        g[a] = d[i] * s
+                    aims[line] = tuple(g)
+        imported = {int(x) for x in root.get("ds_lines", [])}
+        deletes = imported - set(by_line)
+        props = [(ob.instance_collection.name, to_game_matrix(ob.matrix_world, k)) for ob in insts]
+        out_dir = os.path.dirname(bpy.path.abspath(self.filepath))
+        made = []
+        if self.new_models and news:
+            sel = list(context.selected_objects)
+            active = context.view_layer.objects.active
+            for ob in news:
+                model = _model_name(ob.name)
+                world = ob.matrix_world.copy()
+                for o in context.selected_objects:
+                    o.select_set(False)
+                ob.select_set(True)
+                context.view_layer.objects.active = ob
+                ob.matrix_world = Matrix.Identity(4)        # the model at its own origin, the prop record places it
+                try:
+                    r = run_op(EXPORT_SCENE_OT_evo, filepath=os.path.join(out_dir, model + ".evo"), game=self.game,
+                                                 base="GENERIC", selected_only=True, scale=k,
+                                                 collision=self.collision, save_textures=True)
+                except RuntimeError as e:
+                    self.report({"WARNING"}, "%s not exported: %s" % (ob.name, e))
+                    r = {"CANCELLED"}
+                finally:
+                    ob.matrix_world = world
+                if "FINISHED" in r:
+                    props.append((model, to_game_matrix(world, k)))
+                    made.append(model)
+            for o in context.selected_objects:
+                o.select_set(False)
+            for o in sel:
+                o.select_set(True)
+            context.view_layer.objects.active = active
+        elif news:
+            self.report({"WARNING"}, "%d new mesh(es) left out (Export New Meshes as Models is off)" % len(news))
+        try:
+            notes = sceneexport.apply(env, moves, copies, deletes, props, aims)
+            written = sceneexport.write(env, bpy.path.abspath(self.filepath))
+        except (ValueError, KeyError, OSError) as e:
+            self.report({"ERROR"}, "Scene not written: %s" % e)
+            return {"CANCELLED"}
+        msg = notes[0] + " -> " + os.path.basename(written[0])
+        if len(written) > 1:
+            msg += " (+%d part files)" % (len(written) - 1)
+        if made:
+            msg += "; new models: " + ", ".join(made)
+        if not imported:
+            msg += "; deletions not written (imported by an older add-on - import the scene again)"
+        if notes[1:]:
+            msg += "; " + "; ".join(notes[1:4])
+        self.report({"WARNING"} if notes[1:] or not imported else {"INFO"}, msg)
         return {"FINISHED"}
 
 
@@ -2863,7 +3861,7 @@ class OBJECT_OT_ds_bake_minimap(bpy.types.Operator):
             self.scale = float(root.get("evo_scale", self.scale))
         level = str(root["ds_level"]) if root is not None else ""
         if not self.map_name:
-            self.map_name = context.scene.ds_active_mod.strip() or level.title() or "Map"
+            self.map_name = props(context.scene).active_mod.strip() or level.title() or "Map"
         bounds = minimap.LEVEL_BOUNDS.get(level)
         if bounds is None and root is not None and "ds_extent" in root:
             e = list(root["ds_extent"])
@@ -2885,7 +3883,7 @@ class OBJECT_OT_ds_bake_minimap(bpy.types.Operator):
         lay.prop(self, "engine")
         if self.engine == "WORKBENCH":
             lay.prop(self, "background")
-        mod = context.scene.ds_active_mod.strip()
+        mod = props(context.scene).active_mod.strip()
         lay.label(text="Into Mods\\%s" % mod if mod else "Set the Active Mod first (Export to Mod box)",
                   icon="FILE_FOLDER" if mod else "ERROR")
 
@@ -2895,7 +3893,7 @@ class OBJECT_OT_ds_bake_minimap(bpy.types.Operator):
         if not name:
             self.report({"ERROR"}, "Map Name: letters, digits and _ only")
             return {"CANCELLED"}
-        mod = scn.ds_active_mod.strip().strip("\\/")
+        mod = props(scn).active_mod.strip().strip("\\/")
         gdir = game_dir_of(scn)
         if not mod or not gdir:
             self.report({"ERROR"}, "Needs the Active Mod and the game folder (Desert Storm sidebar > Game)")
@@ -2924,7 +3922,7 @@ class OBJECT_OT_ds_bake_minimap(bpy.types.Operator):
                     ax=r.pixel_aspect_x, ay=r.pixel_aspect_y, path=r.filepath, fmt=r.image_settings.file_format,
                     mode=r.image_settings.color_mode, ext=r.use_file_extension, transp=r.film_transparent,
                     engine=r.engine, light=scn.display.shading.light, ctype=scn.display.shading.color_type)
-        target = os.path.join(folder, page)
+        target = mod_path(folder, page)
         world = scn.world
         tmp_world = None
         try:
@@ -2962,12 +3960,12 @@ class OBJECT_OT_ds_bake_minimap(bpy.types.Operator):
         if not os.path.isfile(target):
             self.report({"ERROR"}, "The render wasn't written (%s)" % target)
             return {"CANCELLED"}
-        with open(os.path.join(folder, img), "wb") as f:
+        with open(mod_path(folder, img), "wb") as f:
             f.write(minimap.sheet(page, size))
         msg = "Wrote %s + %s into Mods\\%s (x %.0f..%.0f, z %.0f..%.0f)" % (img, page, mod, self.min_x, self.max_x,
                                                                            self.min_z, self.max_z)
-        script = os.path.join(folder, name + ".lua")
-        if os.path.isfile(script):
+        script = modlayout.find(folder, name + ".lua")
+        if script:
             with open(script, encoding="utf-8") as f:
                 text = f.read()
             new, how = minimap.script_with_map(text, img)
@@ -2994,7 +3992,7 @@ class OBJECT_OT_ds_generate_asset_library(bpy.types.Operator):
     bl_label = "Generate Asset Library"
 
     extracted_dir: StringProperty(name="Extracted Folder", subtype="DIR_PATH",
-                                  description="The folder File > Import > Conflict: Desert Storm Archives wrote")
+                                  description="The folder File > Import > Conflict: Desert Storm Archives (extract) wrote")
     level_pieces: BoolProperty(name="Include Level Pieces", default=False,
                                description="Also the world-piece models (Kit Pieces catalog): thousands of large models")
     skip_existing: BoolProperty(name="Skip Models Already Saved", default=False,
@@ -3011,7 +4009,7 @@ class OBJECT_OT_ds_generate_asset_library(bpy.types.Operator):
 
     def invoke(self, context, event):
         if not self.extracted_dir:
-            self.extracted_dir = DEFAULT_EXTRACT_DIR
+            self.extracted_dir = extract_dir()
         return context.window_manager.invoke_props_dialog(self, width=520)
 
     def execute(self, context):
@@ -3452,21 +4450,22 @@ def vehicle_pivots(ob):
 # ----------------------------------------------------------------------------------------- test in game --
 
 def game_running():
-    """True when DesertStorm.exe is already running (Windows), None when that can't be told."""
+    """True when the current game's exe is already running (Windows), None when that can't be told."""
     if os.name != "nt":
         return None
     import subprocess
     try:
-        out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq DesertStorm.exe", "/NH"], capture_output=True,
+        out = subprocess.run(["tasklist", "/NH"], capture_output=True,
                              text=True, timeout=5, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0)).stdout
     except (OSError, subprocess.SubprocessError):
         return None
-    return "desertstorm.exe" in out.lower()
+    return any(e.lower() in out.lower() for e in games.current().exes)
 
 
 class OBJECT_OT_ds_play_in_game(bpy.types.Operator):
     """Export the selected model into the active mod (as Export to Mod does) and start the game: straight into the
-    Test Level, or the launcher when it's empty"""
+    Test Level, or the launcher when it's empty (the other games: always the launcher / front end - only
+    DesertStormFix has a +level start)"""
     bl_idname = "object.ds_play_in_game"
     bl_label = "Test in Game"
     bl_options = {"REGISTER"}
@@ -3476,27 +4475,35 @@ class OBJECT_OT_ds_play_in_game(bpy.types.Operator):
         scn = context.scene
         gdir = game_dir_of(scn)
         if not gdir:
-            self.report({"ERROR"}, "The game wasn't found - set Game Folder (the folder with DesertStorm.exe)")
+            self.report({"ERROR"}, "The game wasn't found - set Game Folder (the folder with the game's exe)")
+            return {"CANCELLED"}
+        game = games.current()
+        if game.id not in TEST_GAMES:
+            self.report({"ERROR"}, "%s: its plugin (%s) doesn't load models from a Mods folder yet" % (
+                game.short, game.plugin))
             return {"CANCELLED"}
         if game_running():
             self.report({"ERROR"}, "The game is running - close it first (it reads the mods when it starts)")
             return {"CANCELLED"}
         exported = ""
-        if scn.ds_play_export and any(o.type == "MESH" for o in context.selected_objects):
-            if not scn.ds_active_mod.strip():
+        if props(scn).play_export and any(o.type == "MESH" for o in context.selected_objects):
+            if not props(scn).active_mod.strip():
                 self.report({"ERROR"}, "Set the Active Mod to export into (or untick Export First)")
                 return {"CANCELLED"}
-            if not scn.ds_game_dir:
-                scn.ds_game_dir = gdir
-            res = bpy.ops.object.ds_quick_export()
+            if not props(scn).game_dir:
+                props(scn).game_dir = gdir
+            res = run_op(OBJECT_OT_ds_quick_export)
             if "FINISHED" not in res:
                 self.report({"ERROR"}, "Export failed (see the message before this one) - the game wasn't started")
                 return {"CANCELLED"}
-            exported = "exported into Mods\\%s, " % scn.ds_active_mod.strip()
-        args = [os.path.join(gdir, "DesertStorm.exe")]
-        level = scn.ds_test_level.strip()
-        if level:
+            exported = "exported into Mods\\%s, " % props(scn).active_mod.strip()
+        args = [os.path.join(gdir, game.exes[0])]
+        level = props(scn).test_level.strip()
+        skipped = ""
+        if level and game.script_host:
             args += ["+level", level]
+        elif level:
+            skipped = " (Test Level ignored: %s has no +level start - pick the mission in the game's menus)" % game.short
         flags = 0
         if os.name == "nt":
             flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
@@ -3505,8 +4512,8 @@ class OBJECT_OT_ds_play_in_game(bpy.types.Operator):
         except OSError as e:
             self.report({"ERROR"}, "Couldn't start the game: %s" % e)
             return {"CANCELLED"}
-        self.report({"INFO"}, "%sstarted %s" % (exported, " ".join(os.path.basename(a) if i == 0 else a
-                                                                     for i, a in enumerate(args))))
+        self.report({"WARNING"} if skipped else {"INFO"}, "%sstarted %s%s" % (
+            exported, " ".join(os.path.basename(a) if i == 0 else a for i, a in enumerate(args)), skipped))
         return {"FINISHED"}
 
 
@@ -3543,7 +4550,7 @@ def _texture_index():
 def uniform_items(self, context):
     arm = soldier_armature(context.active_object)
     hero = assetlib.hero_number(os.path.splitext(os.path.basename(arm.get("evo_path", "")))[0]) if arm else None
-    key = (hero, context.scene.ds_game_dir)
+    key = (hero, props(context.scene).game_dir)
     if key == _uniforms["key"] and _uniforms["items"]:
         return _uniforms["items"]
     items, paths = [], {}
@@ -3599,8 +4606,8 @@ def apply_uniform(context, ident):
 
 
 def _uniform_update(self, context):
-    if self.ds_soldier_uniform != "NONE":
-        apply_uniform(context, self.ds_soldier_uniform)
+    if props(self).soldier_uniform != "NONE":
+        apply_uniform(context, props(self).soldier_uniform)
 
 
 class OBJECT_OT_ds_refresh_uniforms(bpy.types.Operator):
@@ -3683,29 +4690,43 @@ class VIEW3D_PT_ds_tools(bpy.types.Panel):
         lay = self.layout
         scn = context.scene
         ob = context.active_object
+        # the game of the last import / export: Export to Mod and Test in Game use its folder and mod
+        game = profile()
+        if not GAME:
+            lay.label(text="Game: %s (last import / export)" % game.short, icon="WORLD")
+        if game.id not in WRITE_GAMES:              # Denied Ops: import only - none of the export tools apply
+            box = lay.box()
+            box.label(text="Level", icon="WORLD")
+            box.operator(IMPORT_SCENE_OT_ds_env.bl_idname, text="Import Scene (.env)", icon="IMPORT")
+            box = lay.box()
+            box.label(text="%s models import only:" % game.short, icon="INFO")
+            box.label(text="exporting them isn't built yet")
+            return
         # quick export into the active mod
         box = lay.box()
         box.label(text="Export to mod", icon="EXPORT")
-        box.prop(scn, "ds_active_mod", text="Mod")
-        box.prop(scn, "ds_last_exported_model", text="Model")
-        box.prop(scn, "ds_generic_prop", text="Based On: Auto / Generic Prop")
+        box.prop(scn, sp("active_mod"), text="Mod")
+        box.prop(scn, sp("last_exported_model"), text="Model")
+        box.prop(scn, sp("generic_prop"), text="Based On: Auto / Generic Prop")
         row = box.row()
         row.scale_y = 1.4
         row.operator(OBJECT_OT_ds_quick_export.bl_idname, icon="FILE_TICK")
-        if not scn.ds_active_mod.strip():
+        if not props(scn).active_mod.strip():
             box.label(text="Export once Into a Mod Folder, or type a mod name", icon="INFO")
         # test in game
         box = lay.box()
         box.label(text="Game", icon="PLAY")
-        box.prop(scn, "ds_game_dir", text="Folder")
+        box.prop(scn, sp("game_dir"), text="Folder")
         if not game_dir_of(scn):
-            box.label(text="DesertStorm.exe not found - set the folder", icon="ERROR")
-        box.prop(scn, "ds_test_level", text="Level")
-        box.prop(scn, "ds_play_export", text="Export Selection First")
-        row = box.row()
-        row.scale_y = 1.4
-        row.operator(OBJECT_OT_ds_play_in_game.bl_idname, icon="PLAY")
-        box.operator(IMPORT_SCENE_OT_ds_gc_audio.bl_idname, text="GameCube Audio...", icon="SPEAKER")
+            box.label(text="No supported game here - set the folder", icon="ERROR")
+        if not GAME or game.id in TEST_GAMES:           # the games whose plugin loads the exported model
+            box.prop(scn, sp("test_level"), text="Level")
+            box.prop(scn, sp("play_export"), text="Export Selection First")
+            row = box.row()
+            row.scale_y = 1.4
+            row.operator(OBJECT_OT_ds_play_in_game.bl_idname, icon="PLAY")
+        if GAME in (None, "ds1"):
+            box.operator(IMPORT_SCENE_OT_ds_gc_audio.bl_idname, text="GameCube Audio...", icon="SPEAKER")
         # level tools
         box = lay.box()
         box.label(text="Level", icon="WORLD")
@@ -3720,17 +4741,17 @@ class VIEW3D_PT_ds_tools(bpy.types.Panel):
         # what blocks what (tested in game): normal surfaces stop soldiers and bullets; Blocking Invisible stops
         # soldiers, bullets / grenades fly through; Player Barrier stops only your squad
         row = box.row(align=True)
-        row.prop_enum(scn, "ds_surface", "4", text="Blocks All")
-        row.prop_enum(scn, "ds_surface", "35", text="Soldiers Only")
-        row.prop_enum(scn, "ds_surface", "46", text="Your Squad")
+        row.prop_enum(scn, sp("surface"), "4", text="Blocks All")
+        row.prop_enum(scn, sp("surface"), "35", text="Soldiers Only")
+        row.prop_enum(scn, sp("surface"), "46", text="Your Squad")
         row = box.row(align=True)
-        row.prop(scn, "ds_surface", text="")
+        row.prop(scn, sp("surface"), text="")
         if context.mode == "EDIT_MESH":
             row.operator(OBJECT_OT_ds_pick_surface.bl_idname, text="", icon="EYEDROPPER")
         box.operator(OBJECT_OT_ds_assign_surface.bl_idname,
                      text="Assign to Selected Faces" if context.mode == "EDIT_MESH" else "Assign to Object")
-        box.prop(scn, "ds_show_surfaces", text="Show Collision Surfaces", toggle=True, icon="SHADING_SOLID")
-        if scn.ds_show_surfaces and ob is not None and ob.type == "MESH" and helper_kind(ob) == "collision":
+        box.prop(scn, sp("show_surfaces"), text="Show Collision Surfaces", toggle=True, icon="SHADING_SOLID")
+        if props(scn).show_surfaces and ob is not None and ob.type == "MESH" and helper_kind(ob) == "collision":
             col = box.column(align=True)
             for s in ob.material_slots:
                 if s.material is not None:
@@ -3770,7 +4791,7 @@ class VIEW3D_PT_ds_tools(bpy.types.Panel):
             box = lay.box()
             box.label(text="Soldier: " + arm.name, icon="ARMATURE_DATA")
             row = box.row(align=True)
-            row.prop(context.scene, "ds_soldier_uniform", text="Uniform")
+            row.prop(context.scene, sp("soldier_uniform"), text="Uniform")
             row.operator(OBJECT_OT_ds_refresh_uniforms.bl_idname, text="", icon="FILE_REFRESH")
         if ob is None or ob.type == "ARMATURE":
             return
@@ -3810,8 +4831,10 @@ class VIEW3D_PT_ds_tools(bpy.types.Panel):
             col.label(text="%s: ~%d export vertices%s" % (tex, n, " - over 65535!" if over else ""),
                       icon="ERROR" if over else "TEXTURE")
         for name, (w, h) in [] if helper else sorted(st["images"].items()):
-            if w > 1024 or h > 1024:
-                col.label(text="%s is %d x %d - over 1024" % (name, w, h), icon="ERROR")
+            if w > 2048 or h > 2048:
+                col.label(text="%s is %d x %d - over 2048" % (name, w, h), icon="ERROR")
+            elif w > 1024 or h > 1024:
+                col.label(text="%s is %d x %d - needs DesertStormFix 3.2+" % (name, w, h), icon="INFO")
             elif w and h and (w not in POT or h not in POT):
                 col.label(text="%s is %d x %d - not a power of two" % (name, w, h), icon="ERROR")
         for c in collision_of(ob):
@@ -3823,6 +4846,7 @@ class VIEW3D_PT_ds_tools(bpy.types.Panel):
 
 
 CLASSES = (IMPORT_SCENE_OT_evo, IMPORT_ANIM_OT_prb, IMPORT_SCENE_OT_ds_extract, IMPORT_SCENE_OT_ds_gc_audio,
+           IMPORT_SCENE_OT_ds_port, EXPORT_SCENE_OT_ds_env,
            EXPORT_SCENE_OT_evo,
            EXPORT_ANIM_OT_prb, OBJECT_OT_ds_assign_surface, OBJECT_OT_ds_make_collision, OBJECT_OT_ds_add_point,
            OBJECT_OT_ds_pick_surface, OBJECT_OT_ds_validate_skin_weights, OBJECT_OT_ds_quick_export,
@@ -3835,21 +4859,25 @@ SCENE_PROPS = {
     "ds_surface": lambda: EnumProperty(name="Surface", items=SURFACE_ITEMS, default="4",
                                        description="Collision surface: footstep sounds and bullet effects; "
                                                    "Blocking ... = an obstacle on the AI's route map"),
-    "ds_active_mod": lambda: StringProperty(name="Active Mod", default="",
+    "ds_active_mod": lambda: StringProperty(name="Active Mod", get=_profile_get("active_mod"),
+                                            set=_profile_set("active_mod"),
                                             description="Mod folder under <game>\\Mods that Export to Mod writes into "
-                                                        "(set by the last export Into a Mod Folder)"),
+                                                        "(set by the last export Into a Mod Folder; one per Game)"),
     "ds_last_exported_model": lambda: StringProperty(name="Model Name", default="",
                                                      description="File name Export to Mod writes (<name>.evo; empty = "
                                                                  "the active object's name)"),
     "ds_generic_prop": lambda: BoolProperty(name="Generic Prop", default=False,
                                             description="Export brand-new props on the generic template ("
                                                         + GENERIC_TEMPLATE + ") instead of a game model"),
-    "ds_game_dir": lambda: StringProperty(name="Game Folder", default="", subtype="DIR_PATH",
-                                          description="Folder with DesertStorm.exe (empty = found from the registry; "
-                                                      "set it if you have the game twice, e.g. Steam and GOG)"),
+    "ds_game_dir": lambda: StringProperty(name="Game Folder", subtype="DIR_PATH", get=_profile_get("game_dir"),
+                                          set=_profile_set("game_dir"),
+                                          description="Folder with the Game's exe (empty = found from the registry; "
+                                                      "set it if you have the game twice, e.g. Steam and GOG; one "
+                                                      "per Game)"),
     "ds_test_level": lambda: StringProperty(name="Test Level", default="",
                                             description="Level Test in Game starts straight into: Mission1.dll ... or "
-                                                        "a mod mission such as Ambush.lua (empty = the launcher)"),
+                                                        "a mod mission such as Ambush.lua (empty = the launcher; "
+                                                        "Desert Storm II always starts at the launcher)"),
     "ds_play_export": lambda: BoolProperty(name="Export First", default=True,
                                            description="Test in Game first exports the selected model into the active "
                                                        "mod (like Export to Mod)"),
@@ -3863,11 +4891,29 @@ SCENE_PROPS = {
 }
 
 
+def _scene_prop(name):
+    """SCENE_PROPS key -> this add-on's Scene property name (ds_surface -> sp("surface"))."""
+    return sp(name[3:])
+
+
+if PREFIX:                                  # a game add-on: its own ids, panel and sidebar tab
+    for _c in CLASSES:
+        if issubclass(_c, bpy.types.Operator):
+            _c.bl_idname = op_id(_c.bl_idname)
+    VIEW3D_PT_ds_tools.bl_idname = "VIEW3D_PT_%s_tools" % PREFIX
+    VIEW3D_PT_ds_tools.bl_category = VIEW3D_PT_ds_tools.bl_label = games.GAMES[GAME].short
+    if GAME == "cg":                        # Global Storm's animations are .ani
+        IMPORT_ANIM_OT_prb.bl_label = "Import ANI Animation"
+        EXPORT_ANIM_OT_prb.bl_label = "Export ANI Animation"
+        EXPORT_ANIM_OT_prb.filename_ext = ".ani"
+
+
 def register():
+    bpy.utils.register_class(DS_PT_preferences)
     for c in CLASSES:
         bpy.utils.register_class(c)
     for name, make in SCENE_PROPS.items():
-        setattr(bpy.types.Scene, name, make())
+        setattr(bpy.types.Scene, _scene_prop(name), make())
     bpy.types.TOPBAR_MT_file_import.append(menu_func_import)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
@@ -3876,6 +4922,7 @@ def unregister():
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
     bpy.types.TOPBAR_MT_file_import.remove(menu_func_import)
     for name in SCENE_PROPS:
-        delattr(bpy.types.Scene, name)
+        delattr(bpy.types.Scene, _scene_prop(name))
     for c in reversed(CLASSES):
         bpy.utils.unregister_class(c)
+    bpy.utils.unregister_class(DS_PT_preferences)

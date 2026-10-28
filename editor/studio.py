@@ -160,7 +160,7 @@ def _ground_y(s: Session):
     out = {}
     if s.routes:
         for m in s.routes.markers:
-            if m.flags & 1:
+            if m.flags & 1 or s.routes.is_rda:     # Global Storm: flags differ; matched by cell centre anyway
                 out[(round(m.pos[0]), round(m.pos[2]))] = m.pos[1] - MARKER_LIFT
     return out
 
@@ -171,13 +171,13 @@ def _new_obstacles(s: Session):
     path = _find_file(s.folder, s.level + ".ENV") if s.folder else None
     base = EnvFile.load(path) if path else None
     key = lambda r: (str(r.get("model")).upper(), tuple(round(c) for c in r["pos"]))   # noqa: E731
-    base_props = {key(r) for r in base.find("ENVI") if r.get("type") == 0} if base else set()
+    base_props = {key(r) for r in base.find("ENVI") if r.file.is_prop(r)} if base else set()
     base_ids = _base_ids(s)
     walk = {k.upper() for k in list(getattr(s, "terrains", {})) + list(getattr(s, "roads", {}))}
     out = []
     for r in s.env.records:
         try:
-            if r.kind == "ENVI" and r.fields and r.get("type") == 0 and not r.children:
+            if r.kind == "ENVI" and r.fields and r.file.is_prop(r) and not r.children:
                 if str(r["model"]).upper() not in walk and key(r) not in base_props:
                     out.append(r.index + 1)
             elif _is_vehicle(r) and (r["script_id"] not in base_ids or not base):
@@ -198,11 +198,18 @@ def walkability_grid(s: Session, resolution=0, blocked=True, cells=True):
         return {"footprints": _new_obstacles(s)}
     # a new level (s.blank) has no map yet: its session names the environment level, whose map is another place
     path = _find_file(s.folder, s.level + ".QTD") if s.folder and not getattr(s, "blank", False) else None
+    rda = None if path or not s.folder or getattr(s, "blank", False) else _find_file(s.folder, s.level + ".RDA")
     ground = _ground_y(s)
     cells, source = [], None
-    if path:
-        nodes = _read_qtd(open(path, "rb").read())
-        source = f"{s.level}.QTD (the game's AI walk map)"
+    if path or rda:
+        if path:
+            nodes = _read_qtd(open(path, "rb").read())
+            source = f"{s.level}.QTD (the game's AI walk map)"
+        else:   # Global Storm: the same quadtree sits in <LEVEL>.RDA after the header and bounds (routes.read_rda)
+            data = open(rda, "rb").read()
+            n = struct.unpack_from("<i", data, 0x20)[0]
+            nodes = _read_qtd(data[0x20:0x24 + 20 * n + 8])
+            source = f"{s.level}.RDA (the game's AI walk map)"
         walk_pts = []
         for kind, _d, child, x, z, h in nodes:
             if not child and kind == 3:
@@ -330,13 +337,13 @@ def save_minimap(s: Session, image_data_base64):
     folder = os.path.join(s.game_dir or "", "Mods", mod)
     if not os.path.isdir(folder):
         raise CommandError(f"the mission's mod folder is missing: {folder}")
-    with open(os.path.join(folder, page), "wb") as f:
+    from commands import _mod_out, _mod_remove
+    page_path, img_path = _mod_out(s, folder, page), _mod_out(s, folder, img)   # dds\ in an organised mod
+    with open(page_path, "wb") as f:
         f.write(images.encode_png(MAP_SIZE, MAP_SIZE, rgba))
-    with open(os.path.join(folder, img), "wb") as f:
+    with open(img_path, "wb") as f:
         f.write(_sheet(page, MAP_SIZE))
-    clean = os.path.join(folder, page[:-4] + ".clean.png")   # production.py's pin-less copy: a new picture replaces it
-    if os.path.exists(clean):
-        os.remove(clean)
+    _mod_remove(folder, page[:-4] + ".clean.png")   # production.py's pin-less copy: a new picture replaces it
     script, how = _script_path(s), None
     if os.path.exists(script):
         text = open(script, encoding="utf-8").read()
@@ -344,7 +351,7 @@ def save_minimap(s: Session, image_data_base64):
         if new != text:
             with open(script, "w", encoding="utf-8", newline="\n") as f:
                 f.write(new)
-    return {"files": [os.path.join(folder, img), os.path.join(folder, page)], "size": MAP_SIZE,
+    return {"files": [img_path, page_path], "size": MAP_SIZE,
             "script": how or "no script yet - save the mission again", "bounds": minimap_info(s)}
 
 
@@ -392,7 +399,7 @@ def save_prefab(s: Session, name, lines, note=""):
     walk = {k.upper() for k in list(getattr(s, "terrains", {})) + list(getattr(s, "roads", {}))}
     entries, centres = [], []
     for r in recs:
-        if r.kind not in _PASTE_END or (r.kind == "ENVI" and (r.get("type") != 0 or r.children)):
+        if r.kind not in _PASTE_END or (r.kind == "ENVI" and (not r.file.is_prop(r) or r.children)):
             raise CommandError(f"line {r.index + 1}: {r.kind} records can't go into a prefab (world pieces stay with their zone)")
         if r.kind == "ENVI" and str(r["model"]).upper() in walk:
             raise CommandError(f"line {r.index + 1}: terrain patches and roads can't go into a prefab")

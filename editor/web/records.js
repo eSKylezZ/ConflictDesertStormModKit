@@ -38,8 +38,6 @@
 
   // ---- window ----
   const dlg = el('dialog', { id: 'records-dialog' });
-  const tabRec = el('button', { class: 'on' }, 'Records');
-  const tabTxt = el('button', {}, 'Texts');
   const msg = el('span', { class: 'hint rec-msg' });
   const tables = el('div', { class: 'rec-tables' });
   const search = el('input', { placeholder: 'Search', class: 'rec-search' });
@@ -59,16 +57,32 @@
       'your mission: scripts use it by the hash shown. M01, T02 ... = a mission’s own texts (objectives, briefing, ' +
       'subtitles); missions reuse keys such as MOV_TXT1, so those change only in the mission shown. Search "M03" for one mission’s texts.'),
     tList);
-  dlg.append(el('div', { class: 'console-head' }, el('strong', {}, 'Game data'), tabRec, tabTxt, msg,
-    el('span', { class: 'grow' }), el('button', { onclick: () => dlg.close() }, 'Close')), recPane, txtPane);
+  // tabs: other scripts add theirs with window.recordsWindow.addTab (forms.js: records field by field, shown first)
+  const tabBar = el('span', { class: 'rec-tabs' });
+  const tabs = [];
+  let current = null;
+  dlg.append(el('div', { class: 'console-head' }, el('strong', {}, 'Game data'), tabBar, msg,
+    el('span', { class: 'grow' }), el('button', { onclick: () => dlg.close() }, 'Close')));
   document.body.append(dlg);
-  tabRec.onclick = () => { tabRec.classList.add('on'); tabTxt.classList.remove('on'); recPane.hidden = false; txtPane.hidden = true; };
-  tabTxt.onclick = () => { tabTxt.classList.add('on'); tabRec.classList.remove('on'); recPane.hidden = true; txtPane.hidden = false; loadTexts(); };
+  function addTab(label, pane, onShow, first = false) {
+    const t = { b: el('button', { onclick: () => showTab(t) }, label), pane, onShow };
+    if (first) { tabs.unshift(t); tabBar.prepend(t.b); } else { tabs.push(t); tabBar.append(t.b); }
+    pane.hidden = true;
+    dlg.append(pane);
+    return t;
+  }
+  function showTab(t) {
+    for (const x of tabs) { x.b.classList.toggle('on', x === t); x.pane.hidden = x !== t; }
+    current = t;
+    if (t.onShow) t.onShow();
+  }
+  const tabRec = addTab('Tables (rows)', recPane, () => { if (!tables.childElementCount) loadTables(); });
+  const tabTxt = addTab('Texts', txtPane, () => loadTexts());
 
   const btn = el('button', { id: 'records-btn', title: 'Game data: weapons, soldiers, stats, kits, vehicles, items, texts' },
                  'Records…');
   (document.getElementById('assets-btn') || document.querySelector('header'))?.after(btn);
-  btn.onclick = () => { dlg.showModal(); if (!tables.childElementCount) loadTables(); };
+  btn.onclick = () => { dlg.showModal(); showTab(current || tabs[0]); };
 
   // ---- tables and lists ----
   let table = null, key = null, record = null;
@@ -215,10 +229,11 @@
     const m = decodeURIComponent(location.hash).match(/^#(records|texts)(?:\/([^/]+))?(?:\/(.+))?$/i);
     if (!m) return;
     if (!dlg.open) dlg.showModal();
-    await loadTables();
-    if (m[1].toLowerCase() === 'texts') { if (m[2]) tSearch.value = m[2]; tabTxt.onclick(); return; }
+    if (m[1].toLowerCase() === 'texts') { if (m[2]) tSearch.value = m[2]; showTab(tabTxt); return; }
+    showTab(tabRec);
     if (m[2]) await openTable(m[2].toUpperCase().replace(/\.TXT$/, '') + '.TXT', m[3]);
   }
+  window.recordsWindow = { addTab, showTab, call, say, modName, needMod, el, dlg, open: () => btn.onclick() };
   window.addEventListener('hashchange', fromHash);
   fromHash();
 })();

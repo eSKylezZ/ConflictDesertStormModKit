@@ -1,6 +1,12 @@
-"""Conflict: Desert Storm world editor - local web server.
+"""Conflict world editor (Desert Storm, Desert Storm II, Vietnam, Global Storm) - the editor's local backend.
 
-  python editor/server.py --data <extracted game folder> [--game <game folder>] [--port 8765] [--no-browser]
+The editor is ConflictEditor.exe (app.py): its window shows the UI this server serves on 127.0.0.1, inside the exe.
+There is no browser version. Run on its own only for development, tests and a headless MCP session:
+
+  python editor/server.py --data <extracted game folder> [--game <game folder>] [--port <port>]
+
+The game comes from the game folder's exe, else the extracted folder (its .game marker); --port defaults to that game's
+port (Desert Storm / DS2 8765, Vietnam 8780, Global Storm 8790), so editors for two games can run side by side.
 
 Serves the editor UI (editor/web) and a JSON API: POST /api/<command> with the arguments as a JSON object ->
 {"ok": true, "result": ...} or {"ok": false, "error": "..."} (the commands in editor/commands.py; GET /api/help lists
@@ -25,7 +31,6 @@ import sys
 import threading
 import time
 import traceback
-import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import unquote, urlsplit
 
@@ -34,6 +39,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from assets import ModelCache  # noqa: E402
 import commands  # noqa: E402
 from commands import CommandError, Session  # noqa: E402
+from conflict_ds_tools import games  # noqa: E402
 from conflict_ds_tools.archive import find_game_dir  # noqa: E402
 
 WEB = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web")
@@ -43,19 +49,26 @@ TOKEN_HEADER = "X-Editor-Token"
 
 
 
+def _mtime(path):
+    try:
+        return os.path.getmtime(path)
+    except OSError:
+        return 0
+
+
 class Editor:
     def __init__(self, data_dir, game_dir, cache_dir):
         self.session = Session(data_dir, game_dir)
         self.models = ModelCache(data_dir, cache_dir)
         self.lock = threading.Lock()  # one command at a time
         self.token = secrets.token_urlsafe(32)  # per launch: /api/* calls must send it (X-Editor-Token)
-        self.commands_time = os.path.getmtime(commands.__file__)
+        self.commands_time = _mtime(commands.__file__)
 
     def reload_commands(self):
         """commands.py changed on disk: reload it in place (the open session and its undo history stay; the module's
         globals - COMMANDS, the session's command functions - are replaced)."""
-        t = os.path.getmtime(commands.__file__)
-        if t != self.commands_time:
+        t = _mtime(commands.__file__)
+        if t != self.commands_time and not getattr(sys, "frozen", False):   # (the exe has no commands.py to reload)
             self.commands_time = t
             importlib.reload(commands)   # (commands.py reloads conflict_ds_tools.env itself)
             # the open session onto the new class (its methods) with any attributes the new __init__ adds
@@ -192,7 +205,9 @@ def make_handler(editor: Editor):
                     full, ctype = os.path.join(sys.modules["production"].RELEASE_DIR, parts[0]), "application/zip"
                 elif path.startswith("/modfile/") and len(parts) == 2 and parts[1].lower().endswith(".wav") \
                         and editor.session.game_dir:
-                    full, ctype = os.path.join(editor.session.game_dir, "Mods", parts[0], parts[1]), "audio/wav"
+                    from conflict_ds_tools import modlayout   # the track at any depth (organised mods: sounds\)
+                    full = modlayout.find(os.path.join(editor.session.game_dir, "Mods", parts[0]), parts[1]) or ""
+                    ctype = "audio/wav"
                 else:
                     return self.send(404, b"not found", "text/plain")
                 if not os.path.isfile(full):
@@ -217,9 +232,20 @@ def make_handler(editor: Editor):
                 if level in ("", ".", "..") or model in ("", ".", "..") or ":" in level + model:
                     return self.send(404, b"not found", "text/plain")
                 s = editor.session
-                folder = s.folder if s.level == level.upper() else os.path.join(s.data_dir, level.lower())
+                if level.startswith("@"):        # a library source: a converted library or a mod
+                    folder = commands.source_folder(s, level, model[:-4] if model.lower().endswith(".glb") else model)
+                    if not folder:
+                        return self.send(404, b"not found", "text/plain")
+                else:
+                    folder = s.folder if s.level == level.upper() else commands.level_folder(s, level)
+                skin = ""
+                for kv in urlsplit(self.path).query.split("&"):
+                    if kv.startswith("skin="):
+                        skin = os.path.basename(unquote(kv[5:]).replace("\\", "/"))
+                if ":" in skin or skin in (".", ".."):
+                    skin = ""
                 try:
-                    glb = editor.models.glb(folder, model)
+                    glb = editor.models.glb(folder, model, skin)
                 except Exception as e:  # noqa: BLE001
                     traceback.print_exc()
                     return self.send(500, str(e).encode(), "text/plain")
@@ -248,21 +274,34 @@ def make_handler(editor: Editor):
     return Handler
 
 
+def start(data, game=None, port=None, cache=None, mod_layout=None):
+    """The editor server for one game (not yet serving - call serve_forever). port None = the game's default, 0 = any
+    free port; mod_layout = the layout new mods get (conflict_ds_tools.modlayout: organised (default) / flat). Returns
+    (server, url, Game, game folder)."""
+    g = (games.detect(game) if game else None) or games.detect_extracted(data) or games.current()
+    games.set_current(g)
+    game = game or find_game_dir(g)
+    editor = Editor(data, game, cache or os.path.join(data, "_editor_cache"))
+    if mod_layout:
+        editor.session.mod_layout = mod_layout
+    ThreadingHTTPServer.allow_reuse_address = False   # Windows: otherwise a second editor binds the same port silently
+    server = ThreadingHTTPServer(("127.0.0.1", g.port if port is None else port), make_handler(editor))
+    return server, f"http://127.0.0.1:{server.server_address[1]}/", g, game
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data", required=True, help="extracted game folder (ds_extract.py output)")
     ap.add_argument("--game", help="game folder (Mods are saved there; default: found in the registry)")
     ap.add_argument("--cache", help="model cache folder (default: <data>/_editor_cache)")
-    ap.add_argument("--port", type=int, default=8765)
-    ap.add_argument("--no-browser", action="store_true")
+    ap.add_argument("--port", type=int, help="default: the game's (8765 Desert Storm / DS2, 8780 Vietnam, 8790 Global Storm)")
+    ap.add_argument("--no-browser", action="store_true", help=argparse.SUPPRESS)   # old scripts: no browser either way
+    ap.add_argument("--mod-layout", choices=("organised", "flat"), default="organised",
+                    help="new mods: files in folders by type (organised, default) or all in the mod's top folder (flat); "
+                         "mods that already have files keep their own layout")
     a = ap.parse_args()
-    game = a.game or find_game_dir()
-    editor = Editor(a.data, game, a.cache or os.path.join(a.data, "_editor_cache"))
-    server = ThreadingHTTPServer(("127.0.0.1", a.port), make_handler(editor))
-    url = f"http://127.0.0.1:{a.port}/"
-    print(f"Editor: {url}  (data {a.data}, game {game or '-'})")
-    if not a.no_browser:
-        webbrowser.open(url)
+    server, url, g, game = start(a.data, a.game, a.port, a.cache, a.mod_layout)
+    print(f"{g.short} Editor backend: {url}  (data {a.data}, game {game or '-'}) - the editor itself is ConflictEditor.exe")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

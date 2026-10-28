@@ -25,10 +25,28 @@ conflict_desert_storm\
       ...your files...
 ```
 
-- Files can sit in sub-folders; the plugin finds them by name.
+- Files can sit in sub-folders; the plugin finds them by name. New mods keep them **in folders by type** - what the
+  Blender add-ons, the editor and the example builder make:
+
+  ```text
+  Mods\MyFirstMod\
+    evos\     models (.evo, .dyn)
+    dds\      textures (.dds .tga .png), image sheets (.img)
+    anims\    animations (.prb)
+    sounds\   sound packs (.sch), .wav, streams (.psf: sounds\SAS\ / sounds\Delta\ for one accent)
+    tables\   table rows (.txt, .replace.txt), texts (.strings)
+    defs\     .weapon .skin .unit .vehicle .gear .pouches
+    levels\   scenes, patches, routes, .lua / .dll missions
+    campaign.txt, records\, frames\   always in the mod's top folder
+  ```
+
+  Older mods have every file in the mod's top folder ("flat") - that works just the same, and the tools keep a flat
+  mod flat. In this guide "put X in your mod" means its folder above (or the top folder of a flat mod). A file a
+  `.weapon` / `.skin` names (`shot sound = bang.wav`) is found next to it first, then anywhere in the mods by name.
 - A folder whose name starts with `_` is switched off (`Mods\_MyFirstMod`).
-- In the game, **MODS** on the main menu lists every mod folder: switch them on and off there and press **Apply**
-  (Tab, or Square / X on a pad). No restart needed for most changes.
+- In the game, **MODS** on the main menu lists every mod folder, numbered in **load order**: switch them on and off,
+  move one with **Left / Right** (pad: L1 / R1), and press **Apply** (Tab, or Square / X on a pad). No restart needed
+  for most changes. When two mods have a file of the same name, the mod loaded **last** wins; a new mod loads last.
 - Every time the game starts (and on Apply), the plugin writes **`Mods\DesertStormFix-report.txt`**: what each mod
   added, notes, and problems marked **`[fail]`**. When something doesn't show up, look there first. The main menu
   also says "N PROBLEMS" at the bottom left when there are any.
@@ -320,11 +338,222 @@ and are the same in both folders (Mission 2 S02/S04/S05, 3 S01, 4 S02/S03, all o
 11A, the Outro and Training); the rest carry SAS / Delta speech. The texts of what is said are in each mission's
 `MnnStrs.loc` (keys `SPEECHn`, `OBJ_Mn_*`).
 
+#### 4.5b A body in several parts (several textures, big meshes)
+
+A character can be more than one mesh / material: the exporter writes one **skin part** per material (each with its
+own texture, saved as `.dds` with **Save Textures**), and cuts a part with more than 65 535 vertices or triangles into
+pieces (the game's limit per part). Characters made in other programs - one mesh with a dozen materials and 100 000
+vertices - export as they are, nothing to join or bake. A body with one material exports as before (one part, the
+game's uniform texture).
+
+What the game does with the parts (both games load, animate and draw every part with its own texture):
+
+- **Desert Storm II**: every soldier shows each part's own texture.
+- **Vietnam, Global Storm**: each part becomes a skin object of its own in the body file, with its own texture
+  (both games draw and animate every one).
+- **Desert Storm**: every character shows each part's own texture; the squad (Bradley, Foley, Connors, Jones) also
+  wears the uniform of his skin on the **main** skin part (the one the exporter keeps in the body's own skin slot -
+  the part with the original body's material). This needs DesertStormFix 3.3 or later; with older versions (or the
+  game alone) the squad's uniform covers every part. A Desert Storm body carries its
+  extra parts on spare connectors of its skeleton (an animation has one track per object, so the file can't grow): up
+  to 6 extra parts on a soldier body (the hand-forearm, shoulder and hip connectors nothing uses) - join materials if
+  you have more. Bodies exported with 1.8.x put them on bones instead, which crashes Desert Storm at the first
+  footstep (0x424D5C) - export those again. `body =` in a `.skin` (4.5) takes such a body like any other.
+
+Base the export on the game's own body (**Based On**) - not on a body you exported before (refused: its parts would
+stay).
+
 #### 4.6 Change a soldier's body for everyone (_BigHead)
 
 Steps 1-3 of 4.5, but export under the game's own name (`HERO01_ARMSTRONG.evo`). Every Bradley in every level uses
 it. Folders that replace game files are best shipped switched off (`_` in front of the folder name), so players
 choose.
+
+### Gear: hats, packs, face pieces and pouches
+
+Gear is the small models hung on a soldier's body - not part of his uniform texture. On the briefing screen's
+**CHARACTER** tab the HEADGEAR, BACKPACK, FACE and POUCHES rows pick them for each soldier, and every piece fits
+every soldier (they all share one skeleton). A mod adds pieces with `.gear` files and pouch sets with `.pouches`
+files.
+
+A `.gear` file:
+
+```
+id       = PINK_BERET      # the new model's name: letters, digits and _ (max 35)
+slot     = head            # head, back, face or pouch - which rows offer it
+name     = Pink Beret      # shown on the row
+based on = IR_BERET_RED    # a game model to start from ...
+texture  = PinkBeret       # ... with your texture (PinkBeret.dds in the folder, same layout and size)
+```
+
+Instead of `based on` + `texture`, `model = MYHAT` uses a model the mod ships (`MYHAT.evo`); with neither, the mod
+ships `<id>.evo`. Get a game piece's texture to paint over with the extractor (its texture is named like the model,
+e.g. `IR_BERET_RED.dds`). `texture <part> = X` works as for weapons when a model has more than one texture.
+
+Game pieces to start from (model names): hats `UK_CAP_GREEN`, `UK_HAT_DESERT`, `UK_WOOLLYHAT`, `UK_HELMET_DESERT`,
+`US_CAP_DESERT`, `US_HELMET_DESERT`, `US_BANDANA_SANDY`, `RU_FURHAT`, `IR_BERET_RED`, `IR_SHEMAGH01_RED` …; packs
+`UK_BACKPACKMEDIUM`, `US_BACKPACKLARGE`, `IR_BACKPACK_PLAIN`, `AN_RADIOPACK` …; face `AN_SUNGLASSES`,
+`AN_SPECTACLES`, `AN_CIGAR`, `IR_BEARD01`, `IR_MOUSTACHE01` …; pouches `UK_AMMOPOUCH01`, `UK_BOTTLEPOUCH01`,
+`US_HIPRPOUCH`, `US_HIPSATCHEL`, `US_CHESTTORCH`, `RU_AMMOPOUCH01`, `IR_HIPHOLSTER` … (the full list is the game's
+`CONNOBJS.TXT` plus the ones the extractor names under `chardata`). Pieces that aren't in `chardata.dat`
+(`RU_HIPHOLSTER`, `IR_AMMOPOUCH01`, `AN_WRENCH`, `AN_CHESTGRENADE`) exist only in missions whose scene uses them - use
+them as a base only if the mod ships the result, or expect them to be missing elsewhere.
+
+#### 4.6b Headgear (PinkBeret)
+
+`slot = head`. Hats hang on the head's hat point, so a hat made from another hat sits right on every soldier.
+
+#### 4.6c A backpack (DesertRadio)
+
+`slot = back`. The game takes packs off while a soldier rides a vehicle and puts them back when he gets out -
+yours too.
+
+#### 4.6d A face piece (GoldShades)
+
+`slot = face`: glasses, cigars, beards. Night-vision goggles use the same point: they replace the piece while worn,
+and it comes back when they come off.
+
+#### 4.6e A pouch, and a pouch set (TanPouches)
+
+`slot = pouch`. With **OPTIONS > DESERTSTORMFIX > FREE POUCH CHOICE** on, each pouch spot has its own row and
+offers every pouch. With it off (the default), pouches are picked as sets on the POUCHES row - so a pouch mod
+usually brings a set too. A `.pouches` file:
+
+```
+name        = Tan Belt
+belt        = TAN_BOTTLE      # a .gear pouch by its id ...
+belt left   = TAN_AMMOPOUCH
+belt right  = TAN_AMMOPOUCH
+hip right   = US_HIPRPOUCH    # ... or a game pouch by its model name
+```
+
+Spots: `belt` (back of the belt), `belt left`, `belt right`, `hip left`, `hip right`, `chest left`, `chest right`;
+left out or `none` = empty. A piece made for one spot works on another but can sit a little off - check it on the
+briefing screen (it turns the soldier round).
+
+#### 4.6f Pouch sets from the game's pieces only (PouchBundles)
+
+A `.pouches` file needs no models or textures: PouchBundles is three text files (Gunslinger, Toolbelt, Bandolier)
+mixing the SAS, US, Russian and Iraqi pieces.
+
+### Vehicles
+
+#### 4.6g A vehicle skin (DesertVehicles)
+
+Missions where the squad has a vehicle of its own (Mission 8's Humvee, Mission 9's Bradley) get a **VEHICLE** row on
+the briefing screen's MISSION tab: any ground vehicle with seats for the crew can take its place, from any faction.
+A `.vehicle` file adds one more choice:
+
+```
+id        = DESERT_HUMVEE        # the vehicle's name: letters, digits and _ (max 31)
+based on  = US_VEH_Hum_Vee       # the game vehicle it starts from (VEHICLE.TXT)
+name      = Humvee (Desert)      # shown on the row
+
+texture humvee01 = DesertHumvee01   # one line per texture slot you change
+texture humvee02 = DesertHumvee02
+```
+
+Seats, handling, guns and sounds stay the base vehicle's. Most vehicles use several textures - name each slot as the
+model does (the Humvee: `humvee01` .. `humvee04`; the Abrams: `VHAbrams01` .. `VHAbrams03`; the extractor's PNGs
+carry the same names). `texture = X` without a slot is for one-texture models. Turrets' guns are separate models
+(VEHWPNS.TXT -> WEAPS.TXT) and keep their colours. `damaged texture <slot> = X` skins the wreck.
+
+#### 4.6h A new vehicle
+
+`model = MYTANK` instead of textures: a model your mod ships (`MYTANK.evo`, exported from Blender based on the game
+vehicle so its parts, crew connectors and exits are where the game expects them). Tracks and wheels come from
+`MYTANK.DYN` - without one the base vehicle's is used so a level can still place it, but the vehicle isn't offered
+on the loadout screen's VEHICLE tab (DesertStormFix 3.3+: another body on the base's wheels / tracks can't be
+driven - ship a `.DYN` that fits your model). `damaged model = X` for its wreck, `faction = Iraqi` (or US,
+UK) to show the side next to the name. For different seats, handling or guns, add rows to the tables
+(`Vehicle.txt`, `VStat.txt`, `VehWpns.txt`, recipe 4.21) - a vehicle defined there by a row of its own is offered
+too.
+
+**Its own guns** (DesertStormFix 3.3+): `gun = US_VWPN_M1ABRAMS_MAINCANNON -> MY_CANNON` puts another weapon where
+the base vehicle has that gun (its `VehWpns.txt` weapon) - usually a `.weapon` based on that gun with your model
+(`based on = US_VWPN_M1ABRAMS_MAINCANNON`, `model = MY_CANNON`): it fires and sounds like the base's, looks like
+yours, and sits on the same connector. `gun = US_VWPN_BRADLEY_TOW -> -` leaves that gun off. One line per gun; a
+gun the base vehicle doesn't have is reported in the mod report. The porter (README, "Port from another Conflict game") writes these for a ported vehicle's own guns, gun by gun
+(same kind first); when two base guns share one connector (the MILAN Land Rover), the second goes on a free
+`CONNECTOR_WEAPONnn` through its `.weapon`'s `column 7`.
+
+**Its own stats** (DesertStormFix 3.3+): `stat column 9 = 60.00` changes `VStat.txt` column 9 (1-based) in a copy of
+the base's stats row named `<ID>_STATS` - armour, speeds and the other numbers the game reads from VStat. Columns
+2 to the row's end, except 13 (the engine bank: use `engine sound`); a wrong column is reported. The porter writes
+these for a Desert Storm II vehicle where DS2's VStat column means the same as DS1's (same value in 90 % of the
+vehicles both games have); The Great Escape's are left as the base's (too few vehicles in common to tell).
+
+**Gunner poses.** A seat whose connector is a `CONNECTOR_GUNNERnn` mans a gun (the first *n* of them, n = Vehicle.txt
+column 26). How the gunner stands is the gun's `Weaps.txt` column 54: `VehicleGunnerAim` (crouched at a hatch, the
+Humvee), `VehicleGunnerAim_TOW`, `VehicleGunner01` (standing, hands low) - or an animation your mod ships (`.prb`,
+recipe 4.14). The game leaves the gunner's own weapon in his hands; `VehicleGunnerAim` happens to hide it inside
+the gun, other poses show it. DesertStormFix 3.3+ doesn't draw a gunner's own weapon while he is in a gunner seat (it
+comes back when he gets out). Example `LandRoverVariants`: `VehicleGunnerAim_LR`, the hatch pose stood up for the Land
+Rover's rear .50 cal and MILAN, made by `examples/build_examples.py` from your game files. Guns go to the gunner seats
+in VehWpns order, which on the game's two-gun Land Rover crossed them over - the example swaps its two gunner seats.
+
+#### 4.6h2 Engine sound and handling (Hovercraft example, DesertStormFix 3.2+)
+
+`engine sound = Hovercraft` in a `.vehicle` gives it its own engine: a bank named so in a `.sch` bank pack in the
+mod, laid out like the game's `Wheels` bank (8 events: 0x0056 start, 0x0E50 stop, 0x0ECE idle loop, 0x0B46 revving
+loop, 0x0BB5 driving loop - its pitch follows the speed -, 0x03C0 rolling loop, 0x0E00 / 0x046E acceleration /
+deceleration one-shots). `grip = 0.6` sets a tyre friction - the game's vehicles have unlimited grip and never slide;
+low values drift - and `spin damping = 30` how quickly the body stops turning (the game's 0.2: a sliding vehicle spins
+on like a puck). Measured on the Hovercraft example: grip 0.6 alone kept spinning at ~60 deg/s after a turn; with spin
+damping 30 it drifts through the turn (up to ~30 deg sideways), stops rotating within ~1.5 s and glides on.
+
+Everything else about handling is the model's `.DYN` (text, numbers in this order; the Humvee's values):
+type `1` (wheeled) and `0`, `10`, max steer `1.22` (radians), ride height `53`, mass `10`, chassis box `200 100 500`,
+body offset `0 0 0` (z y x - a negative y lowers the centre of mass), collision box `275 150 550` and its offset,
+suspension `5 0.005 0.5 0.5 1.2` (travel cm, limit softness, damping ratio, travel split, rest), tyre slip / softness
+front `0.02 0.001` and rear `0.05 0.001`, wheelbase, track, wheel mass, wheel count, then one line per wheel (flags -
+0x20 = front -, radius, …, position, …, wheel model). More travel and less damping = bouncier (too much rolls over in
+turns), a lower body offset = steadier.
+
+`examples/hovercraft/build_hovercraft.py` builds the whole mod from your game files - hull model on the Humvee's seats
+and exits, invisible wheels, synthesised fan / turbine engine, hover handling (options `--grip`, `--travel`, …).
+
+Vehicles from other missions just work: the plugin copies whatever the swapped-in vehicle needs (models, textures,
+tracks, sounds) from the game's other archives when the mission loads. A saved game keeps the vehicles it was saved
+with, so turning a vehicle mod off can make such a save use the original vehicles again.
+
+### Soldiers
+
+#### 4.6i A new soldier type (`.unit`, DesertStormFix 3.2+)
+
+A `.unit` file adds a soldier type you can place in missions (editor or scene file) like the game's own:
+
+```
+id         = Iraqi_Militia        # max 35 characters, no commas
+based on   = Iraqi_Conscript      # the game soldier type it starts from (Units.txt)
+type       = SOLDIER              # SOLDIER, CIVILIAN, GOAT HERDER, EMIR, MISSILE EXPERT or POW
+model      = IraqInfantry01_Sandy # any soldier model - the game's or yours
+health     = 60
+experience = Veteran              # Rookie, Green, Trained, Regular, Veteran, Expert, Professional, Guard, Crack,
+                                  # Elite, Specialist, Skill One .. Skill Four
+voice      = Iraqi_Civilian       # speech bank; one from another mission is copied in
+item       = IR_WPN_AKSU          # the kit, one line per weapon / item ("item = X, amount")
+item       = MediKit, 1
+```
+
+Only `id` and `based on` are required; everything else is the base's. Item lines replace the base's kit (`item =
+none` for none). `column N = x` and `stat column N = x` set any other Units.txt / HStat.txt column (1-based) - the
+HStat columns besides health aren't decoded yet.
+
+What the game can't do: other **types** than the six above (each is built-in behaviour), and **height** - every
+soldier uses the same 51-bone skeleton and the animations set every bone's length, so a taller model shrinks back when
+it moves. A model must keep that skeleton (objects and order, export it from a game soldier); the report says so if it
+doesn't.
+
+`examples/aliens/build_aliens.py` builds three alien enemies this way from your game files: bodies reshaped from a game
+soldier on the same skeleton (elongated skull, big black eyes, thin limbs - `make_body.py` scales each bone's vertices
+along and across the bone, so the animations still fit), three energy guns (`.weapon` files with script-built models,
+pictures and synthesised shots) and alien voices (copies of the Iraqi soldier voice bank with synthesised calls).
+
+The report also checks raw table rows (`Units.txt`, `UnitWpns.txt`, `HStat.txt` parts, recipe 4.21): rows the game
+can't load are left out with a reason, and Units.txt's last column (the number of kit slots) is set from the kit rows -
+with the plain game a slot without a UnitWpns row crashed the mission, and more rows than slots dropped the whole kit
+table.
 
 ### Weapons
 
@@ -566,7 +795,7 @@ export. A taller ladder needs `#PT_LADDER_TOP` at its new top. Points you don't 
 - Vertex colours (the baked lighting on buildings and many props) are exported from the mesh's colour attribute, as
   the import made it.
 - **Based On › Auto / Generic Prop** builds a brand-new prop without a game model to start from (on the game's
-  `BH_BODGEPLATE`, found in your extracted folders or read from your game archives). Without a `#BSP_` object it
+  `BH_BODGEPLATE` - Desert Storm II: `WALLMAP` - found in your extracted folders or read from your game archives). Without a `#BSP_` object it
   collides with its own mesh; its origin is Blender's world origin. The same happens when nothing at all is given.
 - Images loaded from the extracted game folders aren't saved into the mod again - the game has them already.
 - After one export **Into a Mod Folder**, the sidebar's **Export to Mod** button repeats it for the selection in one
@@ -575,7 +804,7 @@ export. A taller ladder needs `#PT_LADDER_TOP` at its new top. Points you don't 
 #### Sidebar tools (3D View › N › Desert Storm)
 
 - **Model check**: vertices and triangles; export vertices per texture (positions × UV seams - hard edges add a few
-  more) against the game's 65535; images over 1024 or not a power of two; collision triangles (over 3000 is slow).
+  more) against the game's 65535; images over 2048 (over 1024 needs DesertStormFix 3.2+) or not a power of two; collision triangles (over 3000 is slow).
   Counts follow the mesh in Object Mode; **Refresh** after UV edits.
 - **Show Collision Surfaces**: `#BSP_` objects drawn solid, one colour per surface (the list shows the active
   object's), instead of wireframes. In Edit Mode the eyedropper beside the surface list takes the active face's
@@ -598,7 +827,68 @@ import makes them, the export writes whatever markers the action has (move them 
 new cycle; other marker names are ignored with a warning). An action without markers keeps the footsteps of the game
 animation with the same name (or the one in the exporter's **Footsteps From**).
 
+#### 4.20a Desert Storm II models and animations
+
+The add-on works the same way on **Conflict: Desert Storm II**, through its own menu entries: extract its archives
+(**File › Import › Conflict: Desert Storm II Archives (extract)**), import its models and animations (**Conflict:
+Desert Storm II (.evo)** / **… Animation (.prb)**), and export with **File › Export › Conflict: Desert Storm II
+(.evo)**. Those entries use Desert Storm II's own game folder, extracted folder and active mod; a Desert Storm model or
+skeleton is refused there (and flagged on import). What's
+different:
+
+- **Collision surfaces**: Desert Storm II has twelve more (Snow, Soft Mud, Tree Canopy, Gravel, Plastic, Rubber and
+  their `Blocking …` twins). They're in the surface lists, marked "Desert Storm II only"; a Desert Storm model refuses
+  them.
+- **Animations** name the bone each track moves (Desert Storm's go by position), so one animation plays on every
+  soldier body with those bones. Export with **Footsteps From** set to the game animation it replaces: the new one
+  keeps that animation's tracks, including those for objects this body doesn't have (the vehicle gunner animations
+  also move the gun). Which one a seat uses is in the catalog tables: a vehicle's guns (`VEHWPNS.TXT`) name their
+  gunner animation in `WEAPS.TXT` (Land Rover MK19: `BunkerGunnerAim`, .50 cal: `VehicleGunnerAim`).
+- **Brand-new props** start from Desert Storm II's `WALLMAP` (one flat panel that collides with itself).
+- **Mods**: DesertStorm2Fix's Mods folder replaces a game file by its **file name** (`<game>\Mods\<Mod>\` -
+  sub folders don't matter, a `_` in front switches the mod off; `Mods\DesertStorm2Fix-report.txt` lists every file it
+  served). So export with **Into a Mod Folder** and **Replace the Game's Model** (the model under the original's
+  name), animations under the game animation's name, new textures with **Save Textures**. A model under a new name is
+  used nowhere until a game file names it; for a new weapon model the exporter writes a starter `.weapon` (DS2's
+  plugin reads them). Details: the patch's `docs/sdk/ds2-mods.md`.
+- **Test in Game** exports and starts Desert Storm II at its launcher: DesertStorm2Fix has no `+level` start, so pick
+  the mission in the game's menus (the Test Level field only works for Desert Storm).
+
+**The Great Escape, Vietnam, Global Storm**: their plugins (GreatEscapeFix, VietnamFix, GlobalStormFix) serve
+`<game>\Mods` the same way - a file replaces the game's by its file name, in any folder of the mod. **Into a Mod
+Folder** works for all three: export with **Replace the Game's Model** to change a game model. A new weapon model in
+The Great Escape gets a starter `.weapon` (GreatEscapeFix reads them); in Vietnam and Global Storm a new name is used
+only once a game file names it. **Test in Game** exports and starts the game at its launcher / front end - only
+Desert Storm has the `+level` start. GreatEscapeFix and GlobalStormFix list what they served in
+`Mods\<plugin>-report.txt` (VietnamFix has no report yet).
+
 ### For experts: tables
+
+#### 4.20b Change records field by field (`records\*.lua`) - the recommended way
+
+Every weapon, soldier type, vehicle, item, door and so on is a **record** with a fixed ID - `ds1:weapon/us_wpn_m16a2`,
+`ds1:unit/bradley`, `ds1:vehicle_stats/tankstat_m1a1`. A mod changes records with small files in
+`Mods\<YourMod>\records\` (any name ending in `.lua`) that name **only the fields they change**:
+
+```lua
+return {
+  { id = "ds1:weapon/us_wpn_m16a2", magazine_size = 60, damage = 16 },
+  { id = "ds1:weapon/my_rifle", based_on = "ds1:weapon/us_wpn_m16a2", key = "MY_RIFLE", damage = 30 },
+  { id = "ds1:feature/nu_prop_crate5#2", delete = true },
+}
+```
+
+- Two mods changing *different* fields of one weapon both apply; when they set the *same* field differently, the mod
+  that loads later wins and `Mods\DesertStormFix-report.txt` says so (`Records: conflict: ...`).
+- To see every record and field name: `python cli/ds_records.py -o <folder>` writes them from your own game
+  (`forms\weapon.lua`, `forms\unit.lua` ...; keep that folder to yourself - it's game data), `--levels` adds each
+  level's placed objects, waypoints and regions with their editor IDs.
+- The editor's commands `forms_types`, `forms_list`, `form_get`, `form_set`, `form_new`, `form_delete`,
+  `form_revert`, `forms_report` (also over MCP) write `records\editor.lua` for you.
+- Full format: DesertStormFix's SDK page `docs/sdk/data-files.md`. Needs DesertStormFix 3.3 or newer.
+
+The older ways below (`.txt` rows, `.replace.txt`, `.weapon` files) still work and are applied on top of record
+edits; prefer records for new mods - they combine with other mods instead of replacing whole rows.
 
 #### 4.21 Add rows to a game table (ExtraRecruit)
 
@@ -628,6 +918,10 @@ UnitWpns.replace.txt   Iraqi_Conscript,IR_WPN_AK74,WEAPON,0
 HStat.replace.txt      IR_Infantryman00,20,0,0,0,0,90,60.00,10,0.00,0.00,0.00,0.00,90,100.00,100,5.00,1.50
 ```
 
+A soldier type's kit slots (last column of `Units.txt`) and a vehicle's gun slots (`Vehicle.txt` column 26) follow
+the kit / gun rows automatically (DesertStormFix 3.2+); with an older version keep them equal to the number of rows -
+the example above needs `Iraqi_Conscript`'s last column raised to 2.
+
 Plain `<table>.txt` files still only add rows. The editor's *Records…* window shows every table with named columns
 and links between them (a soldier type → its stats, experience level and kit; a vehicle → its stats and guns) and
 writes these files.
@@ -655,6 +949,11 @@ OBJECTIVE1A = Reach the radar site before nightfall.
 
 The *Texts* tab lists a mission key once per mission (search `M03` for one mission's texts) and writes the section
 for you.
+
+**Texts for your own level** (DesertStormFix 3.3+): a section name no game file has, e.g. `[MYOP]`, is a text file of
+its own - a `.lua` level switches it on with `game.load_strings("MYOPStrs.loc")` (the plugin sees there is no such
+file and uses the section; the texts don't touch any other level). A key known only by its number is written
+`#4ECE85EA = Neutralize the Sniper` - what the porter's `texts` lines write for other games' texts (README, "Port from another Conflict game").
 
 ## 5. Sharing
 
@@ -694,11 +993,8 @@ and for the players you share them with.
 
 ### 7.1 Make one in the editor
 
-The kit's level editor runs in your browser and makes a whole mission without code:
-
-```
-python editor/server.py --data extracted
-```
+The kit's level editor, **ConflictEditor.exe**, makes a whole mission without code: start it, pick the game (it
+extracts the game's archives the first time) and open a level.
 
 1. Open a level (Mission 1 …), or **New level…** for an empty one with a ground you can sculpt.
 2. Place soldiers, vehicles and props from the Library; give soldiers a patrol path (**Paths & Regions…**); place
@@ -712,6 +1008,18 @@ python editor/server.py --data extracted
 A mission made from a campaign level keeps that level's own mission logic (briefing, cutscenes, objectives), and
 yours runs on top. The mod holds only your changes, so it can be shared as it is (5). The full tour of the editor:
 [editor/README.md](../editor/README.md).
+
+Things DesertStormFix 3.2+ adds that matter for missions:
+
+- **Difficulty**: the DIFFICULTY screen can also offer VERY EASY and VERY HARD. A rule's *difficulty* condition
+  (Only if … difficulty is / at least / at most …) lets a mission add or hold back enemies per difficulty.
+- **Kills for cutscenes**: *Kill / destroy* has a "blown up" choice - the soldier is thrown with gibs and a large
+  blood pool, as if a grenade went off (soldiers only).
+- **Unreachable spots**: an AI soldier ordered somewhere it can't walk to (no route on the walk map) now teleports
+  there when no player can see him or the spot (the Japanese release's fix) - so check the walk map warnings rather
+  than relying on a soldier never arriving.
+- **Online co-op**: a custom mission can be played online when both players have the mod. Rules stay in step on
+  both PCs, random chance included.
 
 ### 7.2 A custom campaign (`campaign.txt`)
 
@@ -735,6 +1043,109 @@ DesertStorm.exe +level sandstorm1.lua
 
 skips the launcher and the menus and loads that mission (the editor's *Play* does this). Also works with a game
 mission (`+level Mission3.dll`).
+
+### 7.3b Missions written as a DLL
+
+Missions can also be DLLs, like the game's own `MissionN.dll`. Put the DLL in your mod folder:
+
+- **A changed game DLL** (e.g. your edited `Mission6.dll`) replaces the game's DLL while the mod is on. You can't
+  share the game's code, so *Export Mod Package* ships it as `Mission6.dllpatch`: only the bytes you changed. Each
+  player's plugin builds the DLL from their own copy. A copy of a game DLL under a new name (`MyOp.dll` made from
+  `Mission6.dll`) is shipped as `MyOp.dllpatch` in the same way. A player whose game DLL is a different version gets
+  a line in `Mods\DesertStormFix-report.txt`, and the game keeps its own DLL.
+- **A DLL of your own** (your own code) is shipped as it is.
+
+In the editor, *Open mission* lists the mission DLLs in your mods. Opening one shows its scene, routes and logic.
+The scene is the one the DLL loads; if it isn't a game level's, you pick the level whose models it uses. *Save as
+mission* / *Play* keep your DLL running underneath (`--@base MyOp.dll`). A DLL with a new name also gets
+`MyOp.level`, which contains `--@archive mission6` (the game level whose archive and sounds it uses). Without that
+file, `+level MyOp.dll` would look for `MyOp.dat`.
+
+### 7.3c Changing a game mission's script (readable missions, `--@replaces`)
+
+The game's missions can be turned into Lua you can read and edit, made from **your own** mission DLLs.
+
+**In the editor:** *Open mission…* lists the game's missions as "Mission1 (game mission as Lua)". Pick one and name a
+mod folder: the first time, its Lua is made from your game's DLL (`Mods\<YourMod>\mission_src\Mission1\`), the level's
+scene opens, and **Script…** shows the mission's events. Every save rebuilds `Mods\<YourMod>\Mission1.lua` (with the
+`--@replaces` line below), so the game plays your version; a save that doesn't load as Lua is reported with its line.
+*Export mod* leaves both out (they're made from the game's code - see the end of this section). Commands, also over
+MCP: `game_missions`, `game_mission_open`, then `get_script` / `save_script`.
+
+**By hand:**
+
+```bat
+python cli/ds_mission2lua_readable.py "D:\Games\Conflict - Desert Storm\Training1.dll" -o work
+```
+
+`work\Training1\scripts\events.lua` is the mission logic: every function of the DLL, the script API by name
+(`api.set_path(...)`), messages as `on("killed", ...)`, scene objects by their editor ID (`obj.ARMOURER`). Every
+other script API call is there for you too (`api.play_stream`, `api.set_view_camera` …, in
+`scripts/runtime.lua`). After editing, `--bundle work\Training1` rebuilds `work\Training1.lua`.
+
+To play your version **instead of the game's** `Training1.dll`, add this line under the first line of
+`Training1.lua` and put it in a mod folder:
+
+```lua
+--@replaces Training1.dll
+```
+
+The level stays the game's level (its menu entry, archive, briefing and saves); only its script comes from your mod
+(DesertStormFix 3.3+; [PSE docs: mission replacements](https://github.com/eSKylezZ/ConflictDesertStormPatch/blob/main/docs/sdk/reference/mission-replacement.md)).
+That Lua is made from the game's code, so it's for your own PC: **don't share it**.
+
+**To share a changed mission, write a mission patch** (DesertStormFix 3.3+; [PSE docs: mission
+patches](https://github.com/eSKylezZ/ConflictDesertStormPatch/blob/main/docs/sdk/reference/mission-patches.md)). This is
+a `Training1.patch.lua` in your mod folder that holds only your own Lua. DesertStormFix makes the same readable Lua
+from the player's own `Training1.dll` in the game, applies your patch to it and runs the result. The patch has:
+
+```lua
+--@patches Training1.dll
+--@readable 1
+
+--[[@edit
+        f_47B0(2705)
+        g_14258 = 19
+--@to
+        f_47B0(2705)
+        my_heli_flyover()
+        g_14258 = 19
+]]
+
+function my_heli_flyover()
+  api.activate_object(SCENE.objects.HELI_FLYOVER)
+end
+```
+
+- **Edit blocks** change lines of `scripts/events.lua`. Copy the lines from your `work\` output; they must appear there
+  exactly once.
+- **The rest is your Lua.** It runs in the mission's own environment before the level starts, so it can define new
+  functions or replace the mission's (keep the old one in a local to call it). DesertStormFix adds:
+  - `SCENE.objects` / `.waypoints` / `.regions` / `.cameras`: every editor ID of the level's scene;
+  - `TEXT.KEY` / `MOVIE.KEY`: text hashes;
+  - `X`: the mission runtime.
+
+Every mod's patch for a mission applies, in the mods' load order. A patch that doesn't fit, for example because
+another patch changed the same lines, is left out and named in the mod report. Check yours before playing:
+`python cli/ds_mission_patch.py "<game>\Training1.dll" Training1.patch.lua` (it applies the patch to the readable
+mission and compiles the result). The example **RestoredMissions** (`examples/restored_missions/RestoredMissions/`) is
+four such patches. It puts cut content back into the training missions and Mission 1, and names the scene's objects,
+waypoints, regions and cameras by editor ID (`SCENE.objects.ARMOURER`, `SCENE.cameras.CS_S2_CLOSEUP`).
+
+Adding a film to a level that has none: don't call `api.set_sound_mode(1)` unless a stream plays after its
+`set_sound_mode(0)`. The movie sound mode silences every ordinary sound and only switches back when the next stream
+starts, so the level's speech stays silent (the first version of the training restoration did this - see the PSE page's "Pitfall").
+
+Soldiers can climb ladders in a script: the game has an unused script command `mount_ladder(soldier, 1)` (slot
+0x568) that puts him on the nearest ladder, and the climb itself is the movement rule the player's input uses
+(`MSR_LADDER_CLIMB_UP` 0x3C, down 0x3D) applied every frame - the game dismounts him at the other end. RestoredMissions'
+`common.lua` has it ready: `local c = tr_climb(id, true)` then `tr_climb_step(c)` each frame until it returns "done"
+(Training 2: Johnson climbs the observation tower).
+
+Changing where a soldier walks: check whether the code you replace runs once or every frame. Mission 1's wave step
+calls `set_path` for the small-bridge guard on every frame until the truck reaches its next waypoint, and a path set
+again each frame never gets past its first waypoint (he circles it). RestoredMissions' `mission1.lua` starts its run
+once.
 
 ### 7.4 Writing a mission script by hand (Lua)
 
@@ -790,6 +1201,10 @@ Objects are named by their **script id** (the number the editor shows for each s
 | `game.set_team(id, team)` | A soldier's side (0 = the squad) |
 | `game.captive(id, on[, keep_kit])` | Makes a soldier a prisoner like Foley in Mission 1 (`false` frees him into the squad) |
 | `game.keep_awake(id, on)` | The game lets enemy soldiers the player hasn't seen yet sleep, so their patrols and orders wait until the player comes near; this keeps one awake. Returns true when it worked |
+| `game.kill(id)` | Kills a soldier the normal way (death animation, blood pool). Returns true when it was a living soldier. Needs DesertStormFix 3.2+ (the rules' Kill / destroy uses the game's own kill call, which also destroys vehicles and props) |
+| `game.explode(id)` | Kills a soldier as if hit by an explosion: the body is thrown, gibs and a large blood pool - for cutscenes. Returns true when it was a living soldier. Needs DesertStormFix 3.2+ |
+| `game.difficulty()` | The difficulty: 0 EASY, 1 MEDIUM, 2 HARD, 3 VERY HARD, 4 VERY EASY (3 and 4 are DesertStormFix's own; the game's is_difficulty_hard / is_difficulty_easy answer VERY HARD as hard and VERY EASY as easy) |
+| `math.random` | Seeded the same on every PC in an online co-op game (the session's seed), so random choices stay in step - keep using it rather than reading the clock |
 | **Players and regions** | |
 | `game.player_soldier(n)`, `game.player_position(n)` | Player n's (0-3) soldier / position, nil when there is none |
 | `game.regions` | Trigger regions by name (the editor writes them); entering / leaving one sends `ENTERED` / `LEFT` |

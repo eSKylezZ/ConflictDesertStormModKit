@@ -26,6 +26,9 @@ The level editor's missions, and a few newer mod features, need **DesertStormFix
 
 - **Extract the game archives** (`*.dat`): meshes, textures, animations, vehicle data and tables, with the
   original file names recovered for most files. Optional PNG copies of all textures.
+- **Games**: Conflict: Desert Storm and Desert Storm II in full; in Blender also The Great Escape (import + export,
+  animations too), Conflict: Vietnam and Conflict: Global Storm (import incl. animations; export of static models
+  with collision and points) - see [docs/GAMES.md](docs/GAMES.md).
 - **Blender importer** (File › Import):
   - **Models** (`.evo`): props, buildings, world pieces and vehicles with their full part hierarchy
   - **Vehicles come assembled**: tracks, road wheels and guns are attached where the game puts them
@@ -55,9 +58,37 @@ The level editor's missions, and a few newer mod features, need **DesertStormFix
 
 Works in Blender 3.6, 4.2 and 5.x.
 
-1. Download `conflict_ds_tools-<version>.zip` from NexusMods.
+1. Download the add-on for your game from NexusMods - or the one for every game:
+
+   | Zip | Add-on | File menu entries / sidebar tab |
+   | --- | --- | --- |
+   | `conflict_ds1_tools-<version>.zip` | Conflict: Desert Storm (DS1) tools | Conflict: Desert Storm (+ GameCube audio, porting from the other games) / **Desert Storm** |
+   | `conflict_ds2_tools-<version>.zip` | Conflict: Desert Storm II tools | Conflict: Desert Storm II / **Desert Storm II** |
+   | `conflict_cv_tools-<version>.zip` | Conflict: Vietnam tools | Conflict: Vietnam / **Vietnam** |
+   | `conflict_cg_tools-<version>.zip` | Conflict: Global Storm tools | Conflict: Global Storm / **Global Storm** |
+   | `conflict_ge_tools-<version>.zip` | The Great Escape tools | The Great Escape / **Great Escape** |
+   | `conflict_do_tools-<version>.zip` | Conflict: Denied Ops tools | Conflict: Denied Ops - import only: models, characters, scenes, archives / **Denied Ops** |
+   | `conflict_ds_tools-<version>.zip` | Conflict: Desert Storm tools | every game but Denied Ops (one entry each) / **Desert Storm** |
+
+   They can all be installed at once, next to each other: each has its own operators, sidebar tab, settings and
+   preferences. A game add-on's preferences hold only its game's folders and mod.
 2. In Blender: **Edit › Preferences › Add-ons**, then the **▾** menu at the top right › **Install from Disk…**,
    and pick the zip. (In Blender 3.6: **Install…** on the Add-ons page, then tick the add-on.)
+
+The sections below name the menu entries of the every-game add-on; a game add-on has the same ones for its game.
+Scripts call a game add-on's operators with its prefix: `bpy.ops.import_scene.cds1_evo(...)`,
+`bpy.ops.object.cds2_make_collision(...)` (`cds1`, `cds2`, `ccv`, `ccg`, `cge`, `cdo`; the every-game add-on keeps
+`import_scene.evo`, `object.ds_make_collision` ...).
+
+### 0. One menu entry per game
+
+**File › Import** and **File › Export** have an entry per game: **Conflict: Desert Storm (.evo)** and **Conflict:
+Desert Storm II (.evo)**, and the same for animations, scenes and archives. The entry decides everything: extraction
+and the import browser use that game's extracted folder (default `Documents\Conflict Desert Storm extracted` /
+`Documents\Conflict Desert Storm II extracted`), exports use its game folder and active mod, and a model or animation
+of the other game is refused on export. Each game keeps its own game folder, extracted folder and active mod - set
+them in Edit › Preferences › Add-ons › Conflict: Desert Storm tools. The sidebar's **Export to Mod** and **Test in
+Game** use the game of your last import / export (shown at the top of the Desert Storm tab).
 
 ### 1. Extract the game
 
@@ -76,6 +107,14 @@ doesn't store are named after their hash, e.g. `_867B1D52.DDS`; the importer sti
 PC into the mod `<game>\Mods\GameCubeAudio`, one replacement sound cache per level. It runs in the background with a
 progress bar (all levels: about a minute and a half; **Levels** limits it, e.g. `mission1`), **Esc** cancels. Switch the
 mod on and off in the game's MODS menu. Nothing from the disc ships with the kit: everyone converts their own copy.
+
+**Port from another Conflict game**: **File › Import › Conflict: Port Between Games (recipe)**, pick a recipe
+(`.port` text file: `name`, `from`, then `model` / `weapon` / `vehicle` / `unit` / `character` / `animation` / `texts` / `level` lines -
+[docs/PORTING_PLAN.md](docs/PORTING_PLAN.md)). The models, guns, soldiers and animations it names are converted from your
+own copy of that game into `<Desert Storm>\Mods\<name>` (`texts M01` = that game's Mission 1 texts as a `.strings`
+section for a ported level, `texts catalog` = its shared texts Desert Storm doesn't have); the report opens in the Text Editor as `port-report.txt`.
+**Source Game Folder** overrides the recipe's `source =` line (a game folder or a folder extracted from it). Same as
+`python cli/ds_port.py <recipe>`.
 
 Tick **Editable Models (.blend)** to also get every model as its own Blender file, in `_blend\<archive>\` next to
 the extracted folders (about 2,300 models, roughly 20 minutes; **Include Level Pieces** adds the level geometry). Each
@@ -114,7 +153,9 @@ Options in the import dialog:
 ### 3. Export a model for the game
 
 Make new geometry for a game model - a weapon with a suppressor, a different prop - and export it:
-**File › Export › Conflict: Desert Storm (.evo)**.
+**File › Export › Conflict: Desert Storm (.evo)**. The same works for **Conflict: Desert Storm II** models and
+animations (**File › Export › Conflict: Desert Storm II (.evo)**, based on one of its models) - see [docs/MAKING_MODS.md](docs/MAKING_MODS.md) 4.20a (DesertStorm2Fix's
+Mods folder replaces game files by name).
 
 1. Import the model it replaces (e.g. `mission1/LMG01_M249SAW.EVO`) and edit it, or add your own meshes.
 2. Select the meshes and export. **Based On** is filled in with the imported model; it keeps the game's
@@ -135,8 +176,8 @@ the model's own mesh, keep the original's, or none). The **Desert Storm** tab of
 collision surfaces to faces, makes a collision or shadow mesh from the active mesh (box, convex hull, copy) and adds
 points. Details: [docs/MAKING_MODS.md](docs/MAKING_MODS.md) 4.19b / 4.19c.
 
-Export options: **Into a Mod Folder** writes into `<game>\Mods\<Mod>` (a new weapon or body gets a starter
-`.weapon` / `.skin`), **Replace the Game's Model** saves under the original's name, **Check Only** reports problems
+Export options: **Into a Mod Folder** writes into `<game>\Mods\<Mod>` for every game but Denied Ops (a new weapon
+gets a starter `.weapon` in Desert Storm, Desert Storm II and The Great Escape, a new body a `.skin` in Desert Storm), **Replace the Game's Model** saves under the original's name, **Check Only** reports problems
 without writing.
 
 **Brand-new props**: set **Based On** to **Auto / Generic Prop** (or just export with nothing to base it on). The
@@ -158,7 +199,8 @@ your own game archives - nothing of the game ships with the add-on. It collides 
   (Tarmac, Baked Earth …); export both with Auto / Generic Prop.
 - **Game** - **Test in Game** exports the selection into the active mod (like Export to Mod) and starts
   `DesertStorm.exe`, straight into the **Level** typed there (`Mission1.dll`, or a mod mission such as `Ambush.lua`;
-  empty = the launcher). It refuses while the game is already running, since the game reads mods when it starts.
+  empty = the launcher; the other games always start at their launcher / front end). It refuses while the game is
+  already running, since the game reads mods when it starts.
   **GameCube Audio...** is the GameCube sound conversion below.
 - **Level** - **Import Scene**, **Bake Minimap** and **Generate Asset Library** (below).
 - **Weapon** - **Aim Camera** looks down the sights: add **Rear Sight** and **Front Sight** points (Add Point, 3D
@@ -175,7 +217,9 @@ your own game archives - nothing of the game ships with the add-on. It collides 
 reshape it, sculpt a new head - keeping it weighted to the skeleton, and export it under the same name
 (`HERO01_ARMSTRONG.evo` replaces Bradley's body in a mod folder). The skin keeps the game's UV layout, because the
 uniform/face textures are picked by the game (`.skin` files of the DesertStormFix plugin add new ones). Up to 4
-bones per vertex; keep the body one connected mesh.
+bones per vertex. A body with several materials exports as several skin parts, each with its own texture, and a part
+over 65 535 vertices / triangles is cut into pieces - Desert Storm II shows every part's texture; Desert Storm puts
+the squad's uniform on every part (other characters keep theirs) - see MAKING_MODS 4.5b.
 
 **Level scenes**: **File › Import › Conflict: Desert Storm Scene (.env)** and pick a level's scene, e.g.
 `mission1/MISSION1.ENV` (or an editor mission's `.envpatch` in its mod folder; its base scene comes from the extracted
@@ -185,6 +229,24 @@ out of their source model like the plugin does. Lights become Blender lights (en
 reach), trigger regions wireframe boxes / spheres named like the region, ambient sounds empties whose outer sphere is
 where they fall silent. Every object keeps its scene line (`ds_line`) and model as custom properties. Turn off **World
 Pieces** for a quick look at the props.
+
+**Export the scene back**: **File › Export › (game) Scene (.env)** (every game the import reads: Desert Storm, The
+Great Escape, Desert Storm II, Vietnam, Global Storm) writes the imported scene with your changes and leaves every
+other line as it was (with no changes the file is the original byte for byte):
+
+- props and objects moved, turned or scaled (scale only where the scene version has it - a note says otherwise);
+- duplicates (Shift+D) become new records - an object copy gets the next free script id;
+- deleted objects are removed from the scene (only records the import brought in - turned-off groups stay);
+- a model added from the `<LEVEL> models` collection (Add › Collection Instance) becomes a new prop;
+- a new mesh becomes a new model (`.evo`, named after the object, its new textures as `.dds`) next to the scene and is
+  placed as a prop in the zone of the nearest prop (**Export New Meshes as Models**; **New Models Collide** with their
+  own mesh or not at all). It is built on the game's generic prop (Vietnam: `MPD_INVISBLOCKING3M`, Global Storm:
+  `INVISPOLY`, found in the extracted folders or the game's archives);
+- lights, trigger regions and ambient sounds at their new places; suns and spot lights turned.
+
+Global Storm's split scenes are written as their index plus the `.ART` / `.DES` / `.SND` parts. Export into a
+DesertStormFix mod folder (`Mods\<Mod>\MISSION1.ENV` plus the new models) to play the edited level. Denied Ops scenes
+aren't imported or exported by the add-on (the level editor reads and writes them).
 
 **Bake Minimap** renders the level from straight above into the active mod as the in-game tactical map
 (`GW<Name>0.png` + its `GW<Name>.img` sheet). The bounds are filled in for the shipped missions; a mission script
@@ -198,7 +260,7 @@ Preview.
 
 ### 4. Add animations to a character
 
-Select the character's skeleton (the `…_rig` object), then **File › Import › Conflict: Desert Storm Animation
+Select the character's skeleton (the `…_rig` object), then **File › Import › Conflict: Desert Storm Animation (.prb)
 (.prb)** and pick one or more `.prb` files, e.g. `PRONE_AIM_RIFLE.PRB`. Each becomes an action on the skeleton.
 
 ### 5. Export an animation
@@ -286,6 +348,38 @@ python cli/ds_sound.py encode my_shot.wav check.wav                # hear the ga
 Gun banks are named in `Weaps.txt` column 64 (`M16A2`, `SAW-LIGHTMG`, `MP5SILENCEDSUBMG` …); each refers to four
 samples: trigger click, distant tail, shot 1, shot 2. With the DesertStormFix plugin a mod usually needs none of
 this - a `.weapon` file's `shot sound = my.wav` takes a WAV directly.
+
+Mission DLLs as Lua missions (stage 1 of the mission translator, for DesertStormFix's Lua script host):
+
+```
+python cli/ds_mission2lua.py "<game>\Mission1.dll"                 # -> generated_missions/Mission1.lua
+python cli/ds_mission2lua.py "<game>" --all --check                # every Mission* / Training* DLL, compiled with Lua 5.4 (lupa)
+```
+
+Each DLL becomes one `.lua` level whose functions are the DLL's own x86 code translated instruction by instruction
+(`conflict_ds_tools/mission2lua.py`, built on `missionflow`); it runs on DesertStormFix's mission runtime
+(`dsfix.missionrt`) and behaves like the DLL by construction. Put it in `<game>\Mods\<Any>\Mission1.lua` and start
+the level `Mission1.lua` (developer console: `level Mission1.lua`). The output is made from **your** game files and
+is game code: `generated_missions/` is gitignored - never commit or share it. Details, parity results and limits:
+`docs/sdk/mission-translation.md` in the DesertStormFix repository.
+
+Readable Lua missions (stage 2: decompiled to ordinary Lua you can edit, same behaviour):
+
+```
+python cli/ds_mission2lua_readable.py "<game>\Mission1.dll"        # -> generated_missions/readable/Mission1/ + Mission1.lua
+python cli/ds_mission2lua_readable.py "<game>" --all --check       # every Mission* / Training* DLL + coverage table
+python cli/ds_mission2lua_readable.py --bundle generated_missions/readable/Mission1   # rebuild Mission1.lua after editing
+python tests/mission2lua_diff.py "<game>\Mission1.dll" 1500 7      # stage 1 vs stage 2 against a mock game: IDENTICAL
+```
+
+`conflict_ds_tools/mission2lua_readable.py` decompiles the DLL (CFG, lifting, data-flow, structuring - no gotos, no
+emulated x86): the DLL's functions become Lua functions, the script API is called by name (`api.set_team(obj.HERO_FOLEY,
+0)`), messages are `on("killed", function(msg) … end)` handlers, the DLL's globals are named variables (address in a
+comment), queue_call callbacks are named functions, scene objects / waypoints / regions use their editor IDs from the
+level's scene (`refs.lua`). The folder is a mod layout: `mission.lua` + `refs.lua` (data, literals only),
+`scripts/events.lua` (the logic - edit this), `scripts/runtime.lua` / `start.lua` (generated glue); `<name>.lua` is the
+bundle the game runs (copy it into `<game>\Mods\<Any>\`). The save block stays byte-for-byte the DLL's, so saves made
+with the DLL load. Same rules as stage 1: game code, keep it local.
 
 Better sound effects from a GameCube disc you own (the same conversion as the add-on's **GameCube Audio**):
 

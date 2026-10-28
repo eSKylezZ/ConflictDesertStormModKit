@@ -1,4 +1,56 @@
 {
+ "0x000": {
+  "name": "check_api_version",
+  "args": [
+   {
+    "name": "major",
+    "type": "int"
+   },
+   {
+    "name": "minor",
+    "type": "int"
+   },
+   {
+    "name": "table_size",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1 when the version matches)",
+  "desc": "LevelSetup's version check: returns 1 for (1, 7, 0x8D8); anything else shows the 'Level script is out of date and needs re-building' box (0x5EDB40, FUN_004b98d0) and exits on Abort.",
+  "confidence": "high"
+ },
+ "0x004": {
+  "name": "load_anim",
+  "args": [
+   {
+    "name": "state",
+    "type": "string"
+   },
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "int (1 loaded or already loaded, 0 unknown state / bad file)",
+  "desc": "Registers an animation for a named animation state: finds the state name in the table 0x5EDF28 (0x38-byte entries), loads the .prs through the anim manager FUN_00500a40([0x63C968]) into entry +0x34; unknown name -> 'Anim slot name not defined in code!' box, already loaded -> 'Attempt to load anim twice!' box, load failure -> 'bad anim' box; load time added to [0x60F580].",
+  "confidence": "high"
+ },
+ "0x008": {
+  "name": "load_anim_by_index",
+  "args": [
+   {
+    "name": "state_index",
+    "type": "int"
+   },
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "int (1 loaded / already loaded, 0 bad anim)",
+  "desc": "Same as load_anim but takes the state's index in the table 0x5EDF28 directly (no name lookup); boxes 'Attempt to load anim twice!' / 'bad anim' as there. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x00C": {
   "name": "load_sound_bank",
   "args": [
@@ -9,6 +61,30 @@
   ],
   "returns": "pointer (bank)",
   "desc": "Loads a .sbk sound bank (e.g. \"Mission1.sbk\") through the sound manager (FUN_0055dd20(mgr, name, 1)) and returns the bank.",
+  "confidence": "high"
+ },
+ "0x010": {
+  "name": "load_sound_bank_alt",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "bank pointer or 0",
+  "desc": "Loads a .sbk sound bank like load_sound_bank (0x0C) but with flag 0 (FUN_0055dd20(mgr [0x63C9AC], name, 0)); the flag only reaches FUN_00560580, which ignores it, so it behaves the same. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x014": {
+  "name": "get_sample_id",
+  "args": [
+   {
+    "name": "file",
+    "type": "string"
+   }
+  ],
+  "returns": "int (ELF hash id, 0 if missing or empty)",
+  "desc": "Hashes a sample / stream file name (FUN_00560530: ELF hash FUN_004b9bf0) and returns it if the level sound cache has it (FUN_0055e2d0), else logs 'Sample \"%s\" is not in the sound cache!' and returns 0; same lookup as get_stream_id (0x18) - the differing extra arguments are ignored. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x018": {
@@ -23,6 +99,42 @@
   "desc": "Looks up a speech/cutscene stream by file name (\"OBJ_M1_1A.wav\", \"CS_INTRO_S01.psf\"): ELF hash of the name, checked against the loaded stream table; returns the id or 0.",
   "confidence": "high"
  },
+ "0x01C": {
+  "name": "play_sample",
+  "args": [
+   {
+    "name": "sample",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Plays a sample id (from get_sample_id) once, non-positional, volume 1.0, min distance 1000 (FUN_0055df60 -> FUN_0055e300 on the sound manager [0x63C9AC]); nothing if sound is off ([mgr+0x12E0] = 0). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x020": {
+  "name": "start_sound_emitter",
+  "args": [
+   {
+    "name": "sample",
+    "type": "int"
+   }
+  ],
+  "returns": "handle (emitter slot pointer) or 0",
+  "desc": "Starts a managed non-positional sound emitter for a sample id in one of 30 slots at sound manager +0x880 (0x38 bytes each; FUN_005600c0 with min distance 400, volume 1.0) and returns the slot as a handle for stop_sound_emitter (0x24). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x024": {
+  "name": "stop_sound_emitter",
+  "args": [
+   {
+    "name": "handle",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Stops an emitter started by start_sound_emitter (0x20): sets bit 2 of slot +0x34 (FUN_005600a0); the handle is passed by value so the caller's copy is not cleared. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x028": {
   "name": "play_stream",
   "args": [
@@ -33,6 +145,25 @@
   ],
   "returns": "none",
   "desc": "Stops the current stream and starts this one at full volume (FUN_0055f840); the load time is logged (\"Lost time = %d\") and up to 5000 ms of it is added back to both game timers so scripted timing does not jump.",
+  "confidence": "high"
+ },
+ "0x02C": {
+  "name": "play_stream_flagged",
+  "args": [
+   {
+    "name": "stream",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Like play_stream (0x28) without the load-time compensation: stops the current stream (FUN_0055f820) and starts this one (FUN_0055f890 -> FUN_0055e400), which also sets voice flag 8 (probably looping / music-style playback; not confirmed). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x030": {
+  "name": "stop_stream_alt",
+  "args": [],
+  "returns": "",
+  "desc": "Identical to stop_stream (0x34): stops the playing speech / cutscene stream (FUN_0055f820 on [0x63C9AC]). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x034": {
@@ -152,6 +283,18 @@
   "returns": "none",
   "desc": "Loads the mission's text file (\"M01Strs.loc\") into the text catalog (FUN_004f56d0).",
   "confidence": "high"
+ },
+ "0x05C": {
+  "name": "disable_route_marker",
+  "args": [
+   {
+    "name": "marker",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Takes an AI route marker out of the network (FUN_00503fc0 on [0x63C9C0]): clears its 5 links (FUN_00504540), sets marker flag 0x20 (FUN_005045c0), removes it from its quadtree leaf when flag bit 0 is set (FUN_00505f80 on [0x63C9BC]) and marks the set dirty (+0x18); other markers' links to it are not removed (the loop meant for that calls FUN_00504600 on the same marker). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x060": {
   "name": "link_markers",
@@ -287,6 +430,29 @@
   "desc": "Sets the time scale (+0x28) of timer [0x63C954] (slow motion / speed-up of that clock). Only Mission7 calls it.",
   "confidence": "medium"
  },
+ "0x088": {
+  "name": "get_timer_scale",
+  "args": [],
+  "returns": "float",
+  "desc": "Returns the time scale (+0x28) of timer [0x63C954] (pairs with set_timer_scale 0x84). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x08C": {
+  "name": "blend_timer_scale",
+  "args": [
+   {
+    "name": "target",
+    "type": "float"
+   },
+   {
+    "name": "rate",
+    "type": "float"
+   }
+  ],
+  "returns": "",
+  "desc": "Ramps timer [0x63C954]'s time scale towards target at rate per second (FUN_004ba500: +0xD8 = 1, +0xDC target, +0xE0 rate; applied in the timer update 0x4BA7B6 until reached) - smooth slow motion in / out. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x090": {
   "name": "run_time_of_day_until",
   "args": [
@@ -304,6 +470,20 @@
   "args": [],
   "returns": "time_ms",
   "desc": "Current game time in ms ([0x63C954]+0x10). Used for all script delays.",
+  "confidence": "high"
+ },
+ "0x098": {
+  "name": "get_gameplay_time_ms",
+  "args": [],
+  "returns": "int (ms)",
+  "desc": "Returns the gameplay timer's total ms ([0x63C958]+0x10) - the clock that pauses with the game (0x94 reads timer [0x63C954]). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x09C": {
+  "name": "get_time_whole_seconds",
+  "args": [],
+  "returns": "int (s)",
+  "desc": "Returns timer [0x63C954]'s total ms / 1000 (whole seconds). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x0A0": {
@@ -364,6 +544,46 @@
   ],
   "returns": "none",
   "desc": "Sets how long a unit waits on arrival at this waypoint (+0x1C, added to the arrival time; soldier +0x238 = end of wait).",
+  "confidence": "high"
+ },
+ "0x0B0": {
+  "name": "team_near_waypoint",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "int"
+   },
+   {
+    "name": "team",
+    "type": "int"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if any object in the team's lists 0 and 1 (vehicles and soldiers, FUN_004c9720([0x63C9A0], team, list)) is within distance (cm, 3-D, FUN_004cc210) of the waypoint. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x0B4": {
+  "name": "team_soldier_near_waypoint",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "int"
+   },
+   {
+    "name": "team",
+    "type": "int"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "As team_near_waypoint but only the team's list 1 (soldiers). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x0B8": {
@@ -534,6 +754,30 @@
   "desc": "Returns the object's team byte (+0x10).",
   "confidence": "high"
  },
+ "0x0E8": {
+  "name": "get_object_pointer",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "pointer (game object) or 0",
+  "desc": "Returns the game object for a script id (FUN_004ca660 on [0x63C9A0]). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x0EC": {
+  "name": "get_object_pointer_alt",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "pointer (game object) or 0",
+  "desc": "Identical to 0xE8: game object by script id (FUN_004ca660). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x0F0": {
   "name": "get_object_position",
   "args": [
@@ -605,6 +849,18 @@
   "returns": "bool",
   "desc": "1 if the object is dead/destroyed (soldier class query 3, others health == 0) or the id does not exist.",
   "confidence": "high"
+ },
+ "0x104": {
+  "name": "is_dead_and_removed",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the id does not exist, or the object is out of play (+0xC bit 0 clear) and dead: vehicles/type 0 with health +0x54 == 0, soldiers/type 1 with class query vtable+0x4C(3); 0 for other types or anything in play. Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x108": {
   "name": "is_down",
@@ -718,6 +974,62 @@
   "desc": "Unlinks the follower (+0x26A4 = 0); a follower in AI state 3/4 is set back to state 2. Mission11B uses it on Franklin before walking him to the nuke.",
   "confidence": "medium"
  },
+ "0x128": {
+  "name": "move_to_position",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   },
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1 route found)",
+  "desc": "Sends a living soldier (health > 0) to a world position (passed inline) via the A* route-to FUN_0045ba60(pos, notify 1 -> message 0x0A on arrival) and sets AI state 4 (FUN_0049d870). Called by Mission1, Mission11b, Mission3, Mission4, Mission6.",
+  "confidence": "high"
+ },
+ "0x12C": {
+  "name": "move_to_waypoint",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   },
+   {
+    "name": "waypoint",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1 route found)",
+  "desc": "Routes a soldier to a waypoint's position (FUN_0045ba60, arrival notify), stores the start time (+0x23C4) and destination (+0x257C) and sets AI state 4. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x130": {
+  "name": "move_straight_to_waypoint",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   },
+   {
+    "name": "waypoint",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1 if the soldier exists)",
+  "desc": "Walks a soldier straight at a waypoint's position without route search or arrival message (FUN_0045ba10: single-point path in mover +0x3A0, +0x224 = target, sub-state 2) and sets AI state 4. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x134": {
   "name": "near_waypoint",
   "args": [
@@ -749,6 +1061,26 @@
   "returns": "none",
   "desc": "Clears the unit's waypoint wait end time (+0x238 = 0) so it moves on at once.",
   "confidence": "medium"
+ },
+ "0x13C": {
+  "name": "waypoint_in_view_cone",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "waypoint",
+    "type": "int"
+   },
+   {
+    "name": "degrees",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the waypoint lies within `degrees` of the object's facing (yaw from FUN_004c9a40; angle test FUN_004cc260 = acos of the flat direction dot product). Called by Mission12a, Mission8.",
+  "confidence": "high"
  },
  "0x140": {
   "name": "near_object",
@@ -790,6 +1122,58 @@
   "desc": "1 if `object` is dead (health <= 0) or within `distance` of `other` (else as near_object).",
   "confidence": "high"
  },
+ "0x148": {
+  "name": "near_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "position",
+    "type": "vec3*"
+   },
+   {
+    "name": "distance",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the object is within distance (cm, 3-D, FUN_004cc210) of a world position given by pointer. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x14C": {
+  "name": "object_in_view_cone",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "other",
+    "type": "int"
+   },
+   {
+    "name": "degrees",
+    "type": "float"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if `other` lies within `degrees` of `object`'s facing (FUN_004cc260, no line-of-sight test). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x150": {
+  "name": "forget_targets",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Clears the soldier's target memory (FUN_00407dc0: +0x258 / +0x260 moved to +0x25C / +0x264 and cleared, the 3 tracked-target entries at +0x290 emptied, FUN_00406390(0), soldiers +0x2C44 = 1). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x154": {
   "name": "play_sound_at_object",
   "args": [
@@ -808,6 +1192,18 @@
   ],
   "returns": "none",
   "desc": "Plays sound id from the object's own bank (obj+0x40) at its position (min distance = radius*0.25) and posts an AI noise event of that radius (FUN_0049cb20, 2000 ms) so nearby soldiers can hear it. Sites use 3000.0 / 300.0.",
+  "confidence": "high"
+ },
+ "0x158": {
+  "name": "is_soldier",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if the object exists and is of type 1 (soldier, +4). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x15C": {
@@ -838,6 +1234,34 @@
   "desc": "Returns the object's health (+0x54) if its vtable+8 check passes, else 0.0. Callers multiply by a constant (percentage).",
   "confidence": "high"
  },
+ "0x164": {
+  "name": "get_max_health",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "float",
+  "desc": "Maximum health from the unit stats (FUN_0049c580: unit type 1 -> stats +0x88 +0x24, type 2 -> vehicle def +0x80 +0x24, as u16); 0.0 for unknown ids or objects failing the vtable+8 check. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x168": {
+  "name": "damage_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "amount",
+    "type": "float"
+   }
+  ],
+  "returns": "",
+  "desc": "Deals `amount` damage with no attacker through the object's TakeDamage (vtable +0x3C, soldiers FUN_00424200; scaled by the soldier's damage multiplier +0x2B90). Called by Mission12B, Mission2, Training3, mission10.",
+  "confidence": "high"
+ },
  "0x16C": {
   "name": "set_field_2e0",
   "args": [
@@ -853,6 +1277,50 @@
   "returns": "none",
   "desc": "Writes obj+0x2E0 = value (FUN_0049e790, plain setter; meaning unknown). Only Mission1 (0x12E, 0).",
   "confidence": "low"
+ },
+ "0x170": {
+  "name": "reset_detection_range",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Restores +0x2E0 from its default +0x2E4 (FUN_0049e7a0); +0x2E0 is a range (HStat stats +0x30 or the scene value x 100, scaled by alert level in 0x403C10 - probably sight / detection range); undoes set_field_2e0 (0x16C). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x174": {
+  "name": "set_target_visibility_tracking",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   },
+   {
+    "name": "on",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Writes soldier +0x2B60, which gates FUN_004a5f80 (soldier update 0x42B508): periodic line-of-sight samples to the current target (+0x255C) via FUN_004035d0 into the 20-entry history +0x2B0C, timed by experience level; meaning of the effect beyond that not identified. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x178": {
+  "name": "can_see",
+  "args": [
+   {
+    "name": "observer",
+    "type": "int"
+   },
+   {
+    "name": "target",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "AI sight test FUN_004035d0(observer, target, 0xE, 1, 0): target within the fog distance (atmosphere +0xC), inside the observer's view cone (90 deg for player-driven, else +0x2E8) and then the visibility checks. Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x17C": {
   "name": "set_idle_look_around",
@@ -924,6 +1392,38 @@
   ],
   "returns": "none",
   "desc": "Clears obj+0xC bit 8 (see 0x188): the soldier may be excluded from AI updates again.",
+  "confidence": "high"
+ },
+ "0x190": {
+  "name": "is_tracking_target",
+  "args": [
+   {
+    "name": "observer",
+    "type": "int"
+   },
+   {
+    "name": "target",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if target is one of the observer's 3 tracked targets (entries at +0x290, stride 0x18; FUN_00407310) - i.e. the AI is aware of it. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x194": {
+  "name": "set_target_scanning_no_refresh",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "on",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "FUN_0049ea30(on, 0): sets / clears soldier +0x284 bit 0x400 (threat scan gate) like set_target_scanning (0x1A0) but never refreshes the targets. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x198": {
@@ -1110,6 +1610,34 @@
   "desc": "FUN_0042b160: health <= 0 (for an in-play object of a non-player team only once +0x2A08 + 180 s has passed). 54 sites, 'test eax; je'.",
   "confidence": "medium"
  },
+ "0x1D0": {
+  "name": "set_idle_chatter",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "on",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Sets / clears soldier +0x284 bit 0x800, required by the chatter gate FUN_004272e0 (0x427325) for random idle speech when the soldier has no target and is below alert 3. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x1D4": {
+  "name": "has_ammo",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0; 1 for an unknown id)",
+  "desc": "FUN_00408b10: 1 if any of the 25 inventory items (+0x26B8) is a firing weapon (FUN_004a4c10) with rounds left (magazine +0x80 + reserve +0x54 > 0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x1D8": {
   "name": "set_targetable",
   "args": [
@@ -1141,6 +1669,18 @@
   "returns": "none",
   "desc": "Sets/clears obj+0xC bit 0x10 = AI debug text '** sticking to waypoints **': the soldier keeps to its waypoint path instead of chasing / taking cover.",
   "confidence": "high"
+ },
+ "0x1E0": {
+  "name": "set_ai_flag_10000",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Sets soldier +0x284 bit 0x10000 (no clear variant); no reader of the bit was found in the exe. Unused by the shipped DLLs.",
+  "confidence": "low"
  },
  "0x1E4": {
   "name": "set_min_alert_level",
@@ -1186,6 +1726,30 @@
   "desc": "Returns alert level +0x2D8 (0-4; Mission3 compares with 4 = combat).",
   "confidence": "high"
  },
+ "0x1F0": {
+  "name": "raise_alert_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "FUN_0049d370: alert +0x2D8 += 1 (max 4), time stamped at +0x304. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x1F4": {
+  "name": "lower_alert_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "FUN_0049d3a0: alert +0x2D8 -= 1 unless at the floor +0x2DC, time stamped at +0x300. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x1F8": {
   "name": "set_ai_flag_20",
   "args": [
@@ -1196,6 +1760,22 @@
   ],
   "returns": "none",
   "desc": "Sets soldier +0x284 bit 0x20 (class query vtable+0x4C(0xC) returns it; read in target selection 0x404423 and weapon code 0x4A554D - possibly 'hold fire'). No clear call. Mission1 (0xC), Mission3 guards 0xF3-0xF6.",
+  "confidence": "low"
+ },
+ "0x1FC": {
+  "name": "set_time_2a10",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "time_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Writes soldier +0x2A10 (the timestamp stamp_time_2a10 0x25C sets to now; read at 0x427619, where now < +0x2A10 + 5000 ms suppresses something - e.g. 0 clears it). Unused by the shipped DLLs.",
   "confidence": "low"
  },
  "0x200": {
@@ -1302,6 +1882,20 @@
   "desc": "vtable+0x78 = sets/clears soldier +0x284 bit 0x100 (getter vtable+0x7C); without it the AI won't advance on its target (FUN_0049df90 holds, mode 6). Mission1 Foley 0 while captive, 1 after.",
   "confidence": "medium"
  },
+ "0x220": {
+  "name": "stub_0x220",
+  "args": [],
+  "returns": "",
+  "desc": "No-op on PC (bare ret). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x224": {
+  "name": "stub_0x224",
+  "args": [],
+  "returns": "",
+  "desc": "No-op on PC (bare ret). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x228": {
   "name": "face_waypoint",
   "args": [
@@ -1334,6 +1928,22 @@
   "desc": "Sets the facing target +0x374 to the current rotation (+0x208) with yaw + degrees (wrapped 0-360). Mission3: 180.0.",
   "confidence": "high"
  },
+ "0x230": {
+  "name": "award_experience",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "points",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Awards experience points to a soldier through FUN_00434190 (scaled by difficulty: Easy x0.9, Hard x1.1; can promote up to level 9). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x234": {
   "name": "set_experience_level",
   "args": [
@@ -1364,6 +1974,58 @@
   ],
   "returns": "none",
   "desc": "Sets the experience level to level only if the current one (FUN_0042d150) is lower.",
+  "confidence": "high"
+ },
+ "0x23C": {
+  "name": "get_experience_level",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "int (0-9)",
+  "desc": "Current experience level (FUN_0042d150: +0x2A18, plus a bonus for player-driven soldiers, max 9); 0 for unknown ids. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x240": {
+  "name": "can_press_switch",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   }
+  ],
+  "returns": "int (1/0)",
+  "desc": "1 if movement rule 43 MSR_PRESS_SWITCH has a transition from the soldier's current movement state (+0x2674) in the rule table [0x60EC80] (table +8, row width = state count +4). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x244": {
+  "name": "pick_lock_at_waypoint",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   },
+   {
+    "name": "waypoint",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Applies movement rule 0x4C MSR_PICK_LOCK (FUN_00433650 -> vtable+0x70) and, if allowed, lines the soldier up on the waypoint's position and rotation (FUN_00433330, 100 cm) - a scripted lock-pick animation at a spot. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x248": {
+  "name": "get_damage_multiplier",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "int"
+   }
+  ],
+  "returns": "float",
+  "desc": "Returns soldier +0x2B90, the factor TakeDamage multiplies incoming damage by (0x42428F; set per squad role at spawn: 1.0 / 1.5 / 0.7); 0.0 for unknown ids. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x24C": {
@@ -1476,6 +2138,18 @@
   ],
   "returns": "bool",
   "desc": "True if movement state == STATE_WAVE_ON (0x70).",
+  "confidence": "high"
+ },
+ "0x26C": {
+  "name": "salute",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   }
+  ],
+  "returns": "int (rule applied)",
+  "desc": "Movement rule 0x5D MSR_SALUTE (vtable+0x70): the soldier salutes. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x270": {
@@ -1682,6 +2356,22 @@
   "desc": "Orders a vehicle to fire weapon slot n (+0x260C list) at the target object once: sets +0x2640 target, +0x2644 slot (same as the debug key 'Fire vehicle weapon').",
   "confidence": "medium"
  },
+ "0x2B0": {
+  "name": "set_ai_flag_100000",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "on",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x487840: sets / clears bit 0x100000 of the object's flags +0x284 (every vehicle has it; MP DLLs clear it on the per-faction vehicles 0x16 / 0x3E / 0x19 / 0x18 / 0x3F / 0x1A at start). Exact meaning not identified - see set_ai_flag_200000 (+0x2B4).",
+  "confidence": "medium"
+ },
  "0x2B4": {
   "name": "set_ai_flag_200000",
   "args": [
@@ -1754,6 +2444,66 @@
   "desc": "Sets render-instance flag 0x10000000 (+0x2C -> +0xC) = object not drawn.",
   "confidence": "medium"
  },
+ "0x2C8": {
+  "name": "set_render_position",
+  "args": [
+   {
+    "name": "object",
+    "type": "int"
+   },
+   {
+    "name": "position",
+    "type": "vec3*"
+   }
+  ],
+  "returns": "",
+  "desc": "Calls the render instance's vtable[0](position, 0) (object +0x2C) = moves the drawn model to a world position; the game object / physics position is not changed (game code pairs it with FUN_004c9a00). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x2CC": {
+  "name": "fire_weapon",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "Pulls the trigger of a weapon object once with itself as shooter (FUN_004a1ad0(weapon, weapon, 0, 0, 0)) - for weapons placed in the world. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x2D0": {
+  "name": "fire_weapon_at_position",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "int"
+   },
+   {
+    "name": "position",
+    "type": "vec3*"
+   }
+  ],
+  "returns": "",
+  "desc": "Turns a weapon object to face the position (FUN_004a4e80, angle FUN_004bb100) and fires it once (FUN_004a1ad0). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x2D4": {
+  "name": "fire_weapon_at_object",
+  "args": [
+   {
+    "name": "weapon",
+    "type": "int"
+   },
+   {
+    "name": "target",
+    "type": "int"
+   }
+  ],
+  "returns": "",
+  "desc": "fire_weapon_at_position (0x2D0) at the target object's current position. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x2D8": {
   "name": "call_strike",
   "args": [
@@ -1813,6 +2563,22 @@
   "returns": "none",
   "desc": "Zeroes weapon item fields +0x74, +0x84, +0x88 (fire / reload timers?); Training1 only.",
   "confidence": "low"
+ },
+ "0x2E8": {
+  "name": "get_env_sound_position",
+  "args": [
+   {
+    "name": "out",
+    "type": "vec3*"
+   },
+   {
+    "name": "index",
+    "type": "int"
+   }
+  ],
+  "returns": "out",
+  "desc": "Copies the position of environment (ENVSND) sound slot n (sound manager [0x63C9AC] +0x54 + n*0x34) into out and returns out (hidden struct-return argument first). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x2EC": {
   "name": "enable_env_sound",
@@ -1952,6 +2718,30 @@
   "desc": "Debug text output; a no-op in the shipped exe (jumps to the debug-mappings getter).",
   "confidence": "high"
  },
+ "0x310": {
+  "name": "hide_info_bar",
+  "args": [
+   {
+    "name": "hide",
+    "type": "int"
+   }
+  ],
+  "returns": "int (previous value)",
+  "desc": "Sets info-bar object [0x63C988] +0x48; non-zero stops the render loop drawing the top info bar (item names / pick-ups, FUN_00507b30 at 0x40F222). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x314": {
+  "name": "key_active",
+  "args": [
+   {
+    "name": "dik",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 while a keyboard key (DirectInput scan code) has any non-zero state in the key table 0x753940 (jmp FUN_00539da0); 0 for the 'none' code 0x1146 or while [0x754C6C] is set. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x318": {
   "name": "key_down",
   "args": [
@@ -1962,6 +2752,46 @@
   ],
   "returns": "bool",
   "desc": "1 while a keyboard key (DirectInput scan code, 2..9 = keys 1..8) is down; scripts use it for debug shortcuts behind debug_mode_enabled.",
+  "confidence": "medium"
+ },
+ "0x31C": {
+  "name": "key_released",
+  "args": [
+   {
+    "name": "dik",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 when a key's state in 0x753940 is 3 or 4 (released this frame) (jmp FUN_00539e10); note it also returns 1 for the 'none' code 0x1146. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x320": {
+  "name": "player1_action_pressed",
+  "args": [
+   {
+    "name": "action",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Bit 1 of player 1's input-block action flags (block 0x60F5B8 +0x84 + action*4, byte at 0x60F63C+action*4): the action's 'pressed' bit (action ids = the default.key action table 0x5EC2B8). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x324": {
+  "name": "set_camera_target_object",
+  "args": [
+   {
+    "name": "camera",
+    "type": "int"
+   },
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets scripted camera n's target (camera manager [0x63C9D8], camera +8+n*0x1D8, field +0xE4 via FUN_004d4ed0) to the object's render instance (obj+0x2C) - for CAMTARGOBJ / chase cameras. Unused by the shipped DLLs.",
   "confidence": "medium"
  },
  "0x328": {
@@ -2116,6 +2946,18 @@
   "desc": "Keeps one roster object active in the player soldier's zone: drops *current if it left / died, else picks an enabled, idle, living one (FUN_00484640) and activates it; *current = its id or -1.",
   "confidence": "low"
  },
+ "0x350": {
+  "name": "zone_grunt_alive",
+  "args": [
+   {
+    "name": "include_mounted",
+    "type": "bool"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if any enabled zone-roster entry ([0x617DA8], via get_zone_objects 0x482340) is not dead (is_dead 0x483B20); with include_mounted = 0 only soldiers not in a vehicle (+0x267C = 0) count. Bool twin of count_living_grunts (+0x354). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x354": {
   "name": "count_living_grunts",
   "args": [
@@ -2186,6 +3028,54 @@
   "returns": "none",
   "desc": "Sets spawn-system flag [0x617DD4] (1 after init_spawn_points); meaning unclear.",
   "confidence": "low"
+ },
+ "0x36C": {
+  "name": "set_spawn_query",
+  "args": [
+   {
+    "name": "enabled",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets [0x617DC8] (also set by init_spawn_points' 2nd arg): when non-zero the spawn system asks the script with message 0x49 (spawn veto, param = spawn index) before each spawn (0x482D21). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x370": {
+  "name": "setup_spawn_point",
+  "args": [
+   {
+    "name": "index",
+    "type": "int"
+   },
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   },
+   {
+    "name": "level",
+    "type": "int"
+   },
+   {
+    "name": "zone",
+    "type": "int"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Fills spawn record index ([0x618340], 0x1C bytes) if index < count [0x618344]: +0/+4/+8 position (cm), +0xC threshold compared against the spawner's level argument (record used only when <= it), +0x18 roster zone (-1 any; checked against the zone of the object, 0x482190), +0x14 spawns left (-1 unlimited, decremented per spawn), +0x10 state = 1 (on). The nearest eligible point to the requester is used. Called by Mission1, Mission11a, Mission11b, Mission12B, Mission12a, Mission2, Mission3, Mission4, Mission5B, Mission5a, Mission6, Mission7, Mission8, Mission9, mission10.",
+  "confidence": "medium"
  },
  "0x374": {
   "name": "get_spawn_point",
@@ -2292,18 +3182,25 @@
   "desc": "1 when the campaign object's first field ([[0x60EDC0]+0]) is 0; meaning unclear.",
   "confidence": "low"
  },
+ "0x3A0": {
+  "name": "is_invulnerable_cheat",
+  "args": [],
+  "returns": "bool",
+  "desc": "Returns the INVULNERABLE cheat flag [0x5E640C] (saved as save-header flag 1), or 1 during a cinematic in network MP ([0x610F60]) (jmp FUN_00402fb0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x3A4": {
   "name": "is_difficulty_easy",
   "args": [],
   "returns": "bool",
-  "desc": "1 when the difficulty (FUN_004f0070 on [0x63C9E0]) is 0.",
+  "desc": "1 when the difficulty (FUN_004f0070 on [0x63C9E0]) is 0 (EASY). With DesertStormFix 3.2+ also for its VERY EASY (level 4); game.difficulty() tells them apart.",
   "confidence": "medium"
  },
  "0x3A8": {
   "name": "is_difficulty_hard",
   "args": [],
   "returns": "bool",
-  "desc": "1 when the difficulty is 2.",
+  "desc": "1 when the difficulty is 2 (HARD). With DesertStormFix 3.2+ also for its VERY HARD (level 3); game.difficulty() tells them apart.",
   "confidence": "medium"
  },
  "0x3AC": {
@@ -2414,6 +3311,18 @@
   "desc": "True if the object is a soldier currently driven by a player (type 1 and soldier+0x23C0 input block set).",
   "confidence": "high"
  },
+ "0x3CC": {
+  "name": "object_zone_id",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "World zone index of the object's model (obj+0x1C -> +0xC8 -> +0x1BC); 0 if the id doesn't exist. Same as zone_of_object (+0x334) except the missing-object result. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x3D0": {
   "name": "squad_in_region",
   "args": [
@@ -2424,6 +3333,30 @@
   ],
   "returns": "bool",
   "desc": "True if any member of the player team (active list of team [0x5F9B94]) stands inside the region (region list [0x63C9B8]).",
+  "confidence": "high"
+ },
+ "0x3D4": {
+  "name": "kill_units_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "none",
+  "desc": "Every soldier (object list kind 1) of teams 1-3 whose position (render instance +0xF4 or FUN_004cd890) is inside the region (FUN_004fc040, region manager [0x63C9B8]) is killed via kill_object(id, -1) (0x483A10). Team 0 (the squad) is spared. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x3D8": {
+  "name": "stub_3d8",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "For a soldier (type 1) tail-calls FUN_00421420, which is a bare ret - no-op on PC. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x3DC": {
@@ -2438,6 +3371,18 @@
   "desc": "True if any member of the player team is in the given zone id (same zone lookup as get_player_zone).",
   "confidence": "high"
  },
+ "0x3E0": {
+  "name": "teleport_player_to_point",
+  "args": [
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   }
+  ],
+  "returns": "none",
+  "desc": "Moves the current player's soldier ([0x60F394] block, block+0x310) to the position (FUN_0049ce70(pos,1,1,800.0,0)), re-attaches its view controller (FUN_00472cb0), resets its target tracking (FUN_00407dc0) and flashes the screen blue (1500 ms, 64,64,255). Position-pointer twin of teleport_player_to_waypoint (+0x3E4). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x3E4": {
   "name": "teleport_player_to_waypoint",
   "args": [
@@ -2448,6 +3393,22 @@
   ],
   "returns": "none",
   "desc": "Moves the current player's soldier to the waypoint position (waypoint manager [0x63C9B0]), re-attaches the camera and fades the view in over 1500 ms.",
+  "confidence": "medium"
+ },
+ "0x3E8": {
+  "name": "move_region_contents",
+  "args": [
+   {
+    "name": "from_region",
+    "type": "region"
+   },
+   {
+    "name": "to_region",
+    "type": "region"
+   }
+  ],
+  "returns": "none",
+  "desc": "Teleports every object of teams 0-3 (lists 1 = soldiers not in a vehicle, 5 and 6) standing inside from_region by the offset between the two regions' centres (region +0x14..+0x1C) (FUN_004c9f20(pos,1,1,800.0,0)); if player 1's soldier moved, his view is re-attached (FUN_00472cb0). Unused by the shipped DLLs.",
   "confidence": "medium"
  },
  "0x3EC": {
@@ -2482,6 +3443,26 @@
   "returns": "bool",
   "desc": "True unless some team member is down (health <= 0) but not yet finally dead (class query 3). Mission1 checks it for team 0 before ending the mission at the extraction.",
   "confidence": "medium"
+ },
+ "0x3FC": {
+  "name": "team_near_point",
+  "args": [
+   {
+    "name": "position",
+    "type": "vector_ptr"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 if any active soldier (list kind 1) of the team is within radius (cm) of the point (distance test FUN_004cc210). Unused by the shipped DLLs.",
+  "confidence": "high"
  },
  "0x400": {
   "name": "set_team_alert_level",
@@ -2531,6 +3512,22 @@
   "desc": "Clears both entries of the team relationship matrix 0x640480[a][b] / [b][a] (non-zero = hostile). Mission1 uses (0,2),(1,2) at the extraction.",
   "confidence": "medium"
  },
+ "0x40C": {
+  "name": "set_teams_hostile",
+  "args": [
+   {
+    "name": "team_a",
+    "type": "team"
+   },
+   {
+    "name": "team_b",
+    "type": "team"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x481E60: sets both entries of the team relationship matrix 0x640480[a][b] / [b][a] to 1 (hostile); counterpart of +0x408.",
+  "confidence": "high"
+ },
  "0x410": {
   "name": "get_team_skill_level",
   "args": [
@@ -2542,6 +3539,38 @@
   "returns": "int",
   "desc": "Average skill / trooper level (0-9, soldier +0x2A18 incl. rank bonus) of the team's non-captive members, rounded, capped at 9.",
   "confidence": "medium"
+ },
+ "0x414": {
+  "name": "award_team_experience",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "points",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Calls the experience award FUN_00434190(points) (difficulty-scaled) on every member of the team, active (FUN_004c9720) and inactive (FUN_004c96d0) lists. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x418": {
+  "name": "raise_team_skill_level",
+  "args": [
+   {
+    "name": "team",
+    "type": "team"
+   },
+   {
+    "name": "delta",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "For every team member (active + inactive lists): skill level = current level (FUN_0042d150, incl. rank bonus) + (delta & 0xFF), stored via FUN_0042d1b0 (soldier +0x2A18 clamped 0-9, accuracy from table 0x619428). Unused by the shipped DLLs.",
+  "confidence": "high"
  },
  "0x41C": {
   "name": "set_team_skill_level",
@@ -2556,7 +3585,7 @@
    }
   ],
   "returns": "none",
-  "desc": "Sets the skill / trooper level (0-9, soldier +0x2A18, accuracy from table 0x619428) of every member of the team.",
+  "desc": "Sets the skill / trooper level (0-9, soldier +0x2A18, accuracy from table 0x619428) of every member of the team. Every mission calls it at the start with 'squad level - 3 / 2 / 1' for Easy / Medium / Hard; DesertStormFix 3.2+ adds 1 on VERY HARD and takes 1 off on VERY EASY.",
   "confidence": "medium"
  },
  "0x420": {
@@ -2583,6 +3612,42 @@
   "args": [],
   "returns": "bool",
   "desc": "True if player 1's held weapon (type 6) is in fire mode 2 (burst). Training tutorial check.",
+  "confidence": "medium"
+ },
+ "0x42C": {
+  "name": "set_fire_mode_grenade_launcher",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches the soldier's held weapon (vtable +0x74, item type 6) to fire mode 0x100 (M203 grenade launcher) via FUN_004a4fb0(0x100, 0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x430": {
+  "name": "set_fire_mode_burst",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switches the soldier's held weapon (vtable +0x74, item type 6) to fire mode 2 (burst) via FUN_004a4fb0(2, 0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x434": {
+  "name": "find_object_roster_zone",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "int",
+  "desc": "Index of the zone roster ([0x617DA8]: +0 array of per-zone id lists, +4 count) that contains the script id, -1 if none (FUN_00482190; the spawn system uses it for spawn-point zones). Unused by the shipped DLLs.",
   "confidence": "medium"
  },
  "0x438": {
@@ -2673,12 +3738,76 @@
   "desc": "Sets the up/down (open) state of a non-door object class with +0x54 state bits (bit 1 state, bit 0 changing, time +0x88); non-zero raises. Training1 uses it on the shooting targets 0x85/0x86.",
   "confidence": "low"
  },
+ "0x44C": {
+  "name": "set_object_flags_54",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "mask",
+    "type": "int"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Object +0x54 = (flags & ~mask) | value with no type check (door / target state bits: bit 0 busy/locked, bit 1 open/raised). Unchecked twin of set_door_flags (+0x440). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x450": {
+  "name": "set_switch_state",
+  "args": [
+   {
+    "name": "switch",
+    "type": "int"
+   },
+   {
+    "name": "state",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Switch by index (manager [0x63C9C4], 100-byte entries, FUN_004f6970) -> FUN_004f71c0(state): 0 sets entry +0x10 bit 1 (and clears bit 0) and swaps the on/off models; non-zero clears bits 0-1 and swaps back. No door callback or message 0x0D (unlike a player using it). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
  "0x454": {
   "name": "rebuild_squad_hud",
   "args": [],
   "returns": "none",
   "desc": "Re-runs the HUD screen set-up ([0x617A04] vtable[3]) so the soldier panels match the current squad.",
   "confidence": "high"
+ },
+ "0x458": {
+  "name": "face_each_other",
+  "args": [
+   {
+    "name": "object_a",
+    "type": "object"
+   },
+   {
+    "name": "object_b",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns two soldiers to face each other: direction between their positions (FUN_004bb100) given to each as wanted facing (FUN_0049e7b0). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x45C": {
+  "name": "freeze_animation",
+  "args": [
+   {
+    "name": "duration_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Pauses the animation/physics timer [0x63C954] and all sounds (FUN_004e8410(1, 2); the gameplay timer keeps running); if duration_ms > 0 queues an event (flags 0x16, game-timer based) that resumes them (FUN_004e8410(0,0)) after that time. Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x460": {
   "name": "set_pause_allowed",
@@ -2691,6 +3820,13 @@
   "returns": "none",
   "desc": "Sets the pause-menu allowed flag [0x61079C]; mission scripts call it with 1 once play starts.",
   "confidence": "high"
+ },
+ "0x464": {
+  "name": "get_max_object_id",
+  "args": [],
+  "returns": "int",
+  "desc": "Object manager [0x63C9A0] +0x34: highest valid script id in the id table (+0x30) (lookups check id <= it). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x468": {
   "name": "set_all_units_ai_flag_80000",
@@ -2756,6 +3892,13 @@
   "desc": "Empty function (ret) in the PC build.",
   "confidence": "high"
  },
+ "0x47C": {
+  "name": "nop_0x47c",
+  "args": [],
+  "returns": "none",
+  "desc": "Empty function (ret) - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x480": {
   "name": "set_view_overlay_alpha",
   "args": [
@@ -2766,6 +3909,18 @@
   ],
   "returns": "none",
   "desc": "Sets view controller +0x2BC (default 0.5) on every view; multiplies an overlay/flare alpha in the camera manager draw. Missions 5A/5B/7 use 0.25 / 0.15.",
+  "confidence": "low"
+ },
+ "0x484": {
+  "name": "stamp_time_2a00",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "For an active soldier: +0x2A00 = animation timer ms ([0x63C954]+0x10). The weapon fire code sets the same field and FUN_00407e80 reports 'within the last 3 s' from it (recent fire/noise); set_calm (+0x260) clears it. Unused by the shipped DLLs.",
   "confidence": "low"
  },
  "0x488": {
@@ -2825,6 +3980,13 @@
   ],
   "returns": "none",
   "desc": "Stores two catalog text hashes in campaign +8 / +0xC (mission name texts, set during init next to the briefing).",
+  "confidence": "low"
+ },
+ "0x49C": {
+  "name": "request_main_menu",
+  "args": [],
+  "returns": "none",
+  "desc": "Sets [0x60696C] = 1: on the next level start the game goes to front-end state 1 (main menu) and clears it (0x40FCFC); the console uses it for FrontEnd.dll. Unused by the shipped DLLs.",
   "confidence": "low"
  },
  "0x4A0": {
@@ -2923,6 +4085,18 @@
   "desc": "Shows and tracks the objective (flags |= 0xA).",
   "confidence": "high"
  },
+ "0x4BC": {
+  "name": "hide_objective",
+  "args": [
+   {
+    "name": "objective",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears flags 2 (shown) and 8 (tracked) of the objective (campaign [0x60EDC0], FUN_004586e0; flags &= 0xF5). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x4C0": {
   "name": "complete_objective",
   "args": [
@@ -2933,6 +4107,18 @@
   ],
   "returns": "none",
   "desc": "Marks the objective done (flag 4, untracked) and plays sound 0xCD4.",
+  "confidence": "high"
+ },
+ "0x4C4": {
+  "name": "reopen_objective",
+  "args": [
+   {
+    "name": "objective",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears the objective's done flag 4 (flags &= 0xFB). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x4C8": {
@@ -2965,6 +4151,26 @@
   ],
   "returns": "none",
   "desc": "Sets / clears the objective's tracked flag (8).",
+  "confidence": "high"
+ },
+ "0x4D0": {
+  "name": "get_objective_state",
+  "args": [
+   {
+    "name": "objective",
+    "type": "int"
+   },
+   {
+    "name": "shown",
+    "type": "pointer"
+   },
+   {
+    "name": "done",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes 1/0 to *shown (flag 2) and *done (flag 4) of the objective; nothing written if the index is invalid. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x4D4": {
@@ -3054,6 +4260,18 @@
   "desc": "Debug: draws the script ids of all team 0-3 units on screen (the player's marked '<<') plus a counter.",
   "confidence": "medium"
  },
+ "0x4EC": {
+  "name": "get_object_pointer_alias",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "pointer",
+  "desc": "Raw object pointer for a script id (FUN_004ca610 on [0x63C9A0], range-checked; 0 for -1 / out of range). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x4F0": {
   "name": "cycle_view_to_next_unit",
   "args": [],
@@ -3067,6 +4285,18 @@
   "returns": "none",
   "desc": "Stops all 128 scripted cameras and resets view 0 to the game camera.",
   "confidence": "high"
+ },
+ "0x4F8": {
+  "name": "reset_camera",
+  "args": [
+   {
+    "name": "camera",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Restarts scripted camera n by its type (camera manager [0x63C9D8], FUN_004d4ac0: 0 free / 1 target pos / 2 target obj / 3 chase): eye back to its start (+0x5C) and path progress cleared. Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x4FC": {
   "name": "set_view_camera",
@@ -3085,6 +4315,38 @@
   "args": [],
   "returns": "bool",
   "desc": "True if view 0 has no scripted camera (camera id 0).",
+  "confidence": "high"
+ },
+ "0x504": {
+  "name": "set_view_camera_delayed",
+  "args": [
+   {
+    "name": "camera",
+    "type": "int"
+   },
+   {
+    "name": "delay_ms",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Queues an event (flags 0xE) that after delay_ms makes camera n view 0's camera (FUN_004d4f80(n, 0)) and stores it in [0x5ED118]. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x508": {
+  "name": "queue_callback",
+  "args": [
+   {
+    "name": "callback",
+    "type": "pointer"
+   },
+   {
+    "name": "delay_ms",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Queues a plain timed callback (event queue [0x63C978], FUN_004db6b0, flags 0xE): the DLL function is called with the event after delay_ms. Like queue_call (+0x518) without arguments / skippable flag. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x50C": {
@@ -3118,6 +4380,22 @@
   "returns": "none",
   "desc": "Teleports an object to a world position (cm) if it is active (vtable+8), exact height kept.",
   "confidence": "high"
+ },
+ "0x514": {
+  "name": "face_waypoint_direction",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "Turns the object to the waypoint's stored rotation (waypoint table [0x63C9B0], entry +0xC, FUN_004d1400): soldiers get yaw+180 (wrapped) as wanted facing (FUN_0049e7b0) + FUN_0049d4a0(7); types 0/6 are rotated directly (FUN_004c9a70). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x518": {
   "name": "queue_call",
@@ -3201,6 +4479,18 @@
   "desc": "Turns player input on/off for every player block (block +0x34); off parks each block's soldier in 0x617C40 and detaches it, on reattaches it. Used around cutscenes.",
   "confidence": "high"
  },
+ "0x520": {
+  "name": "set_player_input",
+  "args": [
+   {
+    "name": "enabled",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "For every player block (count [0x610798]): +0x34 = enabled and control mode FUN_004500b0(enabled ? 0 player : 2 AI). Lighter twin of set_player_control (+0x51C) without parking soldiers / cameras. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x524": {
   "name": "load_animation",
   "args": [
@@ -3212,6 +4502,18 @@
   "returns": "anim",
   "desc": "Loads (or finds already loaded) a .prs animation by file name through the anim manager [0x63C968] (FUN_00500a40); returns the handle used by +0x52C / +0x654.",
   "confidence": "high"
+ },
+ "0x528": {
+  "name": "unload_animation",
+  "args": [
+   {
+    "name": "anim",
+    "type": "pointer"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes an animation (as returned by load_animation +0x524) from the anim manager [0x63C968] list and frees it (FUN_00500b30). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x52C": {
   "name": "play_scripted_animation",
@@ -3242,6 +4544,30 @@
   "returns": "none",
   "desc": "Removes the cinematic letterbox bars (FUN_004d1d00(0)).",
   "confidence": "high"
+ },
+ "0x538": {
+  "name": "flash_screen",
+  "args": [
+   {
+    "name": "duration_ms",
+    "type": "float"
+   },
+   {
+    "name": "r",
+    "type": "int"
+   },
+   {
+    "name": "g",
+    "type": "int"
+   },
+   {
+    "name": "b",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x486190: logs 'flashscreen called at %d' (GetTickCount), then FUN_004D2C30(view controller [0x63C98C], ms, r, g, b) = full-screen colour flash. Not referenced by the six MP DLLs.",
+  "confidence": "medium"
  },
  "0x53C": {
   "name": "fade_in",
@@ -3331,11 +4657,145 @@
   "desc": "Makes a soldier hold the inventory item whose definition name matches (e.g. \"US_WPN_M16A2\") (FUN_0042ec10).",
   "confidence": "high"
  },
+ "0x550": {
+  "name": "take_item_by_name",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "definition",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the first inventory item (soldier +0x26B8, 25 slots) whose definition name (def +4) equals the string (FUN_004318a0(item,0,0)); else error box \"GruntTakeItem : Grunt hasn't got item %s\". Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x554": {
+  "name": "drop_item_by_name",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "definition",
+    "type": "string"
+   }
+  ],
+  "returns": "none",
+  "desc": "Drops the first inventory item with that definition name to the ground (FUN_00431c70(item, 0)); else error box \"GruntDropItem : Grunt hasn't got item %s\". Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x558": {
+  "name": "stub_558",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns 0 - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x55C": {
+  "name": "stub_55c",
+  "args": [],
+  "returns": "none",
+  "desc": "Empty function (ret) - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x560": {
   "name": "run_queued_calls",
   "args": [],
   "returns": "none",
   "desc": "Runs every pending skippable event in the event queue at once (FUN_004db670 on [0x63C978], flag 8) - skips a cutscene built with +0x518.",
+  "confidence": "high"
+ },
+ "0x564": {
+  "name": "spawn_effects_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   },
+   {
+    "name": "duration_ms",
+    "type": "int"
+   },
+   {
+    "name": "count",
+    "type": "int"
+   },
+   {
+    "name": "effect",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Queues count particle effects of the given type (effects system [0x63C974], FUN_004f0b10 - the gib/dust spawner) at random points inside the region, spread over duration_ms (>= 200) (FUN_004f1fe0 -> event callback 0x4F1E30). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x568": {
+  "name": "mount_ladder",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "anywhere",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Mounts the soldier on the nearest ladder (FUN_00433690 finds it and the end, bottom or top; FUN_00433850 applies MSR_MOUNT_LADDER_BOTTOM 0x3A / _TOP 0x3B and sets the move target to the other end). anywhere = 0: only within reach of the ladder end. Climbing = movement rule MSR_LADDER_CLIMB_UP 0x3C / DOWN 0x3D applied every frame (soldier vtable +0x70); the game dismounts at the end. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x56C": {
+  "name": "dismount_ladder",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "If the soldier is on a ladder (vtable +0x60) calls vtable +0x68: movement rule 0x3E then FUN_004348e0 (gets off the ladder). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x570": {
+  "name": "climb_ladder_up",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "If on a ladder (vtable +0x60), sets the AI state FUN_0049d870(9) (+0x2378 = 9, which selects movement mode 9); probably climb up - direction not verified. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x574": {
+  "name": "climb_ladder_down",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "If on a ladder (vtable +0x60), sets the AI state FUN_0049d870(10) (movement mode 10); probably climb down - direction not verified. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x578": {
+  "name": "is_on_ladder",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Soldier vtable +0x60 (FUN_00437410): 1 while the movement state +0x2674 is a ladder state (0x38-0x3C, 0x3E, 0x3F). Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x57C": {
@@ -3444,6 +4904,42 @@
   "desc": "Sets a vehicle/aircraft speed factor: max +0x2C38 and current +0x2C34 (0.25-5 seen).",
   "confidence": "medium"
  },
+ "0x5A4": {
+  "name": "set_timer",
+  "args": [
+   {
+    "name": "id",
+    "type": "int"
+   },
+   {
+    "name": "delay_ms",
+    "type": "float"
+   },
+   {
+    "name": "param",
+    "type": "int"
+   },
+   {
+    "name": "repeat",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Queues a timer event (callback 0x487210, flags 0xE one-shot / 0xB repeating) that sends script message 0x16 (TIMER) with the id after delay_ms; param goes to event +0x14 (0 in practice). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x5A8": {
+  "name": "cancel_timer",
+  "args": [
+   {
+    "name": "id",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the first pending event in the event queue [0x63C978] whose first argument (+0x34) equals id (FUN_004db890) - cancels a set_timer (or any queued event with that arg). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x5AC": {
   "name": "set_door_key",
   "args": [
@@ -3491,6 +4987,22 @@
   "returns": "none",
   "desc": "Removes an item object from a soldier's inventory (FUN_004318a0).",
   "confidence": "high"
+ },
+ "0x5B8": {
+  "name": "drop_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes the item object from the soldier's inventory and puts it into the world active (FUN_004318a0(item, 1, 0); take_item +0x5B4 passes 0). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x5BC": {
   "name": "remove_medikits",
@@ -3652,6 +5164,26 @@
   "desc": "Writes the object's world position (render instance) and its zone (+0x1C).",
   "confidence": "medium"
  },
+ "0x5E0": {
+  "name": "move_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "position",
+    "type": "pointer (vec3)"
+   },
+   {
+    "name": "zone",
+    "type": "pointer (zone)"
+   }
+  ],
+  "returns": "none",
+  "desc": "Moves an object to a world position (render instance vtable[0](pos, 0)) and re-links it to a zone (FUN_004c9980 / FUN_004c9a00 with the zone, then FUN_004c9ed0) - +0x5E4 place_item without the activate / refill. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x5E4": {
   "name": "place_item",
   "args": [
@@ -3679,6 +5211,34 @@
   "desc": "True while any of the 10 air-strike slots in [0x60EDA4] is running (state +8 = 1).",
   "confidence": "medium"
  },
+ "0x5EC": {
+  "name": "set_frame_anim_speed",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "speed",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the playback speed of a frame-animated model (render instance +0xEC; the per-frame step FUN_004cccd0 adds speed x dt to the frame counter +0xF0 and wraps / stops at the model's frame count, skin data +0xB4 +4) - e.g. flags, cloth, tracks. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x5F0": {
+  "name": "set_frame_anim_play_once",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets render instance flag 0x10000: the frame animation (+0x5EC) stops on its last frame (speed +0xEC cleared) instead of looping (FUN_004cccd0). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x5F4": {
   "name": "make_vulnerable",
   "args": [
@@ -3701,6 +5261,56 @@
   ],
   "returns": "none",
   "desc": "Sets the soldier's invulnerable bit 0x800000 (+0x284) - cutscene actors.",
+  "confidence": "high"
+ },
+ "0x5FC": {
+  "name": "set_squad_vulnerable",
+  "args": [],
+  "returns": "none",
+  "desc": "FUN_00403050(1): stores 1 in [0x5E640C] and walks every object (FUN_004ca910, callback 0x402FE0): player-side soldiers get the invulnerable bit 0x800000 (+0x284) cleared. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x600": {
+  "name": "set_squad_invulnerable",
+  "args": [],
+  "returns": "none",
+  "desc": "FUN_00403050(0): stores 0 in [0x5E640C] and sets the invulnerable bit 0x800000 (+0x284) on player-side soldiers (same walk as +0x5FC). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x604": {
+  "name": "unhide_instance",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Clears hidden flag 4 on the object's render instance +0xC (FUN_004d1230) - drawn again; does not change whether it is in play. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x608": {
+  "name": "hide_instance",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets hidden flag 4 on the object's render instance +0xC (FUN_004d1220) - not drawn; the object stays in play. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x60C": {
+  "name": "enable_ai",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the soldier's AI-enabled bit 0x1000000 (+0x284); counterpart of +0x610 disable_ai. Unused by the shipped DLLs.",
   "confidence": "high"
  },
  "0x610": {
@@ -3742,6 +5352,75 @@
   "returns": "string",
   "desc": "Returns the text of the keys/buttons bound to a control (index into 0x5D9338 -> action id), for tutorial text.",
   "confidence": "medium"
+ },
+ "0x61C": {
+  "name": "show_subtitle",
+  "args": [
+   {
+    "name": "text",
+    "type": "hash"
+   },
+   {
+    "name": "duration_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "When the byte option [0x5ED0DA] is on (initially 1; probably subtitles), looks up a mission text (FUN_004f5e80 on [0x60EDCC]) into [0x6181E8] and shows it for duration_ms (0 = 10000) in the top text box (rect 0x618300, drawn by FUN_00486d20, ends at [0x618310]). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x620": {
+  "name": "stub_620",
+  "args": [],
+  "returns": "none",
+  "desc": "Bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x624": {
+  "name": "stub_624",
+  "args": [],
+  "returns": "none",
+  "desc": "Bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x628": {
+  "name": "stub_628",
+  "args": [],
+  "returns": "none",
+  "desc": "Bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x62C": {
+  "name": "atmosphere_ramp_04",
+  "args": [
+   {
+    "name": "target",
+    "type": "int"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x487DC0: FUN_004EFDF0 on the atmosphere [[0x63C948]+0x1A58]: ramps field +4 to float(target) over duration (rate +0x2C, end +0x28, time +0x34; duration <= 0 sets it at once). Which value +4 is not identified. Not referenced by the six MP DLLs.",
+  "confidence": "low"
+ },
+ "0x630": {
+  "name": "atmosphere_ramp_0c",
+  "args": [
+   {
+    "name": "target",
+    "type": "int"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x487E00: like +0x62C for atmosphere field +0xC (FUN_004EFE30: +0x24 end, +0x30 rate, +0x38 time). Not referenced by the six MP DLLs.",
+  "confidence": "low"
  },
  "0x634": {
   "name": "face_object",
@@ -3829,6 +5508,22 @@
   ],
   "returns": "none",
   "desc": "Releases the target lock of +0x644 (+0x2568 = 0).",
+  "confidence": "medium"
+ },
+ "0x64C": {
+  "name": "enter_nearest_vehicle",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "seat",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Finds the vehicle the soldier could enter (enter search FUN_00433ad0), a free seat of the wanted kind (seat finder FUN_0043ce90) and mounts him (FUN_00433f00(vehicle, seat kind, seat, 0)). No null check on the found vehicle. Unused by the shipped DLLs.",
   "confidence": "medium"
  },
  "0x650": {
@@ -3964,6 +5659,254 @@
   "desc": "Turns a scene light off (clears flag 4 of the light entry in [0x63C95C]). Mission 1 switches lights 0x15/0x14/0x10/0x0D off after its intro film.",
   "confidence": "high"
  },
+ "0x67C": {
+  "name": "is_light_on",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "bool",
+  "desc": "Returns flag 4 (on) of light entry (index & 0xFF) in the Lights.cpp manager [0x63C95C] (+8 array, 0x108 B each) - FUN_0051c050; see +0x674 / +0x678. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x680": {
+  "name": "set_light_colours",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "colour_a",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "colour_b",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "fade_seconds",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051d3f0 on [0x63C95C]: sets two colours of a scene light (FUN_0051bd50 / FUN_0051bd30, D3DLIGHT8 at entry +0x34) and, with a fade time and the fader from +0x698, blends over it; else SetLight at once. Which D3D colours (diffuse / ambient) not verified. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x684": {
+  "name": "set_light_ambient",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "colour",
+    "type": "colour (0xAARRGGBB)"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051d2d0: writes the colour into the light's D3DLIGHT8 ambient (entry +0x34 +0x24) and calls IDirect3DDevice8::SetLight at once. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x688": {
+  "name": "set_light_diffuse",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "colour",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "fade_seconds",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051d330: sets the light's diffuse colour (entry +0x34 +4); with a fade time and a fader (+0x698, entry flag 0x40) it blends there over the time, else SetLight at once. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x68C": {
+  "name": "reset_light",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051d720: restores the light's D3DLIGHT8 from its saved original values (entry +0x9C..) and re-applies it. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x690": {
+  "name": "detach_light",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Removes a light index from the object's render instance light list (+0x1A0 count, +0x1A4 bytes; FUN_004d0560) - the object is no longer lit by it. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x694": {
+  "name": "attach_light",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Adds a light index to the object's render instance light list (+0x1A0 / +0x1A4, FUN_004d04d0; no duplicates) - lights a model by that scene light. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x698": {
+  "name": "enable_light_effects",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051c070: allocates the light's fader (entry +0xE0, flag 0x40) and flicker controller (+0xDC, flag 0x100) - needed before the fades of +0x680/+0x688 and the effects +0x69C..+0x6A4. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x69C": {
+  "name": "light_flicker_switch",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "interval",
+    "type": "float"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   },
+   {
+    "name": "arg4",
+    "type": "float"
+   },
+   {
+    "name": "use_light_colours",
+    "type": "bool"
+   },
+   {
+    "name": "colour_a",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "colour_b",
+    "type": "colour (0xAARRGGBB)"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051c190 (needs +0x698): flicker controller mode 5 (FUN_0055a870) - the light jumps at random between colour_a and colour_b every interval; use_light_colours = the light's own colours. Exact meaning of the timing args not verified. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x6A0": {
+  "name": "light_flicker_blend",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "interval",
+    "type": "float"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   },
+   {
+    "name": "arg4",
+    "type": "float"
+   },
+   {
+    "name": "use_light_colours",
+    "type": "bool"
+   },
+   {
+    "name": "colour_a",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "colour_b",
+    "type": "colour (0xAARRGGBB)"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051c210: like +0x69C with mode 6 - random blends between the two colours (flicker controller bit 2). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x6A4": {
+  "name": "light_flicker_mode4",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   },
+   {
+    "name": "interval",
+    "type": "float"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   },
+   {
+    "name": "arg4",
+    "type": "float"
+   },
+   {
+    "name": "use_light_colours",
+    "type": "bool"
+   },
+   {
+    "name": "colour_a",
+    "type": "colour (0xAARRGGBB)"
+   },
+   {
+    "name": "colour_b",
+    "type": "colour (0xAARRGGBB)"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051c290: like +0x69C with mode 4 (random switching, controller bit 4 only). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x6A8": {
+  "name": "stop_light_effect",
+  "args": [
+   {
+    "name": "light",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_0051c310: restores the light (FUN_0051d720) and clears flag 0x200 (effect running) set by +0x69C..+0x6A4. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x6AC": {
   "name": "show_message",
   "args": [
@@ -3979,6 +5922,86 @@
   "returns": "none",
   "desc": "Looks up a catalog text (0x4F6730) and shows it in the bottom pop-up bar (FUN_004d33a0 on view controller [0x63C98C]) for the given ms (all sites 5000).",
   "confidence": "high"
+ },
+ "0x6B0": {
+  "name": "show_message_raw",
+  "args": [
+   {
+    "name": "text",
+    "type": "string"
+   },
+   {
+    "name": "duration_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Shows a plain string in the bottom pop-up bar for duration_ms (FUN_004d33a0 on view controller [0x63C98C]) - +0x6AC without the catalog lookup. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x6B4": {
+  "name": "show_message_value",
+  "args": [
+   {
+    "name": "text",
+    "type": "hash"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   },
+   {
+    "name": "duration_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x488910: looks up the catalog text (FUN_004F6730), sprintf's the value into it and shows it in the pop-up bar (view controller [0x63C98C] FUN_004D33A0(text, ms)). MP DLLs: SEC_REMAIN '%d Seconds Remaining', 3000 ms.",
+  "confidence": "high"
+ },
+ "0x6B8": {
+  "name": "debug_printf",
+  "args": [
+   {
+    "name": "format",
+    "type": "string"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Debug printf (MP DLLs pass format strings such as 'LevelEventVehicleDestroyed() - Unable to work out unifrom of at...'); handler 0x488980 is a bare ret in the shipped exe (no-op, like +0x30C).",
+  "confidence": "high"
+ },
+ "0x6BC": {
+  "name": "set_health_percent",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "percent",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets health +0x54 = max health (FUN_0049c580) x percent / 100, percent clamped to 0..100. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x6C0": {
+  "name": "set_view_controller_74",
+  "args": [
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes view controller [0x63C98C] +0x74 (FUN_004d2460; also zeroed at init and by a front-end screen at 0x45D306); no reader found - effect unknown. Unused by the shipped DLLs.",
+  "confidence": "low"
  },
  "0x6C4": {
   "name": "emitter_start",
@@ -4076,6 +6099,98 @@
   "desc": "FUN_00408990 on the soldier: plays movement-state action 9 (or animation 0x4D via vtable+0x70); if one played, plays sound 2 of the bank of vtable+0x74's object at the soldier and posts a 500-unit AI hearing event; returns 1, else 0. Exact action unknown (gesture/shout?).",
   "confidence": "low"
  },
+ "0x6DC": {
+  "name": "add_screen_marker",
+  "args": [
+   {
+    "name": "a",
+    "type": "int"
+   },
+   {
+    "name": "b",
+    "type": "int"
+   },
+   {
+    "name": "c",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x489250: takes a free entry of the 2-entry table 0x618360 (6 dwords, -1 = free, FUN_0048C2E0) and fills it (FUN_0048C330: two ids + four ints converted from floats). Purpose not identified; name is a guess. Not referenced by the six MP DLLs.",
+  "confidence": "low"
+ },
+ "0x6E0": {
+  "name": "is_network_game",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "Returns [0x610F5C] (FUN_004608E0) = the DirectPlay multiplayer flag. 0 when the level runs without a network session. Network-role query.",
+  "confidence": "high"
+ },
+ "0x6E4": {
+  "name": "is_network_host",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "FUN_004608F0: 1 when [0x610F60] (session active, FUN_004608D0) and the DP8 session object [0x770154]+4 -> +0xA8 (host flag, FUN_00563700) are set; 0 offline. The DLLs gate scoring / win checks / event broadcasts on it. Network-role query.",
+  "confidence": "high"
+ },
+ "0x6E8": {
+  "name": "is_network_client",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "FUN_00460920: 1 when [0x610F60] and session +4 -> +0xB0 (client flag, FUN_00563F70); 0 offline. DLLs skip host-side item / respawn logic when it is 1. Network-role query.",
+  "confidence": "high"
+ },
+ "0x6EC": {
+  "name": "is_respawn_enabled",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "Returns the lobby option RE-SPAWN, byte [0x5EBBA9] (FUN_004609A0; set by the host OPTIONS screen item 0xE14 via FUN_0045F8D0).",
+  "confidence": "high"
+ },
+ "0x6F0": {
+  "name": "get_player_team",
+  "args": [
+   {
+    "name": "player",
+    "type": "object"
+   }
+  ],
+  "returns": "team (0 / 1, 3 = none)",
+  "desc": "FUN_00460A40: team byte (+0x15, [0x610DB9 + slot*0x34]) of the MP player-table slot owned by the soldier (slot = FUN_004607E0(obj, 1) = index in the player object list); -1 = the local player's slot [0x610F84]. DLLs pass the result to +0x7D4.",
+  "confidence": "high"
+ },
+ "0x6F4": {
+  "name": "queue_noop_event",
+  "args": [
+   {
+    "name": "a",
+    "type": "int"
+   },
+   {
+    "name": "b",
+    "type": "int"
+   },
+   {
+    "name": "c",
+    "type": "int"
+   },
+   {
+    "name": "delay_ms",
+    "type": "int"
+   },
+   {
+    "name": "flags",
+    "type": "int"
+   },
+   {
+    "name": "repeat",
+    "type": "bool"
+   }
+  ],
+  "returns": "none",
+  "desc": "Pushes an event on the event queue [0x63C978] (FUN_004db6b0) whose callback 0x488F00 is a bare ret: args at +0x30/+0x34/+0x38, delay +0x10, flags +0x14, type 3 if repeat else 6. Does nothing useful on PC. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x6F8": {
   "name": "play_object_anim",
   "args": [
@@ -4132,12 +6247,79 @@
   "desc": "Finds a world zone by name (hash FUN_004b9ab0 compared with zone +0x210 in the world's zone list [0x63C948]+0x1A48, next +0xB0); returns the zone pointer or 0.",
   "confidence": "high"
  },
+ "0x708": {
+  "name": "get_time_seconds",
+  "args": [],
+  "returns": "float",
+  "desc": "0x488FE0: timer [0x63C954] +0x10 (total ms) / +4 (units) as a float = game time in seconds.",
+  "confidence": "high"
+ },
+ "0x70C": {
+  "name": "get_game_clock_seconds",
+  "args": [],
+  "returns": "float",
+  "desc": "Total time of the gameplay timer [0x63C958] (+0x10 ms / units +4) in seconds (st0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x710": {
+  "name": "get_flag_60ee38",
+  "args": [],
+  "returns": "int",
+  "desc": "Returns [0x60EE38]; only ever written 0 (start-up option check at 0x40FEDD) - always 0 on PC. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x714": {
+  "name": "stub_714",
+  "args": [],
+  "returns": "none",
+  "desc": "Bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x718": {
   "name": "camera_zoom_in",
   "args": [],
   "returns": "none",
   "desc": "Jumps to FUN_00444330: steps the current player's camera FOV in (zoom), clamped to the held weapon's zoom limit, with the scope zoom sound - the zoom key handler.",
   "confidence": "medium"
+ },
+ "0x71C": {
+  "name": "camera_zoom_out",
+  "args": [],
+  "returns": "none",
+  "desc": "Jumps to FUN_00444130: steps the current player's camera FOV back out towards 70 degrees - the zoom-out counterpart of +0x718. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x720": {
+  "name": "shake_vehicle",
+  "args": [
+   {
+    "name": "vehicle",
+    "type": "object"
+   },
+   {
+    "name": "strength",
+    "type": "float"
+   },
+   {
+    "name": "duration",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Starts a camera shake on view 0's camera (FUN_004d5760(strength, 0, duration), as +0x32C) and a jolt on a ground vehicle (FUN_004394c0: wheeled +0x2C18 / tracked +0x2C1C body, +0x2C68 = strength x body value, +0x2C6C = duration). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x724": {
+  "name": "return_control_to_leader",
+  "args": [
+   {
+    "name": "blend",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "Gives player 1 (block 0x60F5B8, FUN_0044f260) the first soldier of team 0's list (FUN_004c9720), sets the player camera mode 1 (FUN_00472b30 / FUN_00473110), places the view-0 camera (FUN_004db330(cam, 0, blend)) and keeps the soldier's view angles +0x310. Probably for the end of a cutscene. Unused by the shipped DLLs.",
+  "confidence": "low"
  },
  "0x728": {
   "name": "show_movie_text",
@@ -4202,11 +6384,440 @@
   "desc": "Allocates count sky slots (0x84 B each) for 0x734; called before loading skies (count 2 in Missions 1/4/8/9).",
   "confidence": "high"
  },
+ "0x73C": {
+  "name": "load_pending_textures",
+  "args": [],
+  "returns": "none",
+  "desc": "Loads every registered texture not loaded yet (texture batch FUN_0054a3e0 on [0x63C930], no progress callback) - after mid-level skin / model changes. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x740": {
+  "name": "set_movie_text_colour",
+  "args": [
+   {
+    "name": "view",
+    "type": "int"
+   },
+   {
+    "name": "r",
+    "type": "float"
+   },
+   {
+    "name": "g",
+    "type": "float"
+   },
+   {
+    "name": "b",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "Sets the colour (0-1 floats, alpha 1) of view n's subtitle / text box [0x60ED14+n*4] used by +0x728 (FUN_00508ac0 -> box +4 as 0xFFRRGGBB). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x744": {
+  "name": "get_game_mode",
+  "args": [],
+  "returns": "int (0 team deathmatch, 1 deathmatch, 2 recovery, 3 assault/defend, 4 VIP assassination)",
+  "desc": "FUN_004609F0: maps the lobby GAME TYPE menu index [0x5EBBA5] (0 RECOVERY, 1 TEAM DEATHMATCH, 2 DEATHMATCH, 3 ASSAULT/DEFEND, 4 VIP ASSASSINATION; item 0xDAE) through {2,0,1,3,4,5,6}. Each MP DLL switches its per-mode set-up, update and network-event handlers on it.",
+  "confidence": "high"
+ },
+ "0x748": {
+  "name": "get_time_limit_ms",
+  "args": [],
+  "returns": "int (ms, -1 = no limit)",
+  "desc": "FUN_00461060: (time-limit index [0x5EBBA6] + 1) x 300000 ms (5..20 min); index 4 (1 500 000) returns -1 = unlimited. Lobby option TIME LIMIT (item 0xE11).",
+  "confidence": "high"
+ },
+ "0x74C": {
+  "name": "get_time_remaining_ms",
+  "args": [],
+  "returns": "int (ms, -1 = no limit)",
+  "desc": "0x488AA0: +0x748 time limit minus +0x750 network game time; -1 when unlimited. DLLs end the round when it reaches <= 0 (host only).",
+  "confidence": "high"
+ },
+ "0x750": {
+  "name": "get_network_time_ms",
+  "args": [],
+  "returns": "int (ms, -1 without a session)",
+  "desc": "FUN_00461090: shared DirectPlay session clock (FUN_00562BF0 on [0x770154]: host +0x44C / client +0x99C after a timer update); -1 when [0x770154] is null (offline). Also stamped into kill / respawn messages.",
+  "confidence": "high"
+ },
+ "0x754": {
+  "name": "count_living_players",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0, 1, 2 = both)"
+   }
+  ],
+  "returns": "int",
+  "desc": "FUN_00460BB0: counts MP player-table slots (8 x 0x34 at 0x610DA4) with team != 3 that are on the team (2 = any) and whose dead flag +0x17 ([0x610DBB], set by the kill report) is 0. Used for last-man-standing checks.",
+  "confidence": "high"
+ },
+ "0x758": {
+  "name": "mp_send_text",
+  "args": [
+   {
+    "name": "text",
+    "type": "string"
+   },
+   {
+    "name": "value",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_00463100(text, value, -1): builds a network message type 0x1A with up to 0x4C characters of text from the local player and sends it through the server or client (FUN_005629e0 / FUN_00562ac0). Only when networked. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x75C": {
+  "name": "is_artillery_enabled",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "Returns the lobby option ARTILLERY SUPPORT, byte [0x5EBBA8] (FUN_004609B0; item 0xE13).",
+  "confidence": "high"
+ },
+ "0x760": {
+  "name": "is_weapon_caches_enabled",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "Returns the lobby option WEAPON CACHES, byte [0x5EBBA7] (FUN_004609E0; item 0xE12).",
+  "confidence": "high"
+ },
+ "0x764": {
+  "name": "mp_latest_player",
+  "args": [
+   {
+    "name": "team",
+    "type": "int (2 = any)"
+   }
+  ],
+  "returns": "object (-1 none)",
+  "desc": "Script id of the soldier of the team's multiplayer player with the most recent time stamp (record +4, min of now - t; FUN_00460ae0). Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x768": {
+  "name": "get_team_score",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0, 1, 2 = both)"
+   }
+  ],
+  "returns": "int",
+  "desc": "FUN_00460B60: sum of the score field +0x20 ([0x610DC4]) of every used player slot on the team (kills +1, team kills -2 via the kill report).",
+  "confidence": "high"
+ },
+ "0x76C": {
+  "name": "mp_team_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "int"
+   },
+   {
+    "name": "team",
+    "type": "int (2 = any)"
+   }
+  ],
+  "returns": "bool",
+  "desc": "1 when any of the team's multiplayer players' soldiers is inside the region ([0x63C9B8] FUN_004fc600, test FUN_004fc040) - FUN_00460bf0. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x770": {
+  "name": "get_random_team_player",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0, 1, 2 = both)"
+   }
+  ],
+  "returns": "object (script id, -1 if none)",
+  "desc": "FUN_00460CC0: picks a random player slot on the team (FUN_004B7E60 over +0x778's count) and returns its soldier's script id (player object list FUN_00460830(i,1) +8). VIP mode uses it to choose the VIP.",
+  "confidence": "high"
+ },
+ "0x774": {
+  "name": "set_player_team",
+  "args": [
+   {
+    "name": "player",
+    "type": "object"
+   },
+   {
+    "name": "team",
+    "type": "team"
+   }
+  ],
+  "returns": "int (0 = applied online, -1 otherwise)",
+  "desc": "FUN_00460D40: writes the slot's pending-team byte +0x2C ([0x610DD0]) = team; when host in network state 7 it also sends the player table (FUN_00462820, class 0x1B) and raises script message 0x00 KILLED (player, -1, network time) so the soldier respawns on the new side; offline returns -1 after only storing the byte.",
+  "confidence": "high"
+ },
+ "0x778": {
+  "name": "count_team_players",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0, 1, 2 = both)"
+   }
+  ],
+  "returns": "int",
+  "desc": "FUN_00460DD0: number of used player-table slots (team byte != 3) on the team (2 = all players).",
+  "confidence": "high"
+ },
+ "0x77C": {
+  "name": "respawn_soldier_at_waypoint",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "health_percent",
+    "type": "float"
+   },
+   {
+    "name": "delay_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "int (0, -1 bad object / waypoint)",
+  "desc": "FUN_00460EC0: waypoint position / rotation (FUN_004D13F0 / FUN_004D1400), offset 100 cm by a rotating corner counter [0x610F8C] so respawns don't stack, then FUN_0041D800 on the soldier: respawn target +0x1FC / rotation +0x208, health +0x1F4 = pct x 0.01 x max, respawn pending +0x25DC = 1 at time +0x25D8 = now + delay (MP DLLs: 100.0 with 0 or 2000 ms).",
+  "confidence": "high"
+ },
+ "0x780": {
+  "name": "find_item_carrier",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0, 1, 2 = both)"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "object (soldier script id, -1 none)",
+  "desc": "FUN_00460FB0: scans the inventories (+0x26B8, 25 slots) of the players on the team for the item id; returns the carrying soldier (flag / case carrier checks).",
+  "confidence": "high"
+ },
+ "0x784": {
+  "name": "report_player_killed",
+  "args": [
+   {
+    "name": "victim",
+    "type": "object"
+   },
+   {
+    "name": "killer",
+    "type": "object (-1 none)"
+   },
+   {
+    "name": "time",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_004632D0: only when is_network_game and network state [0x5EBBAC] = 7 (in game): sends class 0x1A subtype 2 (victim slot, killer slot, time). The receiver FUN_00466220 increments the victim's deaths +0x1C, sets dead flag +0x17, kill time +0x18, gives the killer +1 score (-2 for a team kill unless deathmatch) and prints ENEMY DOWN / SQUAD MEMBER DOWN; a client's report is relayed by the host. Does nothing offline.",
+  "confidence": "high"
+ },
+ "0x788": {
+  "name": "resupply_soldier_ammo",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "magazines",
+    "type": "int"
+   },
+   {
+    "name": "cooldown_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x488BB0: if the soldier (type 1) holds a gun (held item type 6; not weapon class 6 / 0xE / 9, not a throwable FUN_004A4C60, not category 8) refills its reserve to 'magazines' magazines via FUN_004A5210(magazines, cooldown), at most once per cooldown. The per-soldier core of +0x7A4 (which adds the local-player / region test); usable for any soldier. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x78C": {
+  "name": "register_mp_item",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   },
+   {
+    "name": "kind",
+    "type": "int (1-3)"
+   }
+  ],
+  "returns": "int (0, -1 bad object)",
+  "desc": "Adds an item object to MP item spawner 'kind' (1 -> 0x619E50, 2 -> 0x619CF0, 3 -> 0x619B90; FUN_004A6380): put in the spawner's 20-entry pool (+0x10C, unless already placed), deactivated (vtable+4(0)), item +0x70 = spawner kind (+0x18), weapons get magazines vtable+0x38(3). The spawner later places pooled items on its spawn points.",
+  "confidence": "high"
+ },
+ "0x790": {
+  "name": "add_mp_item_spawn_point",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "kind",
+    "type": "int (1-3)"
+   },
+   {
+    "name": "marker",
+    "type": "object (kind 1 only, else ignored)"
+   }
+  ],
+  "returns": "int (0)",
+  "desc": "FUN_004A62F0 on spawner 'kind': appends a spawn point at the waypoint's position (+0x1C + n*0x18: pos, freed time = now, item 0, marker object id) and deactivates the marker object; kinds 2/3 pass -1 as marker.",
+  "confidence": "high"
+ },
+ "0x794": {
+  "name": "mp_item_taken",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "int (0, -1 if the item has no spawner kind)",
+  "desc": "FUN_004A6510 on the item's spawner (item +0x70 kind): clears the spawn point holding the item, stamps its freed time (respawn countdown starts) and deactivates its marker object. Called when a player picks up / uses a spawner item.",
+  "confidence": "high"
+ },
+ "0x798": {
+  "name": "set_mp_item_respawn_delay",
+  "args": [
+   {
+    "name": "delay_ms",
+    "type": "int"
+   },
+   {
+    "name": "kind",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x488C90: writes MP item spawner 'kind' +4 (1 -> [0x619E54], 2 -> [0x619CF4], 3 -> [0x619B94]) = the delay before a freed spawn point gets the next pooled item (see +0x7A0 / +0x790). Same argument order as +0x7A0. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x79C": {
+  "name": "drop_mp_items",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   }
+  ],
+  "returns": "int (0)",
+  "desc": "FUN_004A6970: removes every item with an MP spawner kind (+0x70) from the soldier's inventory (FUN_004318A0); kind 1/3 go straight back to their spawner (FUN_004A6380), kind 2 only when script query message 0x2C answers yes. Used when a carrier dies.",
+  "confidence": "high"
+ },
+ "0x7A0": {
+  "name": "set_mp_item_spawner_enabled",
+  "args": [
+   {
+    "name": "enabled",
+    "type": "bool"
+   },
+   {
+    "name": "kind",
+    "type": "int (1-3)"
+   }
+  ],
+  "returns": "none",
+  "desc": "Writes spawner 'kind' +0 (1 -> [0x619E50], 2 -> [0x619CF0], 3 -> [0x619B90]); the per-frame spawner update FUN_004A6260 (from 0x40FB72) only runs when it is set and not on a network client: a free spawn point older than the delay (+4) gets the next pooled item (FUN_004A6470).",
+  "confidence": "high"
+ },
+ "0x7A4": {
+  "name": "resupply_local_player_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   },
+   {
+    "name": "magazines",
+    "type": "int"
+   },
+   {
+    "name": "cooldown_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "If the local player's soldier ([0x610F84] slot) stands in the region (FUN_00483190) and holds a gun (not C4 / knife / fist / throwable / category 8), refills its reserve to 'magazines' magazines through FUN_004A5210, at most once per cooldown (weapon +0x8C). MP DLLs: regions 2/3, 3 mags, 20000 ms (base ammo boxes).",
+  "confidence": "high"
+ },
+ "0x7A8": {
+  "name": "broadcast_mp_event",
+  "args": [
+   {
+    "name": "event",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_004638F0: when is_network_game and state 7, sends class 0x1A subtype 6 (event id); the receiver FUN_004668E0 raises script message 0x36 with the id (a client's request is re-broadcast by the host). This is how the MP DLLs sync game events (flag taken, VIP down, time up 0x3E ...). Nothing happens offline - no message 0x36.",
+  "confidence": "high"
+ },
+ "0x7AC": {
+  "name": "return_item_to_waypoint",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "FUN_00461130: takes the item out of any player's inventory, moves it to the waypoint (rotation too unless it is a weapon, type 6; FUN_004C9F20 snap) and activates it (vtable+4(1)). Recovery flag / case reset.",
+  "confidence": "high"
+ },
+ "0x7B0": {
+  "name": "drop_inventory_item",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x486480: finds the item id in the soldier's inventory; on the network host sends the drop as an HLO event (FUN_0041E310(5, item), class 0x14), otherwise drops it locally (FUN_00431C70(item, 0)).",
+  "confidence": "high"
+ },
  "0x7B4": {
   "name": "get_player_count",
   "args": [],
   "returns": "int",
   "desc": "Returns the number of local players (input blocks, [0x610798] & 0xFFFF); scripts test > 1 for split screen.",
+  "confidence": "high"
+ },
+ "0x7B8": {
+  "name": "end_mp_game",
+  "args": [
+   {
+    "name": "winning_team",
+    "type": "team (0/1, other = draw)"
+   }
+  ],
+  "returns": "none",
+  "desc": "Host only (is_network_host): FUN_00462040(8, team) sends class 0x1B subtype 3; receivers store [0x5EBB44] = winner and network state [0x5EBBAC] = 8 (results screen: '%s WIN' with the team's uniform name, or TEAMS DRAW; 0x4707D2). No effect offline.",
   "confidence": "high"
  },
  "0x7BC": {
@@ -4244,11 +6855,42 @@
   "desc": "Vehicles only (object type 0): false sets vehicle flag +0x2CD8 bit 2, true clears it; the bit is passed to the vehicle dynamics (+0x2C20/+0x2C24, FUN_005192b0/0x51a350) - looks like a brake/hold. Used by cutscene command callbacks.",
   "confidence": "low"
  },
+ "0x7C8": {
+  "name": "reset_mp_item_spawner",
+  "args": [
+   {
+    "name": "kind",
+    "type": "int (1-3)"
+   }
+  ],
+  "returns": "int (0)",
+  "desc": "FUN_004A61D0 on spawner 'kind': clears enable / delay / counts, the 20-entry pool and all 10 spawn points (freed time = now, marker -1). DLLs call it for kinds 1-3 at level start.",
+  "confidence": "high"
+ },
+ "0x7CC": {
+  "name": "stub_7cc",
+  "args": [],
+  "returns": "none",
+  "desc": "0x489580: bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
  "0x7D0": {
   "name": "show_briefing",
   "args": [],
   "returns": "none",
   "desc": "Switches the front end to state 0x14 = the mission briefing popup.",
+  "confidence": "high"
+ },
+ "0x7D4": {
+  "name": "get_team_uniform",
+  "args": [
+   {
+    "name": "team",
+    "type": "team (0/1)"
+   }
+  ],
+  "returns": "int (uniform: 0 SAS, 1 US Delta, 2 Russian, 3 Iraqi)",
+  "desc": "0x461100: lobby faction byte of team 0 ([0x5EBBA3]) or team 1 ([0x5EBBA4]) mapped through {0,1,3,2} (FUN_004613D0) to the engine's skin side; other teams -> 0. DLLs pick which flag / VIP / vehicle objects to activate from it.",
   "confidence": "high"
  },
  "0x7D8": {
@@ -4397,6 +7039,74 @@
   "desc": "Sound manager FUN_0055f270(mode, 1): requests sound context 'mode' (+0x14 = 1 when it differs from the current +0x10). Called with 1 before MovieStart and 0 when the movie/briefing ends - movie vs game sound mode.",
   "confidence": "low"
  },
+ "0x800": {
+  "name": "set_sound_mode_2",
+  "args": [
+   {
+    "name": "mode",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x4896D0: FUN_0055F270(mode, 1) on the sound manager [0x63C9AC] - identical body to +0x7FC set_sound_mode.",
+  "confidence": "high"
+ },
+ "0x804": {
+  "name": "explosion_at_position",
+  "args": [
+   {
+    "name": "x",
+    "type": "float"
+   },
+   {
+    "name": "y",
+    "type": "float"
+   },
+   {
+    "name": "z",
+    "type": "float"
+   },
+   {
+    "name": "zone_object",
+    "type": "object"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   },
+   {
+    "name": "damage",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x4896F0: queues an explosion event at (x, y, z) in the explosion manager [0x63C9D0] (FUN_004E92C0, 20-entry ring; the same call the weapon code makes with weapon def +0xD4 / +0xD8 at 0x4A1A73, and destructible props at 0x41A524) with zone = the given object's +0x1C, no attacker, flags 0x5B0A (bit 0x100 = flash / rumble near the camera, read at 0x40E3E4). Event lifetime = radius x 0.667 ms (min 1 s). radius / damage named from the weapon call; exact effect not seen in game. Called by Mission11b.",
+  "confidence": "medium"
+ },
+ "0x808": {
+  "name": "set_unused_floats_5ec070",
+  "args": [
+   {
+    "name": "a",
+    "type": "float"
+   },
+   {
+    "name": "b",
+    "type": "float"
+   },
+   {
+    "name": "c",
+    "type": "float"
+   },
+   {
+    "name": "d",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x489A60: writes [0x5EC070..0x5EC07C] (defaults 0.8, 0.6, 0.4, 0.3); nothing else in the exe references these addresses (or the table around them at 0x5EC060), so it has no effect on PC. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x80C": {
   "name": "get_vehicle_driver",
   "args": [
@@ -4424,6 +7134,22 @@
   "returns": "none",
   "desc": "Draws a full-screen page with the catalog text and 'press any key' (FUN_0040b1e0, background colour) and blocks until a key / button / mouse press (FUN_00539a20(0)).",
   "confidence": "medium"
+ },
+ "0x814": {
+  "name": "set_rotation_from_waypoint",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x4839D0: turns the object to the waypoint's rotation (FUN_004D1400 on the waypoint table [0x63C9B0] -> rotation setter FUN_004C9A70). Position unchanged - pair with a teleport / place call. Unused by the shipped DLLs.",
+  "confidence": "high"
  },
  "0x818": {
   "name": "hash_name",
@@ -4481,6 +7207,46 @@
   "desc": "Vehicle: on sets +0x2CD8 bit 4 (0x10) and +0x2E8 = 360.0, +0x2EC = 180.0 (full angle ranges, probably turret / sight arcs); off clears the bit. When set and the vehicle is stopped its dynamics inputs are zeroed (0x43A14C).",
   "confidence": "low"
  },
+ "0x828": {
+  "name": "move_to_waypoint_direct",
+  "args": [
+   {
+    "name": "soldier",
+    "type": "object"
+   },
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x489B90: same body as +0x130 minus its soldier-type check: FUN_0045BA10(soldier, waypoint position) = mover (+0x3A0, FUN_0050D170) target set to the point with the route cleared, soldier +0x224 = target, movement mode 2 (FUN_0049D4A0) + FUN_0049D870(4) - sends the soldier straight to the waypoint's position. Returns nothing (+0x130 returns 1). Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x82C": {
+  "name": "explosion_at_waypoint",
+  "args": [
+   {
+    "name": "waypoint",
+    "type": "waypoint"
+   },
+   {
+    "name": "radius",
+    "type": "float"
+   },
+   {
+    "name": "damage",
+    "type": "float"
+   },
+   {
+    "name": "type",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x489730: like +0x804 but at the waypoint's position (FUN_004D13F0), zone 0: explosion event in [0x63C9D0] (FUN_004E92C0) with flags by type: 0 -> 0x5B0A (as +0x804), 1 -> 0x5B1A, 2 -> 0x1B02. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x830": {
   "name": "movie_freeze_world",
   "args": [
@@ -4492,6 +7258,13 @@
   "returns": "none",
   "desc": "Pauses timer [0x63C954] (FUN_004ba560(0)) and points the camera manager's clock at the main timer [0x63C958]; with 1 also hides (render flag 4) every active object that isn't type 2/3.",
   "confidence": "low"
+ },
+ "0x834": {
+  "name": "movie_unfreeze_world",
+  "args": [],
+  "returns": "none",
+  "desc": "0x4869C0: undoes +0x830: restarts timer [0x63C954] (FUN_004BA560(1)), points the camera manager's clock back at it (FUN_004D4590), and for every object (FUN_004CA910, callback 0x486950) that is in play, answers vtable+0x1C and whose render instance lacks flag 0x20000 clears the hide flag 4 (FUN_004D1230). Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x838": {
   "name": "set_node_rotation",
@@ -4513,6 +7286,13 @@
   "desc": "Gives the object's render instance a node override controller (+0x2C4) for the model node named 'node' (archive hash) with the given vector - Mission 3 turns its RADARDISH this way.",
   "confidence": "low"
  },
+ "0x83C": {
+  "name": "is_language_unset",
+  "args": [],
+  "returns": "int (always 0)",
+  "desc": "PS2: 'language not chosen yet' flag (starts 1, cleared when a language is picked; front end shows the language screen); on PC the flag [0x60ED38] is never set, so always 0. 0x489C50: returns [0x60ED38], a .bss dword only ever cleared (by the debug 'next language' key handler 0x444DF0) - effectively always 0 on PC. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
  "0x840": {
   "name": "remove_vehicles_in_region",
   "args": [
@@ -4524,6 +7304,18 @@
   "returns": "none",
   "desc": "Takes every type-0 object (vehicles / props) whose position is inside the region out of play (FUN_004c93a0: in-play bit cleared, hidden, moved to the inactive list).",
   "confidence": "medium"
+ },
+ "0x844": {
+  "name": "remove_corpses_in_region",
+  "args": [
+   {
+    "name": "region",
+    "type": "region"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x4810E0: region by index (FUN_004FC600 on [0x63C9B8]); the corpse manager [0x60F1F4] (HLOCorpse.cpp, CORPSEHOLDER objects) takes every in-play corpse whose position is inside the region out of play (FUN_0041B4F0 -> FUN_004C93A0). Companion of +0x840. Unused by the shipped DLLs.",
+  "confidence": "high"
  },
  "0x848": {
   "name": "tint_soldier_red",
@@ -4547,6 +7339,34 @@
   ],
   "returns": "bool",
   "desc": "FUN_004b9cd0: 1 if the start-up option letter is set (Training 3 checks 'u', the dev movie-skip flag).",
+  "confidence": "high"
+ },
+ "0x850": {
+  "name": "reset_idle_timer",
+  "args": [],
+  "returns": "none",
+  "desc": "FUN_005383E0: [0x754C90] = -(timer [0x63C954]+0x10 x 0.001) so the input idle time (+0x854) restarts from 0.",
+  "confidence": "high"
+ },
+ "0x854": {
+  "name": "get_idle_time",
+  "args": [],
+  "returns": "float (s)",
+  "desc": "FUN_00538410: seconds since the last input (timer x 0.001 - last input [0x754C8C] + [0x754C90]); the front end uses it for the attract-mode film.",
+  "confidence": "high"
+ },
+ "0x858": {
+  "name": "nop_858",
+  "args": [],
+  "returns": "none",
+  "desc": "0x489E20: bare ret (stub).",
+  "confidence": "high"
+ },
+ "0x85C": {
+  "name": "stub_return_0",
+  "args": [],
+  "returns": "int (0)",
+  "desc": "0x489E30: xor eax,eax; ret (stub).",
   "confidence": "high"
  },
  "0x860": {
@@ -4585,6 +7405,129 @@
   "desc": "Sets [0x5F567C]: enables FUN_00435760 (the player's soldier picks a nearby / aimed combat soldier within 2 m as a target) and an inventory check at 0x45335D. Mission 1 turns it off then on; Training 3 too.",
   "confidence": "low"
  },
+ "0x86C": {
+  "name": "activate_object_simple",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x483600: SetActive(1) (vtable+4) unless already in play (+0xC bit 0). Unlike +0xC4 it doesn't record the object in the zone object table (FUN_00482410) or run the network vehicle step. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x870": {
+  "name": "deactivate_object_simple",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x483630: SetActive(0) (vtable+4(0)) only; +0xC8 additionally calls FUN_00482410(obj, 0). Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x874": {
+  "name": "screen_dim_down",
+  "args": [
+   {
+    "name": "time_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x48A410: view controller [0x63C98C] +0x2C8 = -1000 / (time/2) (FUN_004D4500) = per-frame rate (x dt, 0x4D1BE9) of its extra level +0x2C4 (clamped 0..0.5; +4 = max(base, +0x2C4)). Lowers it; opposite of +0x878. Likely a screen fade / dim - visual not checked. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x878": {
+  "name": "screen_dim_up",
+  "args": [
+   {
+    "name": "time_ms",
+    "type": "int"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x48A450: view controller [0x63C98C] +0x2C8 = +1000 / (time/2): ramps its extra level +0x2C4 up to 0.5 (see +0x874). Likely fades / dims the view - visual not checked. Unused by the shipped DLLs.",
+  "confidence": "low"
+ },
+ "0x87C": {
+  "name": "save_soldier_states",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A0A0: allocates (FUN_00489FD0) and fills the array [0x618358] (count [0x618354], 0x28 B each) with every soldier of every team (active + inactive lists): object, position, rotation, +0x1C twice, active bit (+0xC & 1).",
+  "confidence": "high"
+ },
+ "0x880": {
+  "name": "restore_soldier_states",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A250: puts every soldier saved by +0x87C back: render-instance vtable[0](pos), rotation FUN_004C9A70, FUN_004C9980 / FUN_004C9A00 (+0x1C fields), SetActive(saved bit).",
+  "confidence": "high"
+ },
+ "0x884": {
+  "name": "reset_world_state",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A3B0: clears effects / projectiles / decals etc. (FUN_00486EB0), empties the event queue [0x63C978] (FUN_004DB630), resets every soldier's AI / movement / held item (FUN_00489E40), removes dead soldiers (FUN_0048A2E0), then FUN_00486650. Round-restart helper.",
+  "confidence": "medium"
+ },
+ "0x888": {
+  "name": "nop_888",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A3D0: bare ret (stub).",
+  "confidence": "high"
+ },
+ "0x88C": {
+  "name": "reset_all_soldiers",
+  "args": [],
+  "returns": "none",
+  "desc": "0x489E40: for every team's active (FUN_004C9720(team, 1)) and inactive (FUN_004C96D0) soldier lists: soldiers not in a vehicle (+0x267C = 0) get vtable+0x40 (reset), +0x258 / +0x260 moved to +0x25C / +0x264 and cleared, FUN_0049EA30(0, 0), held item FUN_004A4A30(0). Part of +0x884 reset_world_state. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x890": {
+  "name": "stub_890",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A2D0: bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x894": {
+  "name": "restore_destroyed_objects",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A2E0: for every team's active / inactive lists of object kind 3 (FUN_004C9720 / FUN_004C96D0(team, 3)): objects with health +0x54 < 1.0 get FUN_0041A1C0 = flag 0x400 cleared, +0x60 = 0, health back to the definition's max (unit +0x80 -> +0x24). Part of +0x884 reset_world_state. Unused by the shipped DLLs.",
+  "confidence": "medium"
+ },
+ "0x898": {
+  "name": "stub_898",
+  "args": [],
+  "returns": "none",
+  "desc": "0x48A3A0: bare ret - no-op on PC. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x89C": {
+  "name": "is_at_main_menu",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "0x480D80: 0 during a network session ([0x610F60]) or front-end state 0x2E; else 1 when the front-end state [0x617C18] is 1 (main menu).",
+  "confidence": "medium"
+ },
+ "0x8A0": {
+  "name": "get_player_effective_team",
+  "args": [
+   {
+    "name": "player",
+    "type": "object"
+   }
+  ],
+  "returns": "team",
+  "desc": "FUN_00460E70: the slot's pending team +0x2C ([0x610DD0]) if set (!= 3), else its current team +0x15.",
+  "confidence": "high"
+ },
  "0x8A4": {
   "name": "allow_stance_0",
   "args": [
@@ -4598,10 +7541,10 @@
   "confidence": "low"
  },
  "0x8A8": {
-  "name": "query_0x8a8",
+  "name": "get_local_player_count",
   "args": [],
   "returns": "int",
-  "desc": "Always returns 1 (stub). Mission scripts test the result > 1 (left-over multiplayer / player-count check).",
+  "desc": "PC: always returns 1 (stub). PS2 (demo 0x188BB8, retail 0x156A78): [split-screen flag] ? 2 : 1 = local players - the PC mission scripts still branch on it for 2-player co-op (Foley controllable, pickups hidden, cell door). Always returns 1 (stub). Mission scripts test the result > 1 (left-over multiplayer / player-count check).",
   "confidence": "low"
  },
  "0x8AC": {
@@ -4610,6 +7553,39 @@
   "returns": "none",
   "desc": "Clears [0x60F20C] (soldier ctor sets 1); while set, soldiers' view / head angles (+0x310..) are zeroed during cinematics (0x42E4CF).",
   "confidence": "low"
+ },
+ "0x8B0": {
+  "name": "enable_cutscene_head_reset",
+  "args": [],
+  "returns": "none",
+  "desc": "0x480E20: [0x60F20C] = 1 (the soldier ctor default) - counterpart of +0x8AC: soldiers' view / head angles are zeroed during cinematics again. Unused by the shipped DLLs.",
+  "confidence": "high"
+ },
+ "0x8B4": {
+  "name": "get_mp_item_kind",
+  "args": [
+   {
+    "name": "item",
+    "type": "object"
+   }
+  ],
+  "returns": "int (0 none, 1-3 spawner kind)",
+  "desc": "0x488E50: +0x70 of an equipment / weapon object (types 5 / 6) = the MP spawner kind set by +0x78C; 0 for other objects.",
+  "confidence": "high"
+ },
+ "0x8B8": {
+  "name": "disable_idle_timer",
+  "args": [],
+  "returns": "none",
+  "desc": "FUN_00538450: [0x754C90] = FLT_MAX so the input idle time never runs out (no attract-mode film).",
+  "confidence": "high"
+ },
+ "0x8BC": {
+  "name": "take_play_intro_flag",
+  "args": [],
+  "returns": "int (bool)",
+  "desc": "0x48A4D0: returns [0x5ED230] and clears it (initially 1): FrontEnd.dll asks once whether to play the opening film.",
+  "confidence": "high"
  },
  "0x8C0": {
   "name": "get_value_8c0",
@@ -4622,6 +7598,42 @@
   "returns": "float",
   "desc": "Returns **(handle+0x18) as a float (FUN_004d0e30), 0.0 for a null handle; 0x8C4 is the matching setter. Mission 12B doubles the result.",
   "confidence": "low"
+ },
+ "0x8C4": {
+  "name": "damage_breakable",
+  "args": [
+   {
+    "name": "handle",
+    "type": "pointer"
+   },
+   {
+    "name": "amount",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x48A530: for a non-null breakable scene instance (FUN_004D0E80: needs instance flag 0x400000 = ENVI breakable block and health **(handle+0x18) > 0) subtracts amount from its health; reaching 0 runs the break code. Matching getter = +0x8C0. Called by Mission12B.",
+  "confidence": "medium"
+ },
+ "0x8C8": {
+  "name": "push_dynamic_object",
+  "args": [
+   {
+    "name": "object",
+    "type": "object"
+   },
+   {
+    "name": "direction",
+    "type": "vec3*"
+   },
+   {
+    "name": "strength",
+    "type": "float"
+   }
+  ],
+  "returns": "none",
+  "desc": "0x48A550: object type 2 only: its dynamics (+0x64) get FUN_00512480(direction, strength, 0) = if strength != 0 and the body is dynamic (+8 = 1) wakes the Karma body (0x58E780) and adds force direction x strength (0x58EA10). Direction is a pointer to 3 floats. Unused by the shipped DLLs.",
+  "confidence": "medium"
  },
  "0x8CC": {
   "name": "spawn_debris_at_waypoint",

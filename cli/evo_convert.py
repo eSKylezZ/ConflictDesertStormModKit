@@ -25,10 +25,10 @@ def included(o, helpers):
 class Model:
     """A scene plus everything resolved for writing it: textures, normal maps, attached vehicle parts."""
 
-    def __init__(self, path, finder, opts, place=None):
-        self.scene = evo.load(path)
+    def __init__(self, path, finder, opts, place=None, only=None):
+        self.scene = evo.load(path, only)
         self.place = place
-        self.textures, self.skin = evo.resolve_textures(self.scene, finder, opts.skin)
+        self.textures, self.skin = evo.resolve_textures(self.scene, finder, opts.skin, getattr(opts, "override", ""))
         self.normals = {}
         if not opts.no_normal_maps:
             for o in self.scene.objects:
@@ -70,6 +70,10 @@ class Model:
 class GltfWriter:
     def __init__(self, model, anims, opts, out_path):
         self.m, self.anims, self.k, self.helpers = model, anims, opts.scale, opts.helpers
+        meshes = [m for o in model.scene.objects for m in o.node.meshes]
+        # hide invisible blockers inside drawn models; a model made only of them (INVISPOLY props) stays visible
+        self.skip_invisible = (getattr(opts, "skip_invisible", False)
+                               and not all(getattr(m, "invisible", False) for m in meshes))
         self.embed, self.out_dir = not opts.no_embed, os.path.dirname(os.path.abspath(out_path))
         self.bin = bytearray()
         self.g = {"asset": {"version": "2.0", "generator": "evo_convert.py (Conflict: Desert Storm)"},
@@ -167,6 +171,12 @@ class GltfWriter:
                 if self.has_alpha(path):
                     mat["alphaMode"] = "MASK"
                     mat["alphaCutoff"] = 0.5
+        elif not name:
+            # no texture at all ("Default"): blockers / occluders the game doesn't draw (Global Storm *_BLOCK,
+            # BIGINVISIBLEPOLY) - see-through so they don't hide the room
+            mat["pbrMetallicRoughness"]["baseColorFactor"] = [0.55, 0.6, 0.7, 0.25]
+            mat["alphaMode"] = "BLEND"
+            mat["doubleSided"] = True
         else:
             mat["pbrMetallicRoughness"]["baseColorFactor"] = [0.6, 0.6, 0.6, 1.0]
         if normal:
@@ -191,7 +201,7 @@ class GltfWriter:
     def mesh(self, model, o, weights=None):
         prims = []
         for m in o.node.meshes:
-            if not m.triangles:
+            if not m.triangles or (self.skip_invisible and getattr(m, "invisible", False)):
                 continue
             attrs = {"POSITION": self.accessor([self.pos(p) for p in m.positions], 5126, "VEC3", 34962, True),
                      "NORMAL": self.accessor([self.nrm(n) for n in m.normals], 5126, "VEC3", 34962),
@@ -243,7 +253,8 @@ class GltfWriter:
             if keys and place is None:          # TRS so animations can drive the node
                 pos, scale, q = keys[o.index]
                 node["translation"] = list(self.pos(pos))
-                node["rotation"] = self.quat((-q[0], -q[1], -q[2], q[3]))
+                cv = getattr(s.nodes[0], "version", 0) & 0xFFFF >= 0x40   # Vietnam / Global Storm store the rotation itself
+                node["rotation"] = self.quat(q if cv else (-q[0], -q[1], -q[2], q[3]))
                 node["scale"] = list(scale)
             else:
                 local = o.local if place is None or o.parent is not None else evo.mat_mul(place, o.local)
@@ -294,10 +305,11 @@ class GltfWriter:
         times = [f / anim.fps for f in range(anim.frames)]
         tacc = self.accessor(times, 5126, "SCALAR", None, True)
         samplers, channels = [], []
+        tracks = anim.tracks_for(s)                 # DS2 binds tracks by object name hash, DS1 by position
         for i in range(len(s.objects)):
-            if i not in node_of or i >= len(anim.tracks):
+            if i not in node_of or tracks[i] is None:
                 continue
-            keys = [anim.key(i, f) for f in range(anim.frames)]
+            keys = [anim.key(tracks[i], f) for f in range(anim.frames)]
             rots, prev = [], None
             for _, _, q in keys:
                 r = self.quat(q)

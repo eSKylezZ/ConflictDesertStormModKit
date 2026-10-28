@@ -18,7 +18,8 @@ import struct
 from . import evo
 
 _EOBJ_TYPE = 8 + 64 + 64 + 4          # u32 node type
-_EOBJ_PARENT = 8 + 64 + 64 + 4 + 4 + 4 + 4 + 24
+_EOBJ_PARENT = 8 + 64 + 64 + 4 + 4 + 4 + 4 + 24      # DS1 (EOBJ version 0x2F)
+_EOBJ_PARENT_DS2 = 8 + 64 + 64 + 4 + 4 + 4 + 4 + 20  # Desert Storm II (0x35, FUN_005087b0): 4 bytes shorter
 
 
 def objects(data: bytes):
@@ -57,7 +58,11 @@ def extract(data: bytes, index: int, model_name: str) -> bytes:
     name = model_name.encode("latin-1")[:63]
     obj[8:8 + 64] = name + b"\0" * (64 - len(name))
     struct.pack_into("<I", obj, _EOBJ_TYPE, 0)
-    obj[_EOBJ_PARENT:_EOBJ_PARENT + 64] = b"ROOT" + b"\0" * 60
+    version = struct.unpack_from("<I", obj, 4)[0] & 0xFFFF
+    if version not in (0x2F, 0x35):
+        raise evo.EvoError("kit pieces: EOBJ version 0x%x isn't supported (Desert Storm / Desert Storm II only)" % version)
+    parent = _EOBJ_PARENT_DS2 if version == 0x35 else _EOBJ_PARENT
+    obj[parent:parent + 64] = b"ROOT" + b"\0" * 60
     obj[-4:] = b"DONE"
     return bytes(obj)
 

@@ -21,6 +21,8 @@ extracted/
 *.mtl
 *.png
 *.sch
+# (only stream entries - name, length, path - no sound: examples/restored_missions/make_streams.py)
+!examples/restored_missions/RestoredMissions/TRAINING1_STREAMS.sch
 *.wav
 
 # Screenshots show game content - kept local
@@ -38,3 +40,9 @@ desktop.ini
 
 # Local tests
 /tests
+
+# PyInstaller work folder (scripts/build_exe.py)
+build/
+
+# Mission DLLs translated to Lua (cli/ds_mission2lua.py): game code, made from your own files
+generated_missions/

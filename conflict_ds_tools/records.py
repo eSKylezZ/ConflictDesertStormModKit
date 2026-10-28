@@ -21,7 +21,7 @@ import os
 import re
 import struct
 
-from . import archive
+from . import archive, games, modlayout
 
 # Tables the editor shows: file name, what one row is, whether a key can have several rows.
 TABLES = {
@@ -81,13 +81,12 @@ _FLOAT = re.compile(r"-?\d+\.\d*$")
 
 def hash_key(key: str) -> int:
     """The catalog's hash of a text key (archive LFSR over the lower-cased key) - how the game and mod .strings
-    files find a text; mission scripts pass this number (e.g. to add_objective)."""
-    x = 1
-    for c in key.lower().encode("latin-1", "replace"):
-        for b in range(8):
-            i = ((c >> b) & 1) ^ (x & 1) ^ ((x >> 1) & 1) ^ ((x >> 21) & 1) ^ ((x >> 31) & 1)
-            x = ((x << 1) & 0xFFFFFFFF) | i
-    return x
+    files find a text; mission scripts pass this number (e.g. to add_objective). "#1A2B3C4D" = a key known only by
+    its hash (Global Storm stores no key names). Always the lower-cased LFSR (DS1's archives upper-case, its texts don't)."""
+    if re.fullmatch(r"#[0-9A-Fa-f]{8}", key):
+        return int(key[1:], 16)
+    from .evo import archive_hash          # same LFSR, table-driven
+    return archive_hash(key, upper=False)
 
 
 def split_rows(text: str) -> list[list[str]]:
@@ -114,10 +113,12 @@ class Records:
         self.tables: dict[str, list[list[str]]] = {}
         self._texts: dict[tuple[str, str], str] | None = None
         self._catalog = None
+        self._game = None
         files = None
-        if os.path.isfile(os.path.join(source, "catalog.dat")):
+        if os.path.isfile(games.game_file(source, "catalog.dat")):   # (or PSE/Originals)
             files = archive.GameFiles(source)
-            self._catalog = os.path.join(source, "catalog.dat")
+            self._catalog = games.game_file(source, "catalog.dat")
+            self._game = source
         for name in TABLES:
             data = None
             if files:
@@ -199,11 +200,123 @@ class Records:
             if re.fullmatch(r"[A-Z][A-Z0-9_]+", k) and (source, k) not in out:
                 out[(source, k)] = m.group(2).decode("utf-16le", "replace")
 
+    @staticmethod
+    def read_bundle(data: bytes, language: int = 0):
+        """Global Storm text bundle (the first file of catalog.dat and of every level archive): u32 0, u32 n, n x {u32
+        len, name} (the .loc files it was built from), u32 count, u32 languages, languages x u32 offset (counted from 4
+        bytes after the offset list); at each: u32 size, count x {u32 key hash, u32 offset from the table start}
+        sorted by hash, UTF-16 strings. ([.loc names], {hash: text}), or None when data isn't a bundle."""
+        try:
+            if data[:4] != b"\0\0\0\0":
+                return None
+            nf = struct.unpack_from("<I", data, 4)[0]
+            if not 0 < nf < 64:
+                return None
+            p, names = 8, []
+            for _ in range(nf):
+                n = struct.unpack_from("<I", data, p)[0]
+                names.append(data[p + 4:p + 4 + n].rstrip(b"\0").decode("latin-1"))
+                p += 4 + n
+            if not all(n.lower().endswith(".loc") for n in names):
+                return None
+            count, nlang = struct.unpack_from("<II", data, p)
+            offs = struct.unpack_from("<%dI" % nlang, data, p + 8)
+            t = p + 8 + 4 + offs[min(language, nlang - 1)] + 4
+            out = {}
+            for k in range(count):
+                h, o = struct.unpack_from("<II", data, t + 8 * k)
+                s = e = t + o
+                while data[e:e + 2] != b"\0\0":
+                    e += 2
+                out[h] = data[s:e].decode("utf-16le", "replace")
+            return names, out
+        except (struct.error, IndexError):
+            return None
+
+    def _key_names(self, hashes) -> dict[int, str]:
+        """Names for Global Storm's text-key hashes: identifiers from the game's DLLs / exe and data tables, hashed
+        (about a third of the keys get one; the rest stay "#<hash>")."""
+        words = set()
+        for path in games.game_files(self._game, exts=(".exe", ".dll")):
+            with open(path, "rb") as fh:
+                words |= {m.decode() for m in re.findall(rb"[A-Za-z][A-Za-z0-9_]{2,60}", fh.read())}
+        for rows in self.tables.values():
+            for r in rows:
+                for c in r:
+                    words |= set(re.findall(r"[A-Za-z][A-Za-z0-9_]{2,60}", c))
+        # text files in the archives (scenes, script info, editor movies, tables): object / region / objective names
+        for path in games.game_files(self._game, exts=(".dat",)):   # game folder + PSE/Originals
+            with open(path, "rb") as fh:
+                for _h, o, s in archive.entries_head(archive.read_head(fh)):
+                    if s > 1 << 20:
+                        continue
+                    fh.seek(o)
+                    head = fh.read(min(s, 64))
+                    if not head or sum(32 <= c < 127 or c in (9, 10, 13) for c in head) < len(head) * 0.95:
+                        continue
+                    fh.seek(o)
+                    words |= {m.decode() for m in re.findall(rb"[A-Za-z][A-Za-z0-9_]{2,60}", fh.read(s))}
+        out = {}
+        for w in words:
+            h = hash_key(w)
+            if h in hashes:
+                out[h] = w.upper()
+        # keys come in numbered families (OBJ_5_TEXT, M03_OBJ_1_COMPLETE): try every number 0-40 in each named key's
+        # number slots (2-digit slots keep 2 digits)
+        for _round in range(2):
+            for name in list(out.values()):
+                parts = re.split(r"(\d+)", name)
+                slots = [i for i in range(1, len(parts), 2)]
+                for i in slots:
+                    for n in range(41):
+                        cand = parts[:]
+                        cand[i] = str(n).zfill(len(parts[i]) if len(parts[i]) == 2 else 1)
+                        w = "".join(cand)
+                        h = hash_key(w)
+                        if h in hashes and h not in out:
+                            out[h] = w
+        return out
+
+    def _gt_texts(self) -> bool:
+        """Desert Storm II / Global Storm: texts from the bundles - catalog.dat's (shared) and each level archive's
+        (shared + that mission's .loc: source "M01", "T00A" ...). False when catalog.dat holds no bundle (DS1 /
+        Vietnam). Global Storm keeps the bundle as an archive's first file, DS2 anywhere in it."""
+        def first_file(path):
+            with open(path, "rb") as f:
+                ents = archive.entries_head(archive.read_head(f))
+                for _h, o, s in ents:
+                    f.seek(o)
+                    head = f.read(16)
+                    # a bundle: u32 0, u32 n (.loc names), u32 length of the first name
+                    if (s < 1 << 24 and len(head) == 16 and head[:4] == b"\0\0\0\0" and 0 < head[4] < 64
+                            and head[5:8] == b"\0\0\0"):
+                        f.seek(o)
+                        return f.read(s)
+                return b""
+        shared = self.read_bundle(first_file(self._catalog))
+        if shared is None:
+            return False
+        per = {"catalog": shared[1]}
+        for path in games.game_files(self._game, exts=(".dat",)):   # game folder + PSE/Originals
+            f = os.path.basename(path)
+            if f.lower() != "catalog.dat":
+                b = self.read_bundle(first_file(path))
+                if b and len(b[0]) > len(shared[0]):
+                    src = b[0][-1].rsplit("Strs", 1)[0].upper() or f[:-4].upper()
+                    per[src] = {h: v for h, v in b[1].items() if shared[1].get(h) != v}
+        names = self._key_names({h for d in per.values() for h in d})
+        for src, d in per.items():
+            for h, v in d.items():
+                self._texts[(src, names.get(h, "#%08X" % h))] = v
+        return True
+
     def text_entries(self) -> dict[tuple[str, str], str]:
         """(source, KEY) -> first / English text; source "catalog" (shared by every level) or a mission's text file
         ("M01" = M01Strs.loc). Missions reuse keys (MOV_TXT1 date, SPEECH1 ...) with their own texts."""
         if self._texts is None:
             self._texts = {}
+            if self._catalog and self._gt_texts():
+                return self._texts
             if self._catalog:
                 self._scan_texts(open(self._catalog, "rb").read(), self._texts, "catalog")
                 files = archive.GameFiles(os.path.dirname(self._catalog))
@@ -256,11 +369,17 @@ def _write_lines(path: str, lines: list[str]):
         f.write("\n".join(lines) + "\n")
 
 
+def _mod_file(mod_dir: str, name: str, layout: str = modlayout.ORGANISED) -> str:
+    """A mod file to read / rewrite: the mod's copy at any depth, else where a new one goes (modlayout: tables\\ and
+    defs\\ in an organised mod, the top folder in a flat one; no folders made)."""
+    return modlayout.find(mod_dir, name) or modlayout.path_for(mod_dir, name, layout=layout, create=False)
+
+
 def mod_overrides(mod_dir: str, table: str) -> dict[str, list[list[str]]]:
     """A mod's replace rows for a table: key -> rows ([] = deleted)."""
     base = table[:-4]
     out: dict[str, list[list[str]]] = {}
-    for line in _read_lines(os.path.join(mod_dir, base + ".replace.txt")):
+    for line in _read_lines(_mod_file(mod_dir, base + ".replace.txt")):
         s = line.strip()
         if not s or s.startswith("#"):
             continue
@@ -275,16 +394,17 @@ def mod_overrides(mod_dir: str, table: str) -> dict[str, list[list[str]]]:
 def mod_new_rows(mod_dir: str, table: str) -> list[list[str]]:
     base = table[:-4]
     for cand in (table, base + ".txt", base.title() + ".txt"):
-        p = os.path.join(mod_dir, cand)
-        if os.path.isfile(p):
+        p = modlayout.find(mod_dir, cand)
+        if p and os.path.isfile(p):
             return split_rows(open(p, encoding="latin-1").read())
     return []
 
 
-def set_rows(mod_dir: str, table: str, key: str, rows: list[list[str]] | None):
-    """Replace a record's rows in the mod (None = take the mod's replacement out again, [] = delete the record)."""
+def set_rows(mod_dir: str, table: str, key: str, rows: list[list[str]] | None, layout: str = modlayout.ORGANISED):
+    """Replace a record's rows in the mod (None = take the mod's replacement out again, [] = delete the record).
+    Returns the file's path."""
     base = table[:-4]
-    path = os.path.join(mod_dir, base + ".replace.txt")
+    path = _mod_file(mod_dir, base + ".replace.txt", layout)
     keep = []
     for line in _read_lines(path):
         s = line.strip()
@@ -296,20 +416,23 @@ def set_rows(mod_dir: str, table: str, key: str, rows: list[list[str]] | None):
     if rows is not None:
         keep += [join_row(r) for r in rows] if rows else ["-" + key]
     _write_lines(path, keep)
+    return path
 
 
-def add_rows(mod_dir: str, table: str, rows: list[list[str]]):
-    """Append new records (the table's .txt part in the mod)."""
-    path = os.path.join(mod_dir, table[:-4] + ".txt")
+def add_rows(mod_dir: str, table: str, rows: list[list[str]], layout: str = modlayout.ORGANISED):
+    """Append new records (the table's .txt part in the mod). Returns the file's path."""
+    path = _mod_file(mod_dir, table[:-4] + ".txt", layout)
     _write_lines(path, _read_lines(path) + [join_row(r) for r in rows])
+    return path
 
 
 def remove_new_rows(mod_dir: str, table: str, key: str):
-    path = os.path.join(mod_dir, table[:-4] + ".txt")
+    path = _mod_file(mod_dir, table[:-4] + ".txt")
     _write_lines(path, [l for l in _read_lines(path) if l.split(",")[0].strip().upper() != key.upper()])
 
 
-def weapon_file(mod_dir: str, wid: str, base: str, changes: dict[int, str], schema: list[dict]) -> str:
+def weapon_file(mod_dir: str, wid: str, base: str, changes: dict[int, str], schema: list[dict],
+                layout: str = modlayout.ORGANISED) -> str:
     """Write <mod>/<id>.weapon: a game weapon changed in place (base == wid) or a new weapon based on `base`.
     changes = column index -> value; named columns use their .weapon name, others "column N" (1-based)."""
     names = NAMES["WEAPS.TXT"]
@@ -321,8 +444,8 @@ def weapon_file(mod_dir: str, wid: str, base: str, changes: dict[int, str], sche
         # spent cartridge go in as raw columns
         raw = i in (6, 35, 37) or i not in names
         lines.append(f"column {i + 1} = {v}" if raw else f"{names[i]} = {v}")
-    path = os.path.join(mod_dir, f"{wid}.weapon")
     os.makedirs(mod_dir, exist_ok=True)
+    path = modlayout.path_for(mod_dir, f"{wid}.weapon", layout=layout)   # defs\ in an organised mod
     with open(path, "w", encoding="latin-1", newline="\r\n") as f:
         f.write("# made by the Desert Storm Editor's records window\n" + "\n".join(lines) + "\n")
     return path
@@ -332,15 +455,15 @@ def read_strings(mod_dir: str) -> dict[tuple[str, str], str]:
     """The mod's .strings texts: (section, key) -> text; section "" = every level, "M01" = only the mission whose
     texts are M01Strs.loc ("[M01]" line; "[all]" back to every level)."""
     out = {}
-    for f in sorted(os.listdir(mod_dir)) if os.path.isdir(mod_dir) else []:
+    for f in modlayout.files(mod_dir) if os.path.isdir(mod_dir) else []:   # any depth (organised: tables\)
         if f.lower().endswith(".strings"):
             out.update(read_strings_file(os.path.join(mod_dir, f)))
     return out
 
 
-def set_string(mod_dir: str, key: str, text: str | None, section: str = ""):
+def set_string(mod_dir: str, key: str, text: str | None, section: str = "", layout: str = modlayout.ORGANISED):
     """Set (or with None remove) a text in <mod>/<mod>.strings; section "M01" = only in that mission."""
-    path = os.path.join(mod_dir, os.path.basename(os.path.normpath(mod_dir)) + ".strings")
+    path = _mod_file(mod_dir, os.path.basename(os.path.normpath(mod_dir)) + ".strings", layout)
     texts = read_strings_file(path)
     for k in [k for k in texts if k[0] == section.upper() and k[1].upper() == key.upper()]:
         del texts[k]
@@ -376,7 +499,7 @@ def weapon_changes(mod_dir: str) -> dict[str, tuple[str, dict[int, str], str, st
     out = {}
     if not os.path.isdir(mod_dir):
         return out
-    for f in sorted(os.listdir(mod_dir)):
+    for f in modlayout.files(mod_dir):           # relative paths, any depth (organised: defs\)
         if not f.lower().endswith(".weapon"):
             continue
         wid = base = ""

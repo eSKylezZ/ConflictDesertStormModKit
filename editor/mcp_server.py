@@ -1,10 +1,10 @@
-r"""MCP server for the Desert Storm Editor: every editor command as a tool for AI assistants.
+r"""MCP server for the Conflict Editor (all supported games): every editor command as a tool for AI assistants.
 
-The tools are the editor's own command layer (commands.py) - the same commands the browser UI uses, with the same
+The tools are the editor's own command layer (commands.py) - the same commands the editor window uses, with the same
 undo history. By default this server forwards each call to the running editor (server.py), so what an assistant does
-appears in the editor window and can be undone there; the browser redraws when the scene changes.
+appears in the editor window and can be undone there; the window redraws when the scene changes.
 
-  python editor/mcp_server.py [--url http://127.0.0.1:8765]
+  python editor/mcp_server.py [--url http://127.0.0.1:<port>]   (8765 Desert Storm / DS2, 8780 Vietnam, 8790 Global Storm)
   python editor/mcp_server.py --standalone --data <extracted game folder> [--game <game folder>]
 
 Register it with an MCP client over stdio, e.g. Claude Code:
@@ -24,7 +24,7 @@ import urllib.error
 import urllib.request
 
 PROTOCOL = "2025-06-18"
-INSTRUCTIONS = """Desert Storm Editor: edits Conflict: Desert Storm levels and missions (the same commands as the editor's
+INSTRUCTIONS = """Conflict Editor: edits Conflict: Desert Storm / Desert Storm II / Vietnam / Global Storm levels and missions (the game the running editor has open; the same commands as the editor's
 UI, with undo). Typical flow: list_levels / list_missions -> open_level or open_mission -> scene (everything in it)
 or find (records by kind and field values) -> get_record for details -> set_field / move / place (library templates)
 / duplicate / delete / route_* / set_layer -> scene_problems -> save_mission (a playable mission in Mods) ->
@@ -92,8 +92,8 @@ class Editor:
             except ValueError:
                 raise RuntimeError(f"editor answered HTTP {e.code}") from None
         except urllib.error.URLError as e:
-            raise RuntimeError(f"the editor isn't running at {self.url} ({e.reason}) - start it with "
-                               f"python editor/server.py --data <extracted game folder>") from None
+            raise RuntimeError(f"the editor isn't running at {self.url} ({e.reason}) - open ConflictEditor.exe "
+                               f"and pick the game (or use --standalone --data <extracted game folder>)") from None
         if not reply.get("ok"):
             raise ValueError(reply.get("error", "failed"))
         return reply.get("result")
@@ -171,8 +171,12 @@ def main():
     ap.add_argument("--game", help="game folder (standalone)")
     ap.add_argument("--read-only", action="store_true",
                     help="offer only tools that change nothing (no scene edits, no saving, no starting the game)")
+    ap.add_argument("--mod-layout", choices=("organised", "flat"), default="organised",
+                    help="standalone: the layout new mods get (organised = folders by type, flat = all in the top folder)")
     a = ap.parse_args()
     backend = Standalone(a.data, a.game) if a.standalone else Editor(a.url)
+    if a.standalone:
+        backend.session.mod_layout = a.mod_layout
 
     # JSON-RPC is UTF-8; Windows consoles / pipes default to the ANSI or OEM code page
     for stream in (sys.stdin, sys.stdout, sys.stderr):

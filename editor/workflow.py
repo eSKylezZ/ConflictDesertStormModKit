@@ -451,6 +451,12 @@ def check_mission(s: Session, budget=False, limit=200):
     if s.routes:
         for p in s.routes.problems():
             issues.append(_issue("error", "routes", p, fix="route_unlink / route_delete"))
+    import missionlogic
+    try:
+        for p in missionlogic.dll_item_problems(s):
+            issues.append(_issue("warning", "logic", p["problem"], p["line"], "set_kit"))
+    except Exception:  # noqa: BLE001 - a DLL the analyser can't read: no check
+        pass
     seen = {}
     for h in env.find("HLOI"):
         if "script_id" in h.fields:
@@ -560,7 +566,7 @@ def mission_report(s: Session, details=False, limit=200):
             listed.append({"change": "removed", "kind": kind, "base_line": i + 1, "text": base.lines[i][:120]})
     out = {"level": s.level, "mission": list(s.mission) if s.mission else None, "scene": per,
            "unchanged": not per}
-    rmd = _find_file(s.folder, s.level + ".RMD") if s.folder else None
+    rmd = (_find_file(s.folder, s.level + ".RMD") or _find_file(s.folder, s.level + ".RDA")) if s.folder else None
     if s.routes and rmd:
         b = RouteFile.load(rmd).markers
         m = s.routes.markers
@@ -737,8 +743,17 @@ def recovery_restore(s: Session, file, discard_changes=False):
 # ------------------------------------------------------------------------------------------ backups --
 def backup_files(s: Session, folder, names, mod, stem):
     """Copy the files of `names` that exist in `folder` to <data>/_editor_cache/backups/<mod>/<stem>-<time>/ (before a
-    save overwrites them); the newest 10 per stem are kept. Returns the backup folder or None."""
-    present = [n for n in names if os.path.isfile(os.path.join(folder, n))]
+    save overwrites them); the newest 10 per stem are kept. Returns the backup folder or None. A bare name is the mod's
+    file of that name at any depth (organised or flat mod, conflict_ds_tools.modlayout); a path (records\\x.lua) as
+    given. Backed up under its path in the mod."""
+    from conflict_ds_tools import modlayout
+    present = []
+    for n in names:   # a bare name: every copy (a flat leftover and an organised one can both be there)
+        hits = modlayout.find_all(folder, n) if os.sep not in n and "/" not in n else [os.path.join(folder, n)]
+        for p in hits:
+            rel = os.path.relpath(p, folder)
+            if os.path.isfile(p) and rel not in present:
+                present.append(rel)
     if not present:
         return None
     root = _cache_dir(s, "backups", mod)
@@ -754,13 +769,18 @@ def backup_files(s: Session, folder, names, mod, stem):
 
 
 def mission_files(folder, up):
-    """A saved mission's own files in its mod folder (what save_mission may overwrite)."""
+    """A saved mission's own files in its mod folder (what save_mission may overwrite): relative paths, sub-folders
+    included (organised mods)."""
+    from conflict_ds_tools import modlayout
     if not os.path.isdir(folder):
         return []
     stems = {up.upper()}
-    return [n for n in os.listdir(folder)
-            if os.path.isfile(os.path.join(folder, n)) and (n.split(".")[0].upper() in stems or n.lower() == "campaign.txt"
-                                                            or n.upper().startswith(up.upper() + "."))]
+    out = []
+    for rel in modlayout.files(folder):
+        n = os.path.basename(rel)
+        if n.split(".")[0].upper() in stems or n.upper().startswith(up.upper() + ".") or rel.lower() == "campaign.txt":
+            out.append(rel)
+    return out
 
 
 # ------------------------------------------------------------------------------- the editor window link --

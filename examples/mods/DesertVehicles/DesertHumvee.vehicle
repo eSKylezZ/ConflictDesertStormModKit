@@ -1,0 +1,15 @@
+# A sand-coloured Humvee - picked on the VEHICLE row (briefing screen, MISSION tab) in missions where the squad has a
+# vehicle (Mission 8's Humvee, Mission 9's Bradley).
+#
+# Shows: a vehicle skin. No modelling - the game's Humvee is copied under the new id with these textures on it; seats,
+# handling, guns and sounds are the Humvee's. The Humvee uses four textures, so each is named by its slot (the names
+# the model gives them: humvee01 .. humvee04). A slot left out keeps the game's texture.
+
+id        = DESERT_HUMVEE        # the new vehicle's name: letters, digits and _ (max 31)
+based on  = US_VEH_Hum_Vee       # the game vehicle it starts from (VEHICLE.TXT)
+name      = Humvee (Desert)      # shown on the row
+
+texture humvee01 = DesertHumvee01   # DesertHumvee01.dds in this folder, same size as the game's humvee01
+texture humvee02 = DesertHumvee02
+texture humvee03 = DesertHumvee03
+texture humvee04 = DesertHumvee04

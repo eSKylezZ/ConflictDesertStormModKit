@@ -59,7 +59,7 @@ def _same(a, b):
 class Dll:
     def __init__(self, path_or_bytes):
         import pefile
-        self.pe = pefile.PE(data=path_or_bytes) if isinstance(path_or_bytes, (bytes, bytearray)) else pefile.PE(path_or_bytes)
+        self.pe = pefile.PE(data=path_or_bytes) if isinstance(path_or_bytes, (bytes, bytearray)) else pefile.PE(data=open(path_or_bytes, "rb").read())
         self.base = self.pe.OPTIONAL_HEADER.ImageBase
         self.img = self.pe.get_memory_mapped_image()
         text = [s for s in self.pe.sections if s.Name.startswith(b".text")][0]

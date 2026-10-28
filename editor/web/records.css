@@ -42,3 +42,11 @@
 button.danger { border-color: #b62324; color: #ff7b72; }
 .rec-rows { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; overflow-x: auto; }
 .rec-src { min-width: 46px; color: var(--dim); font-size: 11px; }
+
+/* Records tab (forms.js): fields this mod changes (green), fields another switched-on mod changes (amber), bad values */
+.rec-field.mine input { border-color: #3fb950; }
+.rec-field.others input { border-color: #d29922; }
+.rec-fields input.bad, .rec-grid input.bad { border-color: #ff7b72; }
+.rec-used .bad, .rec-head em.bad { color: #ff7b72; }
+.rec-tabs { display: inline-flex; gap: 4px; }
+.rec-grid input.ref { min-width: 260px; }

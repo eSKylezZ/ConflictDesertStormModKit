@@ -1,4 +1,4 @@
-// Desert Storm Editor - viewport and panels. Every change goes through the server's command API (editor/commands.py),
+// Conflict editor (one game at a time: GAME from the server) - viewport and panels. Every change goes through the server's command API (editor/commands.py),
 // the same commands an MCP client uses. Game coordinates: cm, left-handed, Y up -> three.js: m, (x, y, -z).
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -6,7 +6,16 @@ import { TransformControls } from 'three/addons/controls/TransformControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone as cloneSkinned } from 'three/addons/utils/SkeletonUtils.js';
 
+// Model URLs carry the page-load time: the server caches converted models on disk, but the browser kept stale copies
+// for an hour (a reload didn't refetch models this script loads) - e.g. after a reader fix.
+const MODEL_V = Date.now();
+
+// the game the server has open: {id, title, short, exe, plugin} - filled from game_info before the first level opens
+let GAME = { id: '', title: 'Conflict', short: 'Conflict', exe: 'the game', plugin: 'the plugin' };
+
 const $ = (id) => document.getElementById(id);
+// Hooks for editor add-on scripts (worldtools.js: Creation-Kit-style tools) - filled at the end of this file.
+const hostHooks = { afterBuild: [], pickBlocked: () => false, pasteInPlace: null };
 const toThree = (p) => new THREE.Vector3(p[0] / 100, p[1] / 100, -p[2] / 100);
 const toGame = (v) => [+(v.x * 100).toFixed(2), +(v.y * 100).toFixed(2), +(-v.z * 100).toFixed(2)];
 const deg = THREE.MathUtils.degToRad;
@@ -33,9 +42,10 @@ async function api(cmd, args = {}) {
   if (!j.ok) throw new Error(j.error || `HTTP ${r.status} ${r.statusText}`);
   return j.result;
 }
+
 const POLL_COMMANDS = new Set(['history', 'game_console', 'ui_poll', 'ui_reply', 'status']);
 // commands that convert models / textures, build the walk map or write files: up to 5 minutes
-const SLOW_COMMANDS = new Set(['open_level', 'open_mission', 'new_level', 'save_mod', 'save_mission', 'play', 'export_mod_zip',
+const SLOW_COMMANDS = new Set(['open_level', 'open_mission', 'game_mission_open', 'open_dll_mission', 'list_dll_missions', 'new_level', 'save_mod', 'save_mission', 'play', 'export_mod_zip',
   'save_minimap', 'briefing_burn_map', 'briefing_map_image', 'kit_preview', 'kit_pieces', 'kit_models', 'library',
   'asset_options', 'upload_file', 'create_weapon', 'create_skin', 'walkability_grid', 'scene_budget', 'texture_png',
   'terrain_new', 'terrain_noise', 'terrain_set', 'road_new', 'road_set', 'save_script', 'campaign_save',
@@ -168,7 +178,8 @@ const LAYERS = [
   ['world', 'World', '#8d8a6a'], ['props', 'Props', '#b0a27a'], ['objects', 'Objects', '#e05050'],
   ['waypoints', 'Waypoints', '#38c7d6'], ['regions', 'Regions', '#e0b030'],
   ['routes', 'AI routes', '#5fd16b', false],      // thousands of markers: off until wanted (built only while shown)
-  ['cameras', 'Cameras', '#b67be8'], ['sounds', 'Sounds', '#6aa0ff'],
+  ['cameras', 'Cameras', '#b67be8'], ['sounds', 'Sounds', '#6aa0ff'], ['lights', 'Lights', '#ffd36a'],
+  ['aipoints', 'AI points', '#7fe0a0', false],   // Global Storm: AI position markers + cover points (facing / arc)
   ['switches', 'Switches', '#ff8c3a'], ['emitters', 'Emitters', '#c9c4b8'],
   ['vision', 'Vision cones', '#4fd16b', false], ['hazards', 'Minefields', '#ff4040'],   // tactics (editor only)
 ];
@@ -180,8 +191,10 @@ function rememberLayer(key, on) {
   try { localStorage.setItem('layers', JSON.stringify(shownLayers)); } catch { /* ignore */ }
 }
 const groups = {};
+// ?show=aipoints,lights turns layers on for this visit (links to a view)
+const urlShow = new Set((new URLSearchParams(location.search).get('show') || '').toLowerCase().split(',').filter(Boolean));
 for (const [key, label, color, dflt = true] of LAYERS) {
-  const on = shownLayers[key] ?? dflt;
+  const on = urlShow.has(key) || (shownLayers[key] ?? dflt);
   const g = new THREE.Group(); g.name = key; g.visible = on; scene3.add(g); groups[key] = g;
   const row = document.createElement('label');
   row.innerHTML = `<input type="checkbox" ${on ? 'checked' : ''}> <span class="swatch" style="background:${color}"></span>${label}` +
@@ -199,10 +212,12 @@ const pickable = [];
 const loader = new GLTFLoader();
 const modelCache = new Map();
 let level = null;
-function model(name) {
-  const key = name.toUpperCase();
+function model(name, skin = '') {
+  // skin: a texture that replaces a skinned model's own (Global Storm soldiers: the HLOI's body texture)
+  const key = name.toUpperCase() + (skin ? '@' + skin.toUpperCase() : '');
+  const q = skin ? `&skin=${encodeURIComponent(skin)}` : '';
   if (!modelCache.has(key))
-    modelCache.set(key, loader.loadAsync(`/model/${level}/${encodeURIComponent(key)}.glb`).then((g) => keepTree(g.scene))
+    modelCache.set(key, loader.loadAsync(`/model/${level}/${encodeURIComponent(name.toUpperCase())}.glb?v=${MODEL_V}${q}`).then((g) => keepTree(g.scene))
                                 .catch(() => null).finally(requestRender));   // its clones are added in the callers' .then
   return modelCache.get(key);
 }
@@ -258,6 +273,8 @@ function markerMat(color) {
   return markerMats.get(color);
 }
 const cameraGeo = keep(new THREE.OctahedronGeometry(0.5)), soundGeo = keep(new THREE.IcosahedronGeometry(0.35));
+const lightGeo = keep(new THREE.SphereGeometry(0.22, 12, 8));
+const aiPointGeo = keep(new THREE.SphereGeometry(0.12, 8, 6)), coverGeo = keep(new THREE.BoxGeometry(0.3, 0.3, 0.3));
 function marker(geo, color, rec, cat) {
   const m = new THREE.Mesh(geo, markerMat(color));
   m.position.copy(toThree(rec.pos));
@@ -302,7 +319,7 @@ function buildChunks(fresh) {
   for (const [name, h] of chunkHolders) if (!seen.has(name)) { chunkHolders.delete(name); groups.world.remove(h); disposeObject(h); }
 }
 // picking skips the level's own geometry unless "Edit world" is on (a click on the ground would select it otherwise)
-const pickOk = (o) => groups[o.userData.cat]?.visible && (!o.userData.chunk || worldEdit);
+const pickOk = (o) => groups[o.userData.cat]?.visible && (!o.userData.chunk || worldEdit) && !hostHooks.pickBlocked(o.userData);
 
 async function buildScene(fresh) {
   data = await run('scene');
@@ -321,7 +338,7 @@ async function buildScene(fresh) {
     groups.props.add(holder);
     if (p.terrain) { addTerrainMesh(holder, p); continue; }
     if (p.road) { addRoadMesh(holder, p); continue; }
-    model(p.model).then((m) => {
+    model(p.model, p.skin || '').then((m) => {
       const obj = m ? m.clone() : new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshBasicMaterial({ color: 0xb0a27a, wireframe: true }));
       obj.traverse((c) => { if (c.isMesh) { c.userData = { line: p.line, cat: 'props', proxy: holder }; pickable.push(c); } });
       if (m) shadowed(obj);
@@ -339,20 +356,31 @@ async function buildScene(fresh) {
     holder.add(ring, new THREE.Line(facingGeo, new THREE.LineBasicMaterial({ color })));
     groups.objects.add(holder);
     holder.userData.layer = groupOf(o);
-    model(o.model).then((m) => {
+    // Global Storm soldiers: the body and a separate head model (UNITS.TXT), both skinned to the same skeleton
+    const parts = [[o.model, o.skin || '', true]];
+    if (o.head) parts.push([o.head.model, o.head.skin || '', false]);
+    const style = (obj) => obj.traverse((c) => {
+      if (!c.isMesh) return;
+      c.userData = { line: o.line, cat: 'objects' }; pickable.push(c);
+      if (!o.active) {             // waits for the script: drawn see-through
+        c.material = (Array.isArray(c.material) ? c.material : [c.material]).map((mt) => {
+          const x = mt.clone(); x.transparent = true; x.opacity = 0.35; x.depthWrite = false; return x; });
+        if (c.material.length === 1) c.material = c.material[0];
+      }
+    });
+    for (const [partModel, partSkin, main] of parts) model(partModel, partSkin).then((m) => {
+      if (!m && !main) return;
       const obj = m ? cloneSkinned(m) : new THREE.Mesh(coneGeo, new THREE.MeshBasicMaterial({ color }));
-      obj.traverse((c) => {
-        if (!c.isMesh) return;
-        c.userData = { line: o.line, cat: 'objects' }; pickable.push(c);
-        if (!o.active) {             // waits for the script: drawn see-through
-          c.material = (Array.isArray(c.material) ? c.material : [c.material]).map((mt) => {
-            const x = mt.clone(); x.transparent = true; x.opacity = 0.35; x.depthWrite = false; return x; });
-          if (c.material.length === 1) c.material = c.material[0];
-        }
-      });
+      style(obj);
       if (m) shadowed(obj);
       holder.add(obj);
       applyLayerFilter();
+      // Global Storm: hats, radios, pouches - rigid models in a bone's space, parented to that bone of the body
+      if (main && m && o.attach) for (const a of o.attach) model(a.model).then((am) => {
+        const bone = am && obj.getObjectByName(THREE.PropertyBinding.sanitizeNodeName(a.bone));
+        if (!bone) return;
+        const c = am.clone(); style(c); shadowed(c); bone.add(c); requestRender();
+      });
     });
   }
   for (const w of data.waypoints) groups.waypoints.add(marker(ballGeo, 0x38c7d6, w, 'waypoints'));
@@ -372,6 +400,53 @@ async function buildScene(fresh) {
       const inner = new THREE.Mesh(new THREE.SphereGeometry(s.min_distance / 100, 16, 8),
                                    new THREE.MeshBasicMaterial({ color: 0x9cc0ff, wireframe: true, transparent: true, opacity: 0.22 }));
       inner.raycast = () => {}; m.add(inner);
+    }
+  }
+  // Lights: a bulb in the light's colour; point lights a faint sphere of their reach, spots a cone outline along their
+  // direction, suns (DLGT) an arrow
+  for (const l of data.lights || []) {
+    const col = new THREE.Color(...l.colour.map((c) => Math.min(1, Math.max(0, c))));
+    const m = marker(lightGeo, col.getHex(), l, 'lights'); groups.lights.add(m);
+    if (l.kind === 'PLGT' && l.radius > 0) {
+      const reach = new THREE.Mesh(new THREE.SphereGeometry(l.radius / 100, 16, 8),
+                                   new THREE.MeshBasicMaterial({ color: col, wireframe: true, transparent: true, opacity: 0.06 }));
+      reach.raycast = () => {}; m.add(reach);
+    } else if (l.dir) {
+      const dir = gameForward(l.dir[0], l.dir[1]);
+      const len = l.kind === 'SLGT' ? Math.min(l.range || 1000, 3000) / 100 : 3;
+      const tip = dir.clone().multiplyScalar(len);
+      const pts = [new THREE.Vector3(), tip];
+      if (l.kind === 'SLGT' && l.cone > 0) {       // outer cone: 4 edges to a ring at the end
+        const r = Math.tan(deg(Math.min(l.cone, 80) / 2)) * len;
+        const side = new THREE.Vector3(0, 1, 0).cross(dir).normalize();
+        if (side.lengthSq() < 1e-6) side.set(1, 0, 0);
+        const up = dir.clone().cross(side).normalize();
+        const ring = [];
+        for (let i = 0; i <= 24; i++) {
+          const a = (i / 24) * Math.PI * 2;
+          ring.push(tip.clone().addScaledVector(side, Math.cos(a) * r).addScaledVector(up, Math.sin(a) * r));
+        }
+        for (let i = 0; i < 24; i += 6) pts.push(new THREE.Vector3(), ring[i]);
+        for (let i = 0; i < 24; i++) pts.push(ring[i], ring[i + 1]);
+      }
+      const lines = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
+                                           new THREE.LineBasicMaterial({ color: col, transparent: true, opacity: 0.6 }));
+      lines.raycast = () => {}; m.add(lines);
+    }
+  }
+  for (const p of data.aipoints || []) {
+    const cover = p.kind === 'cover';
+    const m = marker(cover ? coverGeo : aiPointGeo, cover ? 0x3fd08a : 0x9fe8c0, p, 'aipoints'); groups.aipoints.add(m);
+    if (cover && p.facing != null) {   // the arc it covers, 1.5 m out, around its facing (Global Storm)
+      const pts = [], n = 12, half = (p.arc || 90) / 2;
+      for (let i = 0; i <= n; i++) {
+        const d = gameForward(0, p.facing - half + (i / n) * 2 * half).multiplyScalar(1.5);
+        if (i === 0) pts.push(new THREE.Vector3(), d); else pts.push(pts[pts.length - 1], d);
+      }
+      pts.push(pts[pts.length - 1], new THREE.Vector3());
+      const fan = new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(pts),
+                                         new THREE.LineBasicMaterial({ color: 0x3fd08a, transparent: true, opacity: 0.7 }));
+      fan.raycast = () => {}; m.add(fan);
     }
   }
   for (const r of data.regions) {
@@ -397,6 +472,7 @@ async function buildScene(fresh) {
   productionAfterScene(fresh);
   buildTactics().catch(() => {});
   applyIsolate();
+  for (const f of hostHooks.afterBuild) { try { f(fresh); } catch (err) { console.error(err); } }
   requestRender();
 }
 
@@ -819,7 +895,9 @@ function applyBrush(t, heights, x, z, op, radius, strength) {
   for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
     const d = Math.hypot(i * t.cell - half - x, j * t.cell - half - z);
     if (d >= radius) continue;
-    const w = 0.5 * (1 + Math.cos(Math.PI * d / radius)), k = j * n + i;
+    // falloff (World Tools adds the slider): the inner part of the radius at full strength, a cosine edge outside it
+    const inner = radius * (1 - Math.min(100, Math.max(1, +($('t-falloff')?.value ?? 100))) / 100);
+    const w = d <= inner ? 1 : 0.5 * (1 + Math.cos(Math.PI * (d - inner) / (radius - inner))), k = j * n + i;
     if (op === 'raise') heights[k] += strength * w;
     else if (op === 'lower') heights[k] -= strength * w;
     else if (op === 'flatten') heights[k] += (target - heights[k]) * Math.min(1, strength / 100) * w;
@@ -1004,6 +1082,8 @@ const SEARCHABLE = [            // [data list, label, text to search, row text]
   ['regions', 'region', (r) => r.name, (r) => r.name],
   ['cameras', 'camera', (c) => `${c.name} ${c.kind}`, (c) => `${c.name} <small>${c.kind}</small>`],
   ['sounds', 'sound', (s) => `${s.name || ''} ${s.sound || ''}`, (s) => `${s.name || s.sound} <small>${s.sound || ''}</small>`],
+  ['aipoints', 'AI point', (p) => p.name, (p) => `${p.name} <small>${p.kind}</small>`],
+  ['lights', 'light', (l) => `${l.name} ${l.kind}`, (l) => `${l.name} <small>${{ PLGT: 'point', SLGT: 'spot', DLGT: 'sun' }[l.kind] || l.kind}</small>`],
   ['emitters', 'emitter', (e) => e.name || '', (e) => e.name || 'emitter'],
   ['switches', 'switch', (w) => w.name || '', (w) => w.name || 'switch'],
 ];
@@ -1143,7 +1223,7 @@ async function loadKitPieces() {
     const entry = { kit: true, level: $('kit-level').value, model, index: p.index, centre: p.centre, label: `${model} #${p.index}`, name: p.name };
     withThumb(li, `kit/${entry.level}/${model}/${p.index}`, async () => {
       const pv = await api('kit_preview', { level: entry.level, model, index: p.index });
-      return `/model/${pv.level}/${encodeURIComponent(pv.model)}.glb`;
+      return `/model/${pv.level}/${encodeURIComponent(pv.model)}.glb?v=${MODEL_V}`;
     });
     li.onclick = () => { placing = entry; for (const x of ul.children) x.classList.toggle('sel', x === li); status(`click in the world to place ${entry.label} - or drag it in`); };
     li.draggable = true;
@@ -1157,34 +1237,90 @@ $('kit-level').onchange = () => loadKitModels().catch(() => {});
 $('kit-model').onchange = () => loadKitPieces().catch(() => {});
 $('kit-search').oninput = () => { clearTimeout(kitTimer); kitTimer = setTimeout(() => loadKitPieces().catch(() => {}), 300); };
 let libTimer = null;
+// The library by source: the open game's shipped levels, the converted libraries of the other games (Desert Storm:
+// <game>\PSE\Library\<game>) and every mod - a chip per source (click = show / hide), a collapsible section per
+// source with its badge and count, and on every item its badge + where it comes from (commands.py library()).
+const LIB_PER_SECTION = 300;
+const libPref = (k, d) => { try { return JSON.parse(localStorage.getItem('lib.' + k)) ?? d; } catch { return d; } };
+const libSave = (k, v) => { try { localStorage.setItem('lib.' + k, JSON.stringify(v)); } catch { /* private window */ } };
+const libTag = (e) => e.source_kind === 'mod' ? 'MOD' : e.source_kind === 'converted' ? e.source_label.split(' ')[0] : 'GAME';
+function libItem(e, ul) {
+  const li = document.createElement('li');
+  li.className = (e.source_kind === 'game' && !e.in_level) ? 'away' : '';
+  const note = e.source_kind === 'game'
+    ? (e.in_level ? '' : " - not in this level's archive (packed into the mod)")
+    : e.source_kind === 'mod' ? ' - its files are copied into your mod when you save'
+      : ' - the game reads it from the converted library; a soldier type / vehicle definition is copied into your mod';
+  li.title = `${e.source_label} · ${e.from}${note}`;
+  const icon = document.createElement('span'); icon.textContent = e.kind === 'prop' ? '▣ ' : '● ';
+  const badge = document.createElement('b'); badge.className = `lib-badge k-${e.source_kind}`; badge.textContent = libTag(e);
+  const name = document.createElement('span'); name.className = 'lib-name'; name.textContent = e.label;
+  const from = document.createElement('small'); from.textContent = e.from;
+  const text = document.createElement('span'); text.className = 'lib-text';
+  text.append(icon, badge, name, from);
+  li.append(text);
+  withThumb(li, `lib/${e.thumb}/${e.model.toUpperCase()}`, async () => `/model/${encodeURIComponent(e.thumb)}/${encodeURIComponent(e.model.toUpperCase())}.glb?v=${MODEL_V}`);
+  li.onclick = () => {
+    placing = e;
+    for (const x of ul.querySelectorAll('li')) x.classList.toggle('sel', x === li);
+    status(`click in the world to place ${e.label} (${e.source_label}) - or drag it in (Esc cancels)`);
+  };
+  li.draggable = true;
+  li.ondragstart = (ev) => {
+    dragEntry = e;
+    ev.dataTransfer.effectAllowed = 'copy';
+    ev.dataTransfer.setData('text/plain', e.label);
+    ev.dataTransfer.setDragImage(li, 10, 10);
+  };
+  li.ondragend = dropPreview;
+  return li;
+}
 async function loadLibrary() {
   if (!level) return;
   loadInteractive().catch(() => {});
   const items = await run('library', { search: $('lib-search').value.trim(), kind: $('lib-kind').value });
   const here = $('lib-here').checked;
-  const ul = $('library'); ul.innerHTML = '';
-  for (const e of items.slice(0, 400)) {
-    if (here && !e.in_level) continue;
-    const li = document.createElement('li');
-    li.className = e.in_level ? '' : 'away';
-    li.title = e.in_level ? `from ${e.level}` : `from ${e.level} - not in this level's archive (needs packing into the mod)`;
-    li.innerHTML = `<span>${e.kind === 'prop' ? '▣' : '●'} ${e.label}</span>`;
-    withThumb(li, `lib/${e.level}/${e.model.toUpperCase()}`, async () => `/model/${e.level}/${encodeURIComponent(e.model.toUpperCase())}.glb`);
-    li.onclick = () => {
-      placing = e;
-      for (const x of ul.children) x.classList.toggle('sel', x === li);
-      status(`click in the world to place ${e.label} - or drag it in (Esc cancels)`);
-    };
-    li.draggable = true;
-    li.ondragstart = (ev) => {
-      dragEntry = e;
-      ev.dataTransfer.effectAllowed = 'copy';
-      ev.dataTransfer.setData('text/plain', e.label);
-      ev.dataTransfer.setDragImage(li, 10, 10);
-    };
-    li.ondragend = dropPreview;
-    ul.appendChild(li);
+  const hidden = new Set(libPref('hidden', []));
+  const closed = new Set(libPref('closed', []));
+  // sources in order: the game, converted libraries, mods
+  const order = { game: 0, converted: 1, mod: 2 };
+  const groups = new Map();
+  for (const e of items) {
+    if (here && e.source_kind === 'game' && !e.in_level) continue;
+    if (!groups.has(e.source)) groups.set(e.source, { id: e.source, label: e.source_label, kind: e.source_kind, items: [] });
+    groups.get(e.source).items.push(e);
   }
+  const list = [...groups.values()].sort((a, b) => (order[a.kind] - order[b.kind]) || a.label.localeCompare(b.label));
+  const chips = $('lib-chips'); chips.innerHTML = '';
+  for (const g of list) {
+    const c = document.createElement('button');
+    c.className = `lib-chip k-${g.kind}` + (hidden.has(g.id) ? ' off' : '');
+    c.textContent = `${g.label} ${g.items.length}`;
+    c.title = hidden.has(g.id) ? 'hidden - click to show' : 'click to hide';
+    c.onclick = () => { if (hidden.has(g.id)) hidden.delete(g.id); else hidden.add(g.id); libSave('hidden', [...hidden]); loadLibrary(); };
+    chips.append(c);
+  }
+  const ul = $('library'); ul.innerHTML = '';
+  for (const g of list) {
+    if (hidden.has(g.id)) continue;
+    const head = document.createElement('li');
+    head.className = `lib-sec k-${g.kind}` + (closed.has(g.id) ? ' closed' : '');
+    head.innerHTML = '<span class="lib-arrow"></span>';
+    const t = document.createElement('span'); t.className = 'lib-sec-label';
+    t.textContent = g.label + (g.kind === 'converted' ? ' · converted' : '');
+    const n = document.createElement('small'); n.textContent = g.items.length;
+    head.append(t, n);
+    head.onclick = () => { if (closed.has(g.id)) closed.delete(g.id); else closed.add(g.id); libSave('closed', [...closed]); loadLibrary(); };
+    ul.append(head);
+    if (closed.has(g.id)) continue;
+    for (const e of g.items.slice(0, LIB_PER_SECTION)) ul.append(libItem(e, ul));
+    if (g.items.length > LIB_PER_SECTION) {
+      const more = document.createElement('li'); more.className = 'hint';
+      more.textContent = `${g.items.length - LIB_PER_SECTION} more in ${g.label} - search to narrow it down`;
+      ul.append(more);
+    }
+  }
+  if (!list.length) ul.innerHTML = '<li class="hint">nothing matches</li>';
 }
 $('lib-search').oninput = () => { clearTimeout(libTimer); libTimer = setTimeout(loadLibrary, 250); };
 // ---- switches & emitters (editor/interactive.py) ----
@@ -1215,7 +1351,7 @@ $('lib-kind').onchange = loadLibrary;
 $('lib-here').onchange = loadLibrary;
 function cancelPlacing() {
   placing = null;
-  for (const x of [...$('library').children, ...$('prefabs').children]) x.classList.remove('sel');
+  for (const x of [...$('library').querySelectorAll('li'), ...$('prefabs').children]) x.classList.remove('sel');
 }
 async function placeAt(point, entry = placing) {
   const e = entry; cancelPlacing();
@@ -1262,8 +1398,8 @@ async function ghostModel(e) {             // the template's model from its own 
   ghost = new THREE.Group(); ghost.add(ghostCone.clone()); scene3.add(ghost); ghost.visible = false;
   if (e.prefab) return ghost;              // a group: the cone marks where its centre goes
   const want = ghost;
-  let url = `/model/${e.level}/${encodeURIComponent(e.model.toUpperCase())}.glb`;
-  if (e.kit) { const pv = await api('kit_preview', { level: e.level, model: e.model, index: e.index }); url = `/model/${pv.level}/${encodeURIComponent(pv.model)}.glb`; }
+  let url = `/model/${e.level}/${encodeURIComponent(e.model.toUpperCase())}.glb?v=${MODEL_V}`;
+  if (e.kit) { const pv = await api('kit_preview', { level: e.level, model: e.model, index: e.index }); url = `/model/${pv.level}/${encodeURIComponent(pv.model)}.glb?v=${MODEL_V}`; }
   const src = await loader.loadAsync(url).then((g) => g.scene).catch(() => null);
   if (src && want === ghost) {
     const m = cloneSkinned(src);
@@ -1860,6 +1996,14 @@ async function confirmDiscard(what) {
   return !dirty || confirm(`The current level has unsaved changes (Save as mod / Save as mission keeps them).\n\n${what} anyway and lose them?`);
 }
 window.addEventListener('beforeunload', (e) => { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+// desktop app (editor/app.py): back to its game picker
+function appReady() { for (const el of document.querySelectorAll('.app-only')) el.hidden = false; }
+if (window.pywebview?.api) appReady(); else window.addEventListener('pywebviewready', appReady);
+$('switch-game').onclick = async () => {
+  if (dirty && !confirm('Unsaved changes in this level will be lost. Switch game anyway?')) return;
+  dirty = false;
+  await window.pywebview.api.home();
+};
 
 async function updateHistory() {
   const h = await api('history');
@@ -1883,7 +2027,7 @@ async function updateHistory() {
   // Play needs a mission: on a game level it opens Save as mission first, then plays
   $('play').title = h.mission ? `Save mission ${h.mission[1]} and start the game straight into it`
     : 'A game level can\'t be played directly: Play opens Save as mission… first, then starts the game in the new mission';
-  document.title = (h.dirty ? '● ' : '') + `Desert Storm Editor - ${h.mission ? h.mission[1] : level || ''}`;
+  document.title = (h.dirty ? '● ' : '') + `${GAME.short} Editor - ${h.mission ? h.mission[1] : level || ''}`;
 }
 let currentMission = null;          // [mod, NAME] once saved / opened as a mission (updateHistory)
 
@@ -1942,9 +2086,12 @@ async function openLevel(name, ask = true) {
   level = name; shownLevel = name; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear(); endIsolate();
   await buildScene(true);
   await updateHistory();
-  const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
+  const want = (urlArgs.get('focus') || '').toLowerCase();
+  const hero = (want && data.objects.find((o) => String(o.unit).toLowerCase() === want))
+    || data.objects.find((o) => /^HERO/i.test(o.model) || /^(Bradley|Foley|Connors|Conners|Jones|Sherman)$/i.test(o.unit)) || data.objects[0];
   if (hero) focusOn(toThree(hero.pos));
   status(`${name}: ${data.objects.length} objects, ${data.props.length} props, ${data.routes.length} route markers`);
+  if (location.hash === '#objectives') openObjectives().catch(() => {});   // link straight to the dialog
 }
 $('open').onclick = () => openLevel($('level').value);
 let shownLevel = null;              // the picker's value while that level is open (put back when opening is cancelled)
@@ -2004,7 +2151,25 @@ $('open-mission').onclick = async () => {
   const list = await run('list_missions');
   const sel = $('o-list'); sel.innerHTML = '';
   for (const m of list) sel.add(new Option(`${m.name}  (Mods\\${m.mod})`, JSON.stringify(m)));
-  if (!list.length) sel.add(new Option('no saved missions yet', ''));
+  // mission DLLs someone built (a saved mission made from one is listed above and keeps its DLL)
+  const saved = new Set(list.map((m) => `${m.mod}/${m.name}`.toUpperCase()));
+  let dlls = [];
+  if (GAME.script_host) { try { dlls = await run('list_dll_missions'); } catch { dlls = []; } }
+  for (const d of dlls) {
+    if (!d.enabled || saved.has(`${d.mod}/${d.dll.replace(/\.dll$/i, '')}`.toUpperCase())) continue;
+    sel.add(new Option(`${d.dll}  (Mods\\${d.mod}, mission DLL${d.shipped ? ' - changed game DLL' : ''})`,
+                       JSON.stringify({ mod: d.mod, dll: d.dll, name: d.dll })));
+  }
+  // the game's own missions, opened as readable Lua in a mod (editor/game_missions.py; DesertStormFix 3.3)
+  if (GAME.id === 'ds1') {
+    let gm = [];
+    try { gm = await run('game_missions'); } catch { gm = []; }
+    for (const g of gm) {
+      sel.add(new Option(`${g.mission}  (game mission as Lua${g.mods.length ? ` - Mods\\${g.mods.join(', ')}` : ''})`,
+                         JSON.stringify({ game: g.mission, mods: g.mods, name: g.mission })));
+    }
+  }
+  if (!sel.options.length) sel.add(new Option('no saved missions yet', ''));
   $('open-dialog').showModal();
 };
 $('o-open').onclick = async (e) => {
@@ -2015,10 +2180,27 @@ $('o-open').onclick = async (e) => {
   if (!await confirmDiscard(`Open ${m.name}`)) return status('kept the unsaved changes');
   $('open-dialog').close();
   status(`opening ${m.name}…`);
-  const r = await run('open_mission', m);
-  level = r.base; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
+  let r;
+  if (m.dll) {
+    try { r = await run('open_dll_mission', { mod: m.mod, dll: m.dll }); }
+    catch (err) {
+      if (!/\(base\)$/.test(err.message)) throw err;
+      const base = prompt(`${err.message}\nLevel (e.g. MISSION1):`);
+      if (!base) return status('not opened');
+      r = await run('open_dll_mission', { mod: m.mod, dll: m.dll, base });
+    }
+  } else if (m.game) {
+    const mod = m.mods[0] || prompt(`Mod folder for the Lua version of ${m.name}
+(the game runs it instead of ${m.name}.dll):`,
+                                    `My${m.name}`);
+    if (!mod) return status('not opened');
+    r = await run('game_mission_open', { mission: m.game, mod });
+    m.mod = mod;
+    if (r.made) status(`${m.name}: Lua made from your game's ${m.name}.dll (Mods\\${mod}\\mission_src)`);
+  } else r = await run('open_mission', m);
+  level = r.base; shownLevel = r.base; $('level').value = r.base; clearModelCache(); clearGroup(groups.world); hiddenLayers.clear();
   await buildScene(true); await updateHistory(); await select(null);
-  const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
+  const hero = data.objects.find((o) => /^HERO/i.test(o.model) || /^(Bradley|Foley|Connors|Conners|Jones|Sherman)$/i.test(o.unit)) || data.objects[0];
   if (hero) focusOn(toThree(hero.pos));
   status(`${m.name} (Mods\\${m.mod}, base ${r.base})`);
 };
@@ -2038,7 +2220,13 @@ const SNIPPETS = [
   ['Mission success', `game.end_mission(2)\n`],
   ['Mission failed', `game.end_mission(1)\n`],
   ['Remember a value in saves', `game.state.done = true   -- game.state is stored in save games\n`],
-  ['Log a message', `print("something happened")   -- DesertStormFix.log\n`],
+  ['Log a message', `print("something happened")   -- ${GAME.plugin}.log\n`],
+];
+// DesertStormFix 3.2+ only (Desert Storm)
+const SNIPPETS_DS1 = [
+  ['Kill a soldier (cutscene)', `game.kill(0 --[[soldier's script id]])   -- death animation, blood pool\n`],
+  ['Blow up a soldier (cutscene)', `game.explode(0 --[[soldier's script id]])   -- thrown, gibs, large blood pool\n`],
+  ['If the difficulty is VERY HARD', `if game.difficulty and game.difficulty() == 3 then   -- 0 EASY 1 MEDIUM 2 HARD 3 VERY HARD 4 VERY EASY\nend\n`],
 ];
 let cm = null;
 function ensureEditor() {
@@ -2046,7 +2234,7 @@ function ensureEditor() {
   cm = CodeMirror($('code'), { mode: 'lua', lineNumbers: true, indentUnit: 4, tabSize: 4, matchBrackets: true,
                                autoCloseBrackets: true, extraKeys: { 'Ctrl-S': () => saveScript(), Tab: (c) => c.replaceSelection('    ') } });
   cm.on('change', () => { $('script-state').textContent = 'unsaved changes'; });
-  for (const [label, text] of SNIPPETS) {
+  for (const [label, text] of GAME.id === 'ds1' ? SNIPPETS.concat(SNIPPETS_DS1) : SNIPPETS) {
     const b = document.createElement('button'); b.textContent = label;
     b.onclick = () => insertCode(text); $('snippets').appendChild(b);
   }
@@ -2074,7 +2262,8 @@ async function saveScript() {
   const cur = cm.getCursor();
   const r = await run('save_script', { text: cm.getValue() }, 'script saved');
   if (r.text !== cm.getValue()) { cm.setValue(r.text); cm.setCursor(cur); }
-  $('script-state').textContent = 'saved';
+  $('script-state').textContent = r.lua_error ? `saved - Lua error: ${r.lua_error}` : 'saved';
+  if (r.lua_error) status(`the script doesn't load: ${r.lua_error}`, true);
 }
 $('script-btn').onclick = openScript;
 async function play() {
@@ -2104,7 +2293,7 @@ function showCrash(c) {
   const box = $('c-crash');
   if (!c) { box.hidden = true; return; }
   const rows = [['Error', `${c.exception} (${c.exit_code})`]];
-  if (c.address) rows.push(['Where', `${c.module || 'DesertStorm.exe'} at ${c.address}`]);
+  if (c.address) rows.push(['Where', `${c.module || GAME.exe} at ${c.address}`]);
   if (c.cause) rows.push(['Likely cause', c.cause]);
   if (c.last_mod_file) rows.push(['Last mod file loaded', c.last_mod_file]);
   if (c.last_log_line) rows.push(['Last log line', c.last_log_line]);
@@ -2156,7 +2345,7 @@ async function pollConsole() {
   let state = r.running ? `running${r.level ? ' - ' + r.level : ''}` : 'not running';
   if (r.exit_code !== null && r.exit_code !== undefined) state = r.crash ? 'crashed' : `exited (${r.exit_code})`;
   if (r.waiting_for_key) state += ' · waiting at PLEASE PRESS ANY KEY TO BEGIN - click the game window and press a key';
-  if (!r.log) state += ' · no DesertStormFix.log (only the dev / Steam build of the plugin writes one)';
+  if (!r.log) state += ` · no ${GAME.plugin}.log (only the dev build of the plugin writes one)`;
   // the game loads every enabled mod (name order, a later one wins a file both have) - not only the one being played
   const mods = r.mods || cMods || [];
   if (mods.length) state += ` · mods loaded: ${mods.join(', ')}`;
@@ -2357,6 +2546,7 @@ window.addEventListener('keydown', async (e) => {
   if (e.key === 'Enter' && pickMode?.finish) { e.preventDefault(); pickMode.finish(); return; }
   const k = e.key.toLowerCase();
   if (e.ctrlKey && k === 'c') { e.preventDefault(); return copySelection().catch(() => {}); }
+  if (e.ctrlKey && e.shiftKey && k === 'v') { e.preventDefault(); return hostHooks.pasteInPlace?.().catch(() => {}); }
   if (e.ctrlKey && k === 'v') { e.preventDefault(); return pasteHere().catch(() => {}); }
   if (k === 'escape' && placing) { cancelPlacing(); status('placing cancelled'); return; }
   if (e.ctrlKey && k === 'z') { e.preventDefault(); $('undo').click(); }
@@ -2387,7 +2577,7 @@ function gameForward(pitch, yaw) {
   const p = deg(pitch), y = deg(yaw);
   return new THREE.Vector3(Math.sin(y) * Math.cos(p), -Math.sin(p), -Math.cos(y) * Math.cos(p));
 }
-const SCENE_LISTS = ['props', 'objects', 'waypoints', 'regions', 'cameras', 'sounds', 'chunks'];
+const SCENE_LISTS = ['props', 'objects', 'waypoints', 'regions', 'cameras', 'sounds', 'lights', 'aipoints', 'chunks'];
 const findRec = (line) => SCENE_LISTS.map((k) => data?.[k]?.find((r) => r.line === line)).find(Boolean);
 const lift = (v, m = 0.15) => v.add(new THREE.Vector3(0, m, 0));
 
@@ -3110,10 +3300,22 @@ async function loadBaseTargets() {
   return out;
 }
 function baseTargetWhen(o) {
+  if (o.si) {                    // Global Storm: the objective is data in the level's .SI
+    const pr = { primary: 'primary', secondary: 'bonus', script: 'script helper (never shown)' }[o.si.priority] || o.si.priority;
+    return `<span class="when-done" title="${escHtml(o.si.name)} in the level's .SI">Completed when ${escHtml(o.si.when)}`
+      + ` · ${escHtml(pr)}${o.si.status === 'active' ? ' · shown from the start' : ''}${o.si.xp ? ` · ${o.si.xp} XP` : ''}</span>`;
+  }
   const t = obBaseTargets?.[o.original_title || o.title];
   return t ? `<span class="when-done" title="where the base mission completes it">Completed: ${escHtml([...t.events].join('; ').toLowerCase())}</span>` : '';
 }
 function baseTargetHtml(o) {
+  if (o.si) {
+    if (!o.si.refs.length) return '<span class="hint">—</span>';
+    return o.si.refs.map((r) => r.ref === 'missing'
+      ? `<span class="hint" title="not in this scene">${escHtml(r.text)}</span>`
+      : `<a class="ref ${r.ref}" data-ref="${r.ref}" data-id="${r.id}" title="select it in the view">${escHtml(r.text)}</a>`).join('')
+      + '<br><span class="hint">(level .SI, read-only)</span>';
+  }
   if (!obBaseTargets) return '<span class="hint">reading the mission logic…</span>';
   const t = obBaseTargets[o.original_title || o.title];
   const refs = t ? [...t.refs.values()] : [];
@@ -3130,7 +3332,7 @@ function renderObjectives() {
     tr.innerHTML = `<td>${o.id}</td>
       <td class="title-cell"><span class="badge campaign" title="Added and completed by the base mission (${escHtml(o.key || 'its DLL')})">Campaign Objective</span>
         <input value="${escHtml(o.title)}" maxlength="120"${o.title_editable ? '' : ' disabled title="not one of the level&#39;s own texts - it can&#39;t be renamed"'}></td>
-      <td><span class="desc">${escHtml(o.description || '')}</span>${baseTargetWhen(o)}</td>
+      <td style="min-width:360px"><span class="desc">${escHtml(o.description || '')}</span> ${baseTargetWhen(o)}</td>
       <td class="tgt">${baseTargetHtml(o)}</td>
       <td><label class="inline" title="off = the script hides it whenever the base mission shows it"><input type="checkbox"${o.hidden ? '' : ' checked'}> on</label></td>
       <td><button title="back to the game's title, on">↺</button></td>`;
@@ -4415,8 +4617,8 @@ window.addEventListener('keydown', (e) => {
 });
 $('tab-library').addEventListener('click', () => loadEmplacements());
 
-// ---- tool panels (Terrain, Road, Paths & Regions, Atmosphere, Mission Settings, Spawns, History) live at the top of
-// the right column, above the inspector, instead of floating over it ----
+// ---- tool panels (Terrain, Road, Paths & Regions, Atmosphere, Mission Settings, Spawns, History) start in the right
+// column's dock; panels.js then floats each one (or keeps it docked) the way the user left it ----
 for (const id of ['terrain', 'road', 'paths-panel', 'atmos', 'mission-settings', 'spawns', 'history-panel']) $('tool-dock').appendChild($(id));
 
 // ---- top view (T): orthographic, straight down, north up; left / right drag pans, the wheel zooms ----
@@ -4529,9 +4731,15 @@ window.dse = {
 };
 
 // ---- start ----
+GAME = await api('game_info');
 const levels = await api('list_levels');
+document.title = `${GAME.short} Editor`;
+for (const el of document.querySelectorAll('.app-name')) el.textContent = `${GAME.short} Editor`;
 for (const l of levels) $('level').add(new Option(l, l));
-$('level').value = levels.includes('MISSION1') ? 'MISSION1' : levels[0];
+// ?level=MISSION04 opens that level, &focus=<unit> puts the camera on that soldier
+const urlArgs = new URLSearchParams(location.search);
+const urlLevel = (urlArgs.get('level') || '').toUpperCase();
+$('level').value = (levels.includes(urlLevel) && urlLevel) || ['MISSION01', 'MISSION1'].find((l) => levels.includes(l)) || levels[0];
 // The server keeps its session when the page is reloaded / reopened: unsaved changes there are shown, not replaced by a
 // fresh copy of the level, unless the user lets them go.
 const startH = await api('history').catch(() => null);
@@ -4541,7 +4749,7 @@ if (startH?.level && startH.dirty && !confirm(`The editor still has unsaved chan
   level = startH.level;
   if (levels.includes(level)) $('level').value = level;
   await buildScene(true); await updateHistory();
-  const hero = data.objects.find((o) => /^HERO/i.test(o.model)) || data.objects[0];
+  const hero = data.objects.find((o) => /^HERO/i.test(o.model) || /^(Bradley|Foley|Connors|Conners|Jones|Sherman)$/i.test(o.unit)) || data.objects[0];
   if (hero) focusOn(toThree(hero.pos));
   status(`${startName}: unsaved changes kept`);
 } else openLevel($('level').value, false);
@@ -4793,3 +5001,18 @@ for (const id of ['at-xfog-start', 'at-xfog-stop']) {
     commitAtmos({ far_fog_start: a * 100, far_fog_stop: b * 100 }, `far fog ${a}-${b} m`);
   };
 }
+
+// ---- host object for add-on scripts (web/worldtools.js): read access to the view, the scene data and the selection,
+// and the same api / run / refresh / select the panels here use. Nothing in it changes the scene by itself.
+window.editorHost = {
+  THREE, hooks: hostHooks, scene3, groups, byLine, toGame, toThree, deg, gameForward,
+  api, run, status, refresh, select, selectMany, requestRender, focusOn, surfaceAt, pastePoint,
+  get renderer() { return renderer; }, get camera() { return camera; }, get orbit() { return orbit; },
+  get data() { return data; }, get selection() { return selection; }, get many() { return many; },
+  selectedLines() { return many.size ? [...many] : selection?.line !== undefined ? [selection.line] : []; },
+  viewCamera(c) { enterCamView(c); }, exitCameraView() { exitCamView(); },
+  slowCommands: SLOW_COMMANDS,
+  pickGround(hint, fn) { groundPick = { pick: (p) => { endGroundPick(); fn(p); } }; renderer.domElement.style.cursor = 'crosshair'; status(hint); },
+  cancelGroundPick() { endGroundPick(); },
+};
+window.dispatchEvent(new Event('editor-host-ready'));

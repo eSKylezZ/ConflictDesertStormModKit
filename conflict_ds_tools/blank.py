@@ -4,20 +4,22 @@ Kept from the base scene: the header (map image), the squad's start objects (by 
 layers, the four colour keys, time of day, glass pane types and the section ends the loader needs. Emptied: world
 pieces and props, every other object, portals, point / spot lights, ambient sounds, waypoints, route markers, regions
 (count 0), emitters, shrubs (the empty block the training levels have), cameras. ``extra_envi`` lines (ground patches,
-props) go into the world section.
+props) go into the world section, ``extra_ports`` into the portals, ``extra`` = {section end keyword (ENDWAYPTS,
+ENDREGIONS ...): lines} before that end (the level porter; the region count line before the REGN lines
+says how many).
 """
 from __future__ import annotations
 
 from .env import EnvFile
 
-SQUAD = ("Bradley", "Foley", "Jones", "Connors")
+SQUAD = ("Bradley", "Foley", "Jones", "Ramirez", "Connors")    # unit names (Connors' unit is Ramirez)
 _EMPTY_SHRUBS = ["SHRUBS", "0 0", "1 0 51", ""] + ["0.000000 0 "] * 51 + ["ENDGARDEN", "ENDSHRUBS"]
 _DROP_SECTIONS = {"world", "rinfo", "portals", "sounds", "waypoints", "regions", "emit", "cameras"}
 _KEEP_KINDS = {"ENDI", "HLOX", "ENDP", "ENDL", "ENDENVS", "ENDWAYPTS", "ENDMARKERS", "ENDREGIONS", "ENDC",
                "<EMIT>", "</EMIT>"}
 
 
-def blank_lines(base: EnvFile, squad=SQUAD, extra_envi=(), extra_hloi=()) -> list[str]:
+def blank_lines(base: EnvFile, squad=SQUAD, extra_envi=(), extra_hloi=(), extra_ports=(), extra=None) -> list[str]:
     by_line = {r.index: r for r in base.records}
     for r in base.records:
         for c in r.children:
@@ -40,6 +42,10 @@ def blank_lines(base: EnvFile, squad=SQUAD, extra_envi=(), extra_hloi=()) -> lis
             out.extend(extra_envi)
         if kind == "HLOX":
             out.extend(extra_hloi)
+        if kind == "ENDP":
+            out.extend(extra_ports)
+        if extra and kind in extra:                    # other sections' records (waypoints, regions ...) before their end
+            out.extend(extra[kind])
         if kind in _KEEP_KINDS:
             out.append(line)
         elif kind == "NUMSWITCHES":                    # switches open doors the new level doesn't have
@@ -47,7 +53,7 @@ def blank_lines(base: EnvFile, squad=SQUAD, extra_envi=(), extra_hloi=()) -> lis
         elif kind == "SWITCH":
             pass
         elif sec == "markers" and kind == "":          # the region count that precedes the REGN lines
-            out.append("0")
+            out.append(str(len(extra.get("ENDREGIONS", ()))) if extra else "0")
         elif sec in _DROP_SECTIONS or kind in ("NEWENVMARKER", "PORT", "ENVSND", "NEWENVWAYPT", "REGN", "RINFO",
                                                 "SLGT", "PLGT", "VAMI", "ANMI"):
             pass

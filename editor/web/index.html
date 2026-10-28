@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Desert Storm Editor</title>
+<title>Conflict Editor</title>
 <link rel="stylesheet" href="vendor/codemirror/codemirror.min.css">
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="records.css">
@@ -20,7 +20,7 @@
 <!-- One row that never wraps: the buttons keep their places; the changing texts (what is open, the status) sit at the
      right end, cut off with … (full text in their tooltips). -->
 <header>
-  <strong>Desert Storm Editor</strong>
+  <strong class="app-name">Conflict Editor</strong>
   <select id="level" title="Game level - picking one opens it (asks first when there are unsaved changes)"></select>
   <nav id="menus">
     <div class="menu"><button class="menu-btn" type="button">File ▾</button>
@@ -32,6 +32,8 @@
         <button id="save" title="Write the edited scene and routes to the game's Mods folder (replaces this level) - the mod is named in the Mod name box">Save as mod</button>
         <button id="save-mission" title="A new playable mission: scene, routes, nav files, Lua script, campaign entry">Save as mission…</button>
         <button id="export-btn" title="Check the mod and package it as a clean .zip with a README, ready to share">Export Mod Package…</button>
+        <hr class="app-only" hidden>
+        <button id="switch-game" class="app-only" hidden title="Back to the game picker (Desert Storm, Desert Storm II, Vietnam, Global Storm)">Switch game…</button>
       </div></div>
     <div class="menu"><button class="menu-btn" type="button">Mission ▾</button>
       <div class="menu-list" hidden>
@@ -88,7 +90,7 @@
         Shift+click selects a range</p>
     </div>
     <div id="pane-library" class="pane" hidden>
-      <div class="row"><input id="lib-search" placeholder="Search props and objects">
+      <div class="row"><input id="lib-search" placeholder="Search props and objects (name, source, file)">
         <select id="lib-kind"><option value="all">All</option><option value="prop">Props</option><option value="object">Objects</option></select></div>
       <details id="tac-stamps" open><summary>Emplacements &amp; minefields</summary>
         <div id="emp-list" class="emp-list"><span class="hint">loading…</span></div>
@@ -107,7 +109,8 @@
           <select id="em-preset" title="Copy of a shipped emitter"></select></div>
         <p class="hint">A switch sends a "switch used" event your rules can react to (Events &amp; Actions).</p>
       </details>
-      <label class="check"><input type="checkbox" id="lib-here" checked> Only models in this level</label>
+      <label class="check" title="Hides the game's own models from other levels (they'd be packed into the mod). Mod and converted items always show."><input type="checkbox" id="lib-here" checked> Only this level's models (game items)</label>
+      <div id="lib-chips" class="lib-chips"></div>
       <ul id="library"></ul>
     </div>
     <div id="pane-kits" class="pane" hidden>
@@ -645,6 +648,9 @@
 </dialog>
 <script type="module" src="app.js"></script>
 <script src="records.js" defer></script>
+<script src="forms.js" defer></script>
+<script src="worldtools.js" defer></script>
+<script src="panels.js" defer></script>
 <datalist id="dl-objects"></datalist><datalist id="dl-names"></datalist><datalist id="dl-slots"></datalist>
 </body>
 </html>

@@ -23,7 +23,7 @@ from commands import CommandError, Session, command, _base_dll, _lua_value, _vec
 EXTRA_DEFAULTS = {"objectives": [], "rules": [], "patrols": {}, "objectives_win": False, "base_overrides": {}}
 # production.py's mission data (briefing dossier, soundtrack, multiplayer spawns): kept here so undo and
 # <NAME>.editor.json carry it like the logic
-PRODUCTION_KEYS = ("briefing", "music", "multiplayer", "tactics")   # tactics: tactics.py (minefields, air support)
+PRODUCTION_KEYS = ("briefing", "music", "multiplayer", "tactics", "worldtools")   # tactics: tactics.py (minefields, air support); worldtools: notes, linked prefabs, spawn lists, camera paths (worldtools.py)
 
 
 def extras(s: Session) -> dict:
@@ -679,32 +679,34 @@ def _warnings(s):
 
 
 def _base_objective_count(s) -> int:
-    """Objective indices the base mission adds itself: its DLL adds them from 0 (editor/level_base.json). A new level
+    """Objective indices the base mission adds itself: its DLL adds them from 0 (editor/games/<game>/level_base.json). A new level
     has none."""
     return len(base_objectives(s))
 
 
 # ------------------------------------------------------------------------- the base mission's own data --
-# editor/level_base.json (scripts/gen_level_setups.py): per shipped mission the objectives its DLL adds (API +0x4B0
+# editor/games/<game>/level_base.json (scripts/gen_level_setups.py): per shipped mission the objectives its DLL adds (API +0x4B0
 # title hash, +0x4B4 description hash) and the script ids it names. Texts are resolved from the player's own catalog /
 # <level>Strs.loc (conflict_ds_tools/records.py) - the JSON holds only numbers. Note: API +0x4E0(hash, slot) in the
 # set-up (level_setups.json) is the BRIEFING (0 title, 1 date, 2 place, 3+ story pages), not an objective.
-_LEVEL_BASE = None
+_LEVEL_BASE = {}             # game id -> level_base.json
 BASE_TIMER = 8998                 # game.timer id: re-hides the base objectives the modder turned off
 
 
 def level_base(level) -> dict:
-    global _LEVEL_BASE
-    if _LEVEL_BASE is None:
+    from conflict_ds_tools import games
+    gid = games.current().id
+    if gid not in _LEVEL_BASE:
         import json
         import os
-        path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "level_base.json")
+        from commands import game_data
+        path = game_data("level_base.json")
         try:
-            with open(path) as f:
-                _LEVEL_BASE = json.load(f)
+            with open(path or "") as f:
+                _LEVEL_BASE[gid] = json.load(f)
         except OSError:
-            _LEVEL_BASE = {}
-    return _LEVEL_BASE.get((level or "").upper(), {})
+            _LEVEL_BASE[gid] = {}
+    return _LEVEL_BASE[gid].get((level or "").upper(), {})
 
 
 def _has_base(s) -> bool:
@@ -717,6 +719,11 @@ def _text_source(s) -> str | None:
     for c in _setups().get(s.level or "", []):
         if c["slot"] == 0x58 and c["args"] and isinstance(c["args"][0], str) and c["args"][0].lower().endswith("strs.loc"):
             return c["args"][0][:-8].upper()
+    # Global Storm: each level archive's text bundle ends with <M01|T00A>Strs.loc (records.py source "M01" / "T00A")
+    import re
+    m = re.fullmatch(r"(MISSION|TRAINING)(\d+)([A-Z]?)", s.level or "")
+    if m:
+        return ("M" if m.group(1) == "MISSION" else "T") + m.group(2).zfill(2) + m.group(3)
     return None
 
 
@@ -768,8 +775,92 @@ def _text_cache(s, level, part, value=None):
     return value
 
 
+def _script_info(s):
+    """Global Storm: the open level's <LEVEL>.SI (conflict_ds_tools/scriptinfo.py), or None."""
+    import os
+    cached = getattr(s, "_si_cache", None)
+    if cached is not None and cached[0] == (s.level, s.folder):
+        return cached[1]
+    si = None
+    if s.level and s.folder and os.path.isdir(s.folder) and not getattr(s, "blank", False):
+        from conflict_ds_tools import scriptinfo
+        from conflict_ds_tools.evo import archive_hash
+        hashed = "_%08X." % archive_hash(s.level + ".SI")     # extracted before .SI was a known extension (DS2)
+        path = next((os.path.join(s.folder, f) for f in os.listdir(s.folder)
+                     if f.upper() == s.level + ".SI" or f.upper().startswith(hashed)), None)
+        if path:
+            try:
+                si = scriptinfo.load(path)
+            except (OSError, ValueError):
+                si = None
+    s._si_cache = ((s.level, s.folder), si)
+    return si
+
+
+_SI_WHEN = {
+    "SCRIPT_TRIGGERED": "the mission script completes it",
+    "ALL_HLOS_DESTROYED": "all of its objects are destroyed",
+    "ANY_HLO_DESTROYED": "any of its objects is destroyed",
+    "COLLECTER": "its items are collected",
+    "ONE_PLAYER_GRUNT_DEAD_OR_ALL_UNCONSCIOUS": "a player's soldier dies or all are unconscious",
+    "ANY_ALIVE_PLAYER_HLO_IN_REGION": "any living player soldier is in its region",
+    "ALL_ALIVE_PLAYER_HLOS_IN_REGION": "all living player soldiers are in its region",
+    "ALL_HLOS_ALIVE_AND_IN_REGION": "all of its objects are alive and in its region",
+    "ANY_PLAYER_HLO_HAS_PICKED_UP_ITEM": "a player soldier picks up its item",
+    "TRIGGERED_ON_MISSION_COMPLETE": "the mission is completed",
+}
+
+
+def _si_objectives(s, si) -> list[dict]:
+    """Global Storm: objectives from the level's .SI - text keys resolved like the DLL objectives, plus how each one
+    completes ("si": when, priority, status, refs to regions / objects / waypoints for the dialog)."""
+    from conflict_ds_tools.records import hash_key
+    regions = [str(r.get("name")) for r in s.env.find("REGN")] if s.env else []
+    waypoints = [str(r.get("name")) for r in s.env.find("NEWENVWAYPT")] if s.env else []
+    objects = {}
+    for r in (s.env.find("HLOI") if s.env else []):
+        if "stat" in r.fields:
+            objects.setdefault(str(r["stat"]).upper(), r["script_id"])
+    out = []
+    for i, o in enumerate(si["objectives"]):
+        key, text = _resolve_text(s, hash_key(o["title_key"])) if o["title_key"] else (None, None)
+        dkey, dtext = _resolve_text(s, hash_key(o["text_key"])) if o["text_key"] else (None, None)
+        refs = []
+        for n in o["regions"]:
+            if n in regions:
+                refs.append({"ref": "region", "id": regions.index(n), "text": n})
+        for n in o["hlos"]:
+            sid = objects.get(n.upper())
+            refs.append({"ref": "object", "id": sid, "text": n} if sid is not None else
+                        {"ref": "missing", "id": -1, "text": n})
+        for n in o["waypoints"]:
+            if n in waypoints:
+                refs.append({"ref": "waypoint", "id": waypoints.index(n), "text": n})
+        when = _SI_WHEN.get(o["completion"], o["completion"].replace("_", " ").lower())
+        result = {"MISSION_COMPLETE": "mission succeeds", "MISSION_FAILED": "mission fails"}.get(o["result"])
+        if result:
+            when += f" -> {result}" + (f" after {o['result_delay_ms'] / 1000:g} s" if o["result_delay_ms"] else "")
+        name = o["name"].replace("_", " ").title()
+        out.append({"id": i, "title": text if text is not None else (o["title_key"] or name),
+                    "key": key or o["title_key"] or None, "description": dtext or "", "description_key": dkey,
+                    "base": True, "source": "base", "texts_missing": text is None and bool(o["title_key"]),
+                    "title_editable": False, "hash": hash_key(o["title_key"]) if o["title_key"] else 0,
+                    "si": {"name": o["name"], "when": when, "priority": o["priority"], "status": o["status"],
+                           "xp": o["xp"], "refs": refs}})
+    return out
+
+
 def base_objectives(s) -> list[dict]:
-    """The base mission's own objectives (resolved once per open level; [] for new levels / MP / no DLL)."""
+    """The base mission's own objectives (resolved once per open level; [] for new levels / MP / no DLL). Global
+    Storm: from the level's .SI (its objectives are data there, not DLL calls)."""
+    si = _script_info(s) if s.level else None
+    if si is not None and si["objectives"]:
+        cached = getattr(s, "_base_objectives", None)
+        if cached is not None and cached[0] == s.level:
+            return cached[1]
+        out = _si_objectives(s, si)
+        s._base_objectives = (s.level, out)
+        return out
     if not _has_base(s):
         return []
     cached = getattr(s, "_base_objectives", None)

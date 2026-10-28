@@ -1,0 +1,8 @@
+# A tan water bottle pouch.
+
+id       = TAN_BOTTLE
+slot     = pouch
+name     = Tan Water Bottle
+
+based on = UK_BOTTLEPOUCH01  # the SAS water bottle (its texture is called UK_BOTTLEPOUCH - the main one is replaced)
+texture  = TanBottle         # TanBottle.dds

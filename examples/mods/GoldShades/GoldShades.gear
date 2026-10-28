@@ -1,0 +1,11 @@
+# Gold-rimmed sunglasses - picked on the FACE row.
+#
+# Shows: a face piece. Face pieces share the face connector with the night-vision goggles: put the goggles on and the
+# shades come off, take them off and the shades are back.
+
+id       = GOLD_SHADES
+slot     = face
+name     = Gold Shades
+
+based on = AN_SUNGLASSES
+texture  = GoldShades        # GoldShades.dds: the sunglasses' own layout

@@ -1,0 +1,11 @@
+# A sand-coloured radio pack - picked on the BACKPACK row.
+#
+# Shows: a back piece. Packs hang on the upper back (the spine connector); the game takes them off while the soldier
+# rides a vehicle and puts them back when he gets out - yours too.
+
+id       = DESERT_RADIOPACK
+slot     = back
+name     = Desert Radio
+
+based on = AN_RADIOPACK      # the squad rifleman's radio
+texture  = DesertRadio       # DesertRadio.dds: the radio's own layout

@@ -17,7 +17,12 @@ python examples/build_examples.py --blender "C:\Program Files\Blender Foundation
 
 - Finds the game from the registry (or pass `-g "D:\Games\Conflict - Desert Storm"`).
 - Output goes to `examples/build/Mods`, one complete folder per example. `--install` also copies them into
-  `<game>\Mods`.
+  `<game>\Mods` (replacing an older copy of that example).
+- Each example is laid out in folders by type ([MAKING_MODS 1](../docs/MAKING_MODS.md#1-where-mods-live)):
+  `defs\` (.skin, .weapon, .gear, .vehicle … and the WAVs they name, kept next to them), `dds\` (textures and
+  pictures), `evos\`, `anims\`, `sounds\` (packs; RadioCutscene's streams in `sounds\SAS\` / `sounds\Delta\`),
+  `tables\` (.txt); the file names in the table below are the same. `--layout flat` builds them the old way (every
+  file in the example's folder).
 - `--blender` (Blender 3.6 or newer) is needed for the examples with models or animations: SilencedSAW, LoudMP5,
   SpeedReload, BigHeadUniform and the four `_` examples. Without it those are left out and the rest is still built.
 
@@ -25,7 +30,8 @@ Folders starting with `_` are switched off: they **replace** something in the ga
 run animation …). Remove the `_` (or switch them on in the game's MODS menu) to try one.
 
 Everything is picked on the **Squad Loadout** screen at the start of a mission: new uniforms on the UNIFORM row (the
-soldier stays who he is), new recruits on the SOLDIER row, new weapons on the MAIN WEAPON / SIDEARM rows.
+soldier stays who he is), new recruits on the SOLDIER row, new weapons on the MAIN WEAPON / SIDEARM rows (LOADOUT tab), gear on the HEADGEAR / BACKPACK / FACE / POUCHES rows
+(CHARACTER tab).
 `Mods\DesertStormFix-report.txt` (written at every start) says what each mod added.
 
 ## What each example shows
@@ -37,18 +43,40 @@ soldier stays who he is), new recruits on the SOLDIER row, new weapons on the MA
 | **PinkSAS** | A pink uniform for Bradley: UNIFORM "SAS (PINK)" | `.skin` with `uniform name`: a new uniform for a soldier, with its own portrait | `PinkSAS.skin`, `SASPink_01.dds`, `PinkPortrait.dds` ([2](../docs/MAKING_MODS.md#2-your-first-mod-a-new-uniform), [4.2](../docs/MAKING_MODS.md#42-a-portrait-for-the-soldier-panel-pinksas)) |
 | **WinterDelta** | Winter camouflage for Foley: UNIFORM "US DELTA (WINTER)" | A Delta uniform, the soldier named by role | `WinterFoley.skin`, `DeltaWinter_04.dds` ([2](../docs/MAKING_MODS.md#2-your-first-mod-a-new-uniform)) |
 | **BigHeadUniform** | Bradley in olive with a bigger head: UNIFORM "SAS (BIG HEAD)" | `.skin` with `body`: a uniform that brings its own body mesh, only while it's worn | `BigHeadUniform.skin`, `BigHead_UK.dds`, `BIGHEAD_BRADLEY.evo` ([4.5](../docs/MAKING_MODS.md#45-a-uniform-with-its-own-body-bigheaduniform)) |
-| **RadioSAS** | Bradley as a radio operator: UNIFORM "SAS (RADIO)" | `.skin` with `voice` and `voice folder`: a uniform with its own voice - the Delta actor's lines over a crackly radio | `RadioSAS.skin`, `RadioSAS_01.dds`, `radio\Bradley_line01.wav` … `47` ([4.5c](../docs/MAKING_MODS.md#45c-a-voice-of-its-own-radiosas)) |
+| **RadioSAS** | Bradley as a radio operator: UNIFORM "SAS (RADIO)" | `.skin` with `voice` and `voice folder`: a uniform with its own voice - the Delta actor's lines over a crackly radio | `RadioSAS.skin`, `RadioSAS_01.dds`, `radio\Bradley_line01.wav` … `47` (next to the `.skin`: `defs\radio\`) ([4.5c](../docs/MAKING_MODS.md#45c-a-voice-of-its-own-radiosas)) |
 | **RadioCutscene** | Mission 1's opening cutscene with all the speech over a crackly radio, music and effects untouched | Replacing a cutscene's sound per actor: `Sound\SAS\` and `Sound\Delta\` + the scene's file name; `ABOUT.md` has the steps | `Sound\SAS\CS_M01_S01.psf`, `Sound\Delta\CS_M01_S01.psf`, `ABOUT.md` ([4.5d](../docs/MAKING_MODS.md#45d-cutscene-and-objective-audio-radiocutscene)) |
 | **QuiltedSAS** | Bradley in a padded navy jacket: UNIFORM "SAS (QUILTED)" | `.skin` with `normal map`: a uniform with its own normal map - the quilting catches the light as he turns | `QuiltedSAS.skin`, `QuiltedSAS_01.dds`, `QuiltedSAS_Bump.tga` ([4.5](../docs/MAKING_MODS.md#45-a-uniform-with-its-own-body-bigheaduniform)) |
 | **GoldenEagle** | A gold Desert Eagle that fires with the Barrett's sound | `.weapon`: `texture`, `hud icon`, a `sound` borrowed from another weapon, damage / magazine / hearing range | `GoldenEagle.weapon`, `GoldEagle.dds`, `GoldEagle_Icon.png` ([4.8](../docs/MAKING_MODS.md#48-a-new-look-textures-also-for-extra-parts-goldeneagle-tigersaw), [4.9](../docs/MAKING_MODS.md#49-a-matching-hud--inventory-picture-tigersaw-goldeneagle-silencedsaw)) |
 | **TigerSAW** | A tiger-striped SAW firing 1000 rounds a minute from a 200-round belt | `.weapon`: textures for a two-part model, `hud icon`, own gunshots, `muzzle flash`, rate of fire, `column N` | `TigerSAW.weapon`, `TigerSAW.dds`, `TigerAmmoBox.dds`, `TigerSAW_Icon.png`, `tiger_shot1.wav`, `tiger_shot2.wav`, `tiger_tail.wav` ([4.8](../docs/MAKING_MODS.md#48-a-new-look-textures-also-for-extra-parts-goldeneagle-tigersaw), [4.11](../docs/MAKING_MODS.md#411-your-own-gunshots-tigersaw)) |
 | **SilencedSAW** | M249 SAW (Silenced), blue, with a suppressor on the model and in its picture | `.weapon`: `silenced`, own gunshot, a model made in Blender, `hud icon` | `SilencedSAW.weapon`, `MYSAW.evo`, `SAW_Blue.dds`, `SAW_Silenced_Icon.png`, `shot.wav` (and `SAW_Red.dds` for its commented-out `texture` line) ([4.12](../docs/MAKING_MODS.md#412-silenced-or-unsilenced-silencedsaw-loudmp5), [4.13](../docs/MAKING_MODS.md#413-a-new-model-silencedsaw-loudmp5)) |
 | **LoudMP5** | The MP5SD without its silencer, with a shotgun's bang | A model with a part taken off in Blender, `hud icon`, a sound bank shipped as a `.sch` bank pack | `LoudMP5.weapon`, `MP5BREACHER.evo`, `Breacher_Icon.png`, `BREACHER.sch` ([4.10](../docs/MAKING_MODS.md#410-borrow-another-gunshot-goldeneagle-loudmp5), [4.13](../docs/MAKING_MODS.md#413-a-new-model-silencedsaw-loudmp5)) |
+| **PinkBeret** | A pink beret for anyone: HEADGEAR "PINK BERET" | `.gear`: headgear from a game model with your own texture | `PinkBeret.gear`, `PinkBeret.dds` ([4.6b](../docs/MAKING_MODS.md#46b-headgear-pinkberet)) |
+| **DesertRadio** | A sand-coloured radio pack: BACKPACK "DESERT RADIO" | `.gear` with `slot = back` | `DesertRadio.gear`, `DesertRadio.dds` ([4.6c](../docs/MAKING_MODS.md#46c-a-backpack-desertradio)) |
+| **GoldShades** | Gold-rimmed sunglasses: FACE "GOLD SHADES" | `.gear` with `slot = face` (comes back after night vision) | `GoldShades.gear`, `GoldShades.dds` ([4.6d](../docs/MAKING_MODS.md#46d-a-face-piece-goldshades)) |
+| **TanPouches** | Tan ammo and bottle pouches and a "TAN BELT" set on the POUCHES row | `.gear` with `slot = pouch` + a `.pouches` set mixing mod and game pieces | `TanAmmoPouch.gear`, `TanBottle.gear`, `TanBelt.pouches`, `TanAmmoPouch.dds`, `TanBottle.dds` ([4.6e](../docs/MAKING_MODS.md#46e-a-pouch-and-a-pouch-set-tanpouches)) |
+| **PouchBundles** | Three pouch sets: GUNSLINGER, TOOLBELT, BANDOLIER | `.pouches` files made only of game pieces - text only | `Gunslinger.pouches`, `Toolbelt.pouches`, `Bandolier.pouches` ([4.6f](../docs/MAKING_MODS.md#46f-pouch-sets-from-the-games-pieces-only-pouchbundles)) |
 | **SpeedReload** | A Colt Commando that reloads twice as fast | `.weapon` with new animations made in Blender | `SpeedReload.weapon`, `UPRIGHT_RELOAD_FAST.prb`, `PRONE_RELOAD_FAST.prb` ([4.14](../docs/MAKING_MODS.md#414-new-animations-speedreload)) |
 | **_BigHead** | Bradley with a bigger head, in every uniform | A character body replaced by name | `HERO01_ARMSTRONG.evo` ([4.6](../docs/MAKING_MODS.md#46-change-a-soldiers-body-for-everyone-_bighead)) |
 | **_HazardDrums** | Yellow-and-black oil drums in Mission 1 | A prop replaced by name, with a new texture saved by the Blender exporter | `OILDRUM.evo`, `HazardDrum.dds` ([4.19](../docs/MAKING_MODS.md#419-replace-a-prop-or-vehicle-model-_hazarddrums)) |
 | **_HeadTilt** | Soldiers standing idle with a tilted head | An animation replaced by name | `upright_relaxed_with_rifle.prb` ([4.20](../docs/MAKING_MODS.md#420-replace-a-game-animation-_headtilt-_bouncyrun)) |
 | **_BouncyRun** | A bouncing rifle run | A walk / run cycle replaced by name; it keeps the game's footstep sounds | `UPRIGHT_RELAXED_RUN_WITH_RIFLE.prb` ([4.20](../docs/MAKING_MODS.md#420-replace-a-game-animation-_headtilt-_bouncyrun)) |
+
+**RestoredMissions** (`examples/restored_missions/RestoredMissions/`, needs DesertStormFix 3.3+) is four **mission
+patches** ([7.3c](../docs/MAKING_MODS.md#73c-changing-a-game-missions-script-readable-missions---replaces)):
+`Training1-3.patch.lua` and `Mission1.patch.lua`. Copy the folder into `<game>\Mods` and DesertStormFix applies them to
+the readable Lua it makes from your own DLLs. The patches hold no game code, so the folder is shareable as it is. They
+put cut content back:
+
+- Training 1: the intro film (the parade ground and the commander's office, with its cut stream audio and subtitles),
+  the "switch between targets" lesson and the armourer fetching your kit;
+- Training 2: the cut radio line before the truck, the base's unused people and the A-10 chase camera;
+- Training 3: the loudspeaker instructor, the Medi-Kit inventory lesson, the civilian-target warning and the Black
+  Hawk's exit;
+- Mission 1: the small-bridge guard raising the alarm and Foley taking the table's Medi-Kit (both from the PS2 demo's
+  script).
+
+What each patch changes and why is in the comments of the patch. It replaces the earlier TrainingRestored mod (remove
+that one).
 
 A `.skin` file makes a **uniform** when it has `uniform name = ...`: the texture is the soldier's own layout, face
 included, so it's the same man in different clothes. Leave out `uniform name` and give a `first name` / `last name`
@@ -61,6 +89,8 @@ to add a **recruit** instead: another man, with his own face, on the SOLDIER row
 - **Uniform textures**: the soldier's texture (`HERO01_UK_01`, `HERO04_US_01` … in `chardata.dat`) recoloured, with
   the face, hair and hands left alone, saved as a 512 × 512 DXT1 `.dds`.
 - **Portraits**: 64 × 64 DXT3 `.dds` (`python cli/ds_texture.py dds face.png --format DXT3`).
+- **Gear textures** (PinkBeret, DesertRadio, GoldShades, TanPouches): the piece's own texture (named like its model,
+  e.g. `IR_BERET_RED`) recoloured, same size.
 - **Weapon textures**: the gun's own texture recoloured, same size (`LMG01_M249SAW` 128 × 32, its ammo box 32 × 32,
   the Desert Eagle 64 × 32).
 - **HUD / inventory pictures** (`hud icon = X` → `X.png`): the game's picture of the gun
@@ -93,7 +123,7 @@ to add a **recruit** instead: another man, with his own face, on the SOLDIER row
   that soldier's own body so its skeleton fits.
 - **OILDRUM.evo** (_HazardDrums): import the drum, swap its image for the new one, export under the same name.
 - **upright_relaxed_with_rifle.prb** (_HeadTilt): import the idle onto the soldier's skeleton, turn the head bone in
-  every key, File › Export › Conflict: Desert Storm Animation.
+  every key, File › Export › Conflict: Desert Storm Animation (.prb).
 - **UPRIGHT_RELAXED_RUN_WITH_RIFLE.prb** (_BouncyRun): lift the root bone in each stride. Because the file keeps the
   game's name, the exporter copies the game animation's footstep events.
 - **UPRIGHT_RELOAD_FAST.prb / PRONE_RELOAD_FAST.prb** (SpeedReload): the game's reloads exported at twice the scene

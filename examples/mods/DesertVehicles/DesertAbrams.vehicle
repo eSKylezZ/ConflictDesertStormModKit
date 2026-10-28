@@ -1,0 +1,13 @@
+# An M1A1 Abrams in desert tan - another vehicle skin (see DesertHumvee.vehicle).
+#
+# The hull's three textures change; the main gun is a separate model (the Abrams' gun in VEHWPNS.TXT / WEAPS.TXT)
+# and keeps the game's colours. The wreck gets a skin too ("damaged texture <slot>").
+
+id        = DESERT_ABRAMS
+based on  = US_VEH_M1Abrams
+name      = M1A1 Abrams (Desert)
+
+texture VHAbrams01 = DesertAbrams01
+texture VHAbrams02 = DesertAbrams02
+texture VHAbrams03 = DesertAbrams03
+damaged texture VHAbrams01 = DesertAbrams01

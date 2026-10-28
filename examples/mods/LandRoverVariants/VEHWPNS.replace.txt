@@ -1,0 +1,14 @@
+# The .50 cal-only Land Rover gets the Land Rover copy of the .50 cal (WEAPS.txt here, a new row added to the game's
+# table: UK_VWPN_SAS_MG_50Cal_LR = the game's UK_VWPN_SAS_MG_50Cal with the gunner pose VehicleGunnerAim_LR instead of
+# VehicleGunnerAim, the Humvee hatch pose, which left the gunner crouched at the Land Rover's higher rear mount).
+# VehicleGunnerAim_LR.prb = VehicleGunnerAim (hands on the grips) standing up - root height and legs from
+# VehicleGunner01; examples/build_examples.py makes it from your game files. DesertStormFix 3.3+ doesn't draw a gunner's
+# own weapon while he mans a gun (older versions show it above the .50 cal). The game's own row stays as it is - the
+# Humvee M60, TOW Humvee, Abrams and the two-gun Land Rover's front gun (a seated gunner between the front seats) use it.
+# Both MILAN versions get UK_VWPN_SAS_Milan_LR = the game's UK_VWPN_SAS_Milan with VehicleGunnerAim_LR too (the game's
+# VehicleGunner01 sat him down at the launcher on the high rear post). Guns go to the gunner seats in this order (see
+# VEHICLE.replace.txt for the two-gun version's seats).
+UK_VEH_SAS_LandRover_MG,UK_VWPN_SAS_MG_50Cal_LR,WEAPON,1000
+UK_VEH_SAS_LandRover_Milan,UK_VWPN_SAS_Milan_LR,WEAPON,1000
+UK_VEH_SAS_LandRover_Milan_LMG_SAW,UK_VWPN_SAS_MG_50Cal,WEAPON,1
+UK_VEH_SAS_LandRover_Milan_LMG_SAW,UK_VWPN_SAS_Milan_LR,WEAPON,1
